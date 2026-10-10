@@ -1,4 +1,5 @@
 mod audio;
+mod content;
 mod game;
 mod math;
 mod render;
@@ -312,14 +313,16 @@ fn set_key(g: &mut Game, code: &str, down: bool) {
 }
 
 fn handle_cmd(g: &mut Game, cmd: &str) {
-    let mut parts = cmd.splitn(3, '|');
+    let mut parts = cmd.splitn(2, '|');
     let head = parts.next().unwrap_or("");
     let a = parts.next().unwrap_or("");
-    let b = parts.next().unwrap_or("");
     match head {
-        "start" => {
-            let best = b.parse().unwrap_or(0);
-            g.start(a, best);
+        "start" => g.start(a),
+        "equip" => g.apply_opts(a),
+        "load" => g.load_save(a),
+        "save" => {
+            let data = g.save_string();
+            g.ui_out.push(("saved", data));
         }
         "resume" => g.resume(),
         "pause" => g.pause(),

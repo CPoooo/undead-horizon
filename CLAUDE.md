@@ -29,13 +29,21 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
 
 ## Features to be implemented
 
-1. **Co-op mode**: live online, real-time co-op for up to 3 players for now, with the ability to revive a downed teammate.
-2. **Persistence in Neon DB**: persist everything (player data, runs, progression) in Neon Postgres and make the leaderboard live and global.
-3. **Login / accounts**: users can sign in so their data is saved.
-4. **Shop & customizations**: earn coins by surviving waves and spend them on cosmetic customizations in a shop.
-5. **Multiple difficulties**.
-6. **Loadouts**: buy different guns with earned coins and try different loadouts.
-7. **Character / inventory screen**: a new screen that shows the character in 2D/3D and lets the user equip items they've bought over the course of their gameplay.
-8. **Campaign mode** (possible): a fun storyline with boss fights.
-9. **Infinite mode**: once the campaign exists, keep the current endless survival as a separate "Infinite" mode.
-10. **Fortnite / CoD-style lobby**: before starting infinite co-op, players can invite friends to their lobby, customize their character, and see their friends list. The host sets the difficulty before loading into the game.
+- [ ] 1. **Co-op mode**: live online, real-time co-op for up to 3 players for now, with the ability to revive a downed teammate. Needs a realtime/websocket server.
+- [ ] 2. **Persistence in Neon DB**: persist everything (player data, runs, progression, save states) in Neon Postgres and make the leaderboard live and global.
+- [ ] 3. **Login / accounts**: users can sign in so their data is saved.
+- [x] 4. **Shop & customizations**: coins are earned by clearing waves (scaled by difficulty) plus boss and chapter bonuses. They buy guns, perks, skins, hats and bullet tracers in the 🛒 Shop.
+- [x] 5. **Multiple difficulties**: Rookie, Survivor, Veteran and Nightmare (`content::DIFFICULTIES`). They scale HP, damage, horde size, speed and coin rewards.
+- [x] 6. **Loadouts**: a primary weapon (6 guns with distinct handling, in `content::GUNS`) plus a starting perk, chosen in the 🎒 Locker.
+- [x] 7. **Character / inventory screen**: the lobby renders your character in-engine on a pedestal, live, facing your cursor. The Locker equips owned items and updates the model instantly.
+- [x] 8. **Campaign mode**: 5 chapters with a story ("Rook and Mara vs. the Bloom"). Each has a typewriter intro and outro, radio chatter per wave, and a unique boss fight (Gravedigger, Matriarch, Cinder King, Twin Wraiths, Bloom Heart). Chapters unlock in order.
+- [x] 9. **Infinite mode**: endless survival. Bosses rotate every 5 waves, and it is the only mode ranked on the leaderboard.
+- [ ] 10. **Fortnite / CoD-style lobby**: before starting infinite co-op, players can invite friends to their lobby, customize their character, and see their friends list. The host sets the difficulty before loading into the game. *(The solo lobby already exists: character showcase, customization, mode and difficulty selection. Invites and friends need the realtime backend.)*
+
+Also done: the pause screen shows full run stats (HP, XP, damage per shot, fire rate, crit, speed, powers) and can **save the run** (resumes from the start of the current wave; one save slot, consumed on resume).
+
+### Where things live
+- Content tables (ids shared with the UI catalog): `src/content.rs`. The shop catalog, prices and story text are in `ui/app.js`.
+- UI to game commands: `start|k=v;...`, `equip|k=v;...`, `save`, `load|<save string>`, `pause`, `resume`, `menu`, `vol|`, `music|`, `autoaim|`.
+- Game to UI events: `ready`, `pause` (run JSON), `resume`, `saved` (save string), `gameover` and `victory` (stats JSON), `autoaim`, `wave`.
+- Player profile, leaderboard and saves currently go through the `Data` backend in `ui/app.js`. It defaults to `LocalBackend` (localStorage). A cloud backend registered as `window.UHCloud` takes over when signed in.

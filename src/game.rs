@@ -1,4 +1,5 @@
 use crate::audio::{Audio, Sfx};
+use crate::content::{self, BossVar, CHAPTERS, DIFFICULTIES, GUNS};
 use crate::math::*;
 use crate::upgrades::{Levels, Up};
 use crate::world;
@@ -97,6 +98,8 @@ pub struct Zombie {
     pub face: f32,
     pub strafe: f32,
     pub tint: f32,
+    pub boss_var: BossVar,
+    pub special_t: f32,
 }
 
 pub struct Bullet {
@@ -111,6 +114,8 @@ pub struct Bullet {
     pub crit: bool,
     pub last_hit: u32,
     pub dead: bool,
+    pub blast: f32,
+    pub knock: f32,
 }
 
 pub struct EShot {
@@ -368,6 +373,17 @@ pub struct Game {
     pub fps: f32,
     pub sep: Vec<V2>,
     pub groan_t: f32,
+    // mode / loadout / cosmetics
+    pub campaign: bool,
+    pub chapter: usize,
+    pub diff: usize,
+    pub gun: usize,
+    pub perk: String,
+    pub skin: usize,
+    pub hat: usize,
+    pub tracer: usize,
+    pub coins: u32,
+    pub victory_t: f32,
 }
 
 fn xp_for(level: u32) -> f32 {
@@ -450,6 +466,16 @@ impl Game {
             fps: 60.0,
             sep: Vec::new(),
             groan_t: 3.0,
+            campaign: false,
+            chapter: 0,
+            diff: 1,
+            gun: 0,
+            perk: String::new(),
+            skin: 0,
+            hat: 0,
+            tracer: 0,
+            coins: 0,
+            victory_t: -1.0,
         };
         g.player.pos = v2(0.0, 0.0);
         g
@@ -486,15 +512,50 @@ impl Game {
         }
     }
 
-    pub fn start(&mut self, name: &str, best: u32) {
+    /// Apply `key=value;key=value` options: loadout, cosmetics, mode, difficulty.
+    pub fn apply_opts(&mut self, opts: &str) {
+        for kv in opts.split(';') {
+            let Some((k, v)) = kv.split_once('=') else {
+                continue;
+            };
+            match k {
+                "name" => {
+                    let n: String = v.trim().chars().take(16).collect();
+                    self.player_name = if n.is_empty() { "Survivor".into() } else { n };
+                }
+                "best" => self.best_wave = v.parse().unwrap_or(0),
+                "mode" => self.campaign = v == "campaign",
+                "chapter" => self.chapter = v.parse::<usize>().unwrap_or(0).min(CHAPTERS.len() - 1),
+                "diff" => self.diff = content::difficulty_index(v),
+                "gun" => self.gun = content::gun_index(v),
+                "perk" => self.perk = v.to_string(),
+                "skin" => self.skin = content::skin_index(v),
+                "hat" => self.hat = content::hat_index(v),
+                "tracer" => self.tracer = content::tracer_index(v),
+                _ => {}
+            }
+        }
+    }
+
+    pub fn difficulty(&self) -> &'static content::Difficulty {
+        &DIFFICULTIES[self.diff]
+    }
+
+    /// Wave number used for scaling: campaign chapters start partway up the curve.
+    pub fn scale_n(&self) -> u32 {
+        let n = self.wave.n.max(1);
+        if self.campaign {
+            CHAPTERS[self.chapter].base + n - 1
+        } else {
+            n
+        }
+    }
+
+    pub fn start(&mut self, opts: &str) {
         self.audio.unlock();
         self.audio.music_on = true;
-        self.player_name = if name.trim().is_empty() {
-            "Survivor".into()
-        } else {
-            name.trim().chars().take(16).collect()
-        };
-        self.best_wave = best;
+        self.best_wave = 0;
+        self.apply_opts(opts);
         self.player = Game::fresh_player();
         self.zombies.clear();
         self.bullets.clear();
@@ -521,6 +582,8 @@ impl Game {
         self.shake = 0.0;
         self.ult_uses = 0;
         self.ult_ready_played = false;
+        self.coins = 0;
+        self.victory_t = -1.0;
         self.wave = Wave {
             n: 0,
             total: 0,
@@ -530,12 +593,39 @@ impl Game {
             boss_timer: 0.0,
             boss_pending: false,
         };
-        self.banner = Some(Banner {
-            title: "SURVIVE".into(),
-            sub: "WASD move · Mouse aim · Space dash · Q ultimate".into(),
-            t: 0.0,
-            dur: 2.6,
-            color: "#e8f0ff",
+        // starting perk from the loadout
+        if let Some(u) = content::perk_upgrade(&self.perk) {
+            self.ups.inc(u);
+            if u == Up::Vitality {
+                self.player.max_hp += 25.0;
+                self.player.hp = self.player.max_hp;
+                self.player.hp_ghost = self.player.hp;
+            }
+        }
+        self.banner = Some(if self.campaign {
+            Banner {
+                title: format!("CHAPTER {}", self.chapter + 1),
+                sub: format!(
+                    "{} · {}",
+                    CHAPTERS[self.chapter].title,
+                    self.difficulty().name
+                ),
+                t: 0.0,
+                dur: 3.0,
+                color: "#ffd36a",
+            }
+        } else {
+            Banner {
+                title: "SURVIVE".into(),
+                sub: format!(
+                    "Infinite · {} · {}",
+                    self.difficulty().name,
+                    GUNS[self.gun].name
+                ),
+                t: 0.0,
+                dur: 2.6,
+                color: "#e8f0ff",
+            }
         });
         self.phase = Phase::Playing;
         self.audio.play(Sfx::UiSelect);
@@ -546,7 +636,7 @@ impl Game {
         (1.0 + 0.25 * self.ups.f(Up::Damage)) * (1.0 + 0.08 * self.ups.f(Up::Velocity))
     }
     fn fire_interval(&self) -> f32 {
-        let base = 0.30 / (1.0 + 0.16 * self.ups.f(Up::FireRate));
+        let base = 0.30 * GUNS[self.gun].interval / (1.0 + 0.16 * self.ups.f(Up::FireRate));
         if self.player.frenzy > 0.0 {
             base * 0.5
         } else {
@@ -554,7 +644,7 @@ impl Game {
         }
     }
     fn move_speed(&self) -> f32 {
-        255.0 * (1.0 + 0.09 * self.ups.f(Up::Speed))
+        255.0 * (1.0 + 0.09 * self.ups.f(Up::Speed)) * GUNS[self.gun].move_mult
     }
     pub fn magnet_r(&self) -> f32 {
         95.0 * (1.0 + 0.45 * self.ups.f(Up::Magnet))
@@ -720,6 +810,15 @@ impl Game {
                 let t = self.menu_t;
                 self.player.prev = self.player.pos;
                 self.player.pos = v2(t * 38.0, (t * 0.15).sin() * 260.0);
+                if real_dt > 0.0 {
+                    self.player.vel = (self.player.pos - self.player.prev) * (1.0 / real_dt);
+                }
+                self.player.walk += self.player.vel.len() * real_dt * 0.06;
+                self.player.aim = if self.input.mouse_seen {
+                    (self.input.mouse - self.screen * 0.5).angle()
+                } else {
+                    t * 0.8
+                };
                 self.alpha = 1.0;
             }
             Phase::Playing | Phase::Dying => {
@@ -739,6 +838,15 @@ impl Game {
                     }
                 }
                 self.alpha = (self.acc / DT).clamp(0.0, 1.0);
+                if self.victory_t >= 0.0 && self.phase == Phase::Playing {
+                    self.victory_t += real_dt;
+                    if self.victory_t > 3.2 {
+                        self.phase = Phase::GameOver;
+                        self.audio.music_on = false;
+                        let json = self.stats_json();
+                        self.ui_out.push(("victory", json));
+                    }
+                }
                 if self.phase == Phase::Dying {
                     self.dying_t += real_dt;
                     if self.dying_t > 1.8 {
@@ -916,7 +1024,8 @@ impl Game {
     pub fn pause(&mut self) {
         if self.phase == Phase::Playing {
             self.phase = Phase::Paused;
-            self.ui_out.push(("pause", String::new()));
+            let json = self.run_json();
+            self.ui_out.push(("pause", json));
             self.audio.play(Sfx::UiMove);
         }
     }
@@ -930,6 +1039,12 @@ impl Game {
     }
     pub fn to_menu(&mut self) {
         self.phase = Phase::Menu;
+        self.player = Game::fresh_player();
+        self.ups = Levels::default();
+        self.victory_t = -1.0;
+        self.texts.clear();
+        self.particles.clear();
+        self.rings.clear();
         self.audio.music_on = false;
         self.zombies.clear();
         self.bullets.clear();
@@ -1054,16 +1169,142 @@ impl Game {
     }
 
     pub fn stats_json(&self) -> String {
-        let name = self.player_name.replace('\\', "").replace('"', "'");
+        let name = self.player_name.replace(['\\', '"'], "");
+        let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{}}}",
+            "{{\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{}}}",
             name,
             self.wave.n.max(1),
             self.player.level,
             self.kills,
             self.time,
-            self.best_combo
+            self.best_combo,
+            self.coins,
+            if self.campaign { "campaign" } else { "infinite" },
+            self.chapter,
+            diff,
+            GUNS[self.gun].id,
+            self.victory_t >= 0.0
         )
+    }
+
+    /// Detailed snapshot for the pause screen's stats panel.
+    pub fn run_json(&self) -> String {
+        let ups: Vec<String> = crate::upgrades::ALL
+            .iter()
+            .filter(|u| self.ups.get(**u) > 0)
+            .map(|u| {
+                let d = u.def();
+                format!(
+                    "{{\"icon\":\"{}\",\"name\":\"{}\",\"lvl\":{},\"max\":{},\"color\":\"{}\"}}",
+                    d.icon,
+                    d.name,
+                    self.ups.get(*u),
+                    d.max,
+                    d.color
+                )
+            })
+            .collect();
+        let shots_per_sec = 1.0 / self.fire_interval();
+        format!(
+            "{{\"run\":{},\"hp\":{:.0},\"maxHp\":{:.0},\"xp\":{:.0},\"xpNext\":{:.0},\"dmg\":{:.1},\"fireRate\":{:.2},\"speed\":{:.0},\"crit\":{:.0},\"magnet\":{:.0},\"ult\":{:.0},\"remaining\":{},\"gunName\":\"{}\",\"diffName\":\"{}\",\"upgrades\":[{}]}}",
+            self.stats_json(),
+            self.player.hp,
+            self.player.max_hp,
+            self.player.xp,
+            self.player.xp_next,
+            10.0 * GUNS[self.gun].dmg * self.dmg_mult(),
+            shots_per_sec,
+            self.move_speed(),
+            self.crit_chance() * 100.0,
+            self.magnet_r(),
+            self.player.ult * 100.0,
+            self.remaining(),
+            GUNS[self.gun].name,
+            self.difficulty().name,
+            ups.join(",")
+        )
+    }
+
+    /// Serialise the run so it can be resumed later (from the start of the current wave).
+    pub fn save_string(&self) -> String {
+        let wave = if self.wave.intermission > 0.0 {
+            self.wave.n + 1
+        } else {
+            self.wave.n.max(1)
+        };
+        let ups: Vec<String> = self.ups.0.iter().map(|l| l.to_string()).collect();
+        let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
+        format!(
+            "name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={}",
+            self.player_name.replace([';', '=', '|'], ""),
+            if self.campaign { "campaign" } else { "infinite" },
+            self.chapter,
+            diff,
+            GUNS[self.gun].id,
+            self.perk,
+            wave,
+            self.player.level,
+            self.player.xp,
+            self.player.hp,
+            self.player.max_hp,
+            ups.join(","),
+            self.kills,
+            self.coins,
+            self.time,
+            self.player.ult,
+            self.best_combo,
+            self.best_wave
+        )
+    }
+
+    pub fn load_save(&mut self, data: &str) {
+        self.start(data);
+        let mut wave = 1u32;
+        for kv in data.split(';') {
+            let Some((k, v)) = kv.split_once('=') else {
+                continue;
+            };
+            match k {
+                "savewave" => wave = v.parse().unwrap_or(1).max(1),
+                "level" => self.player.level = v.parse().unwrap_or(1),
+                "xp" => self.player.xp = v.parse().unwrap_or(0.0),
+                "hp" => self.player.hp = v.parse().unwrap_or(100.0),
+                "maxhp" => self.player.max_hp = v.parse().unwrap_or(100.0),
+                "kills" => self.kills = v.parse().unwrap_or(0),
+                "coins" => self.coins = v.parse().unwrap_or(0),
+                "time" => self.time = v.parse().unwrap_or(0.0),
+                "ult" => self.player.ult = v.parse().unwrap_or(0.0),
+                "combo" => self.best_combo = v.parse().unwrap_or(0),
+                "ups" => {
+                    for (i, l) in v.split(',').enumerate().take(self.ups.0.len()) {
+                        self.ups.0[i] = l.parse().unwrap_or(0);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if self.campaign {
+            wave = wave.min(CHAPTERS[self.chapter].waves);
+        }
+        self.player.xp_next = xp_for(self.player.level);
+        self.player.hp = self.player.hp.clamp(1.0, self.player.max_hp);
+        self.player.hp_ghost = self.player.hp;
+        self.ult_ready_played = self.player.ult >= 1.0;
+        self.wave.n = wave - 1;
+        self.wave.intermission = 2.0;
+        self.banner = Some(Banner {
+            title: "RUN RESUMED".into(),
+            sub: format!(
+                "Wave {} · Level {} · {}",
+                wave,
+                self.player.level,
+                self.difficulty().name
+            ),
+            t: 0.0,
+            dur: 2.4,
+            color: "#7ad7ff",
+        });
     }
 
     // ---------------------------------------------------------------- simulation
@@ -1395,38 +1636,60 @@ impl Game {
     }
 
     fn fire(&mut self) {
-        let p = &self.player;
-        let ppos = p.pos;
-        let aim = p.aim;
-        let n = 1 + self.ups.get(Up::Multishot) as i32;
-        let spread = 0.10;
-        let speed = 920.0 * (1.0 + 0.2 * self.ups.f(Up::Velocity));
-        let life = 0.62 * (1.0 + 0.15 * self.ups.f(Up::Velocity));
-        let dmg = 10.0 * self.dmg_mult();
-        let pierce = self.ups.get(Up::Pierce) as i32;
+        let gun = GUNS[self.gun];
+        let ppos = self.player.pos;
+        let aim = self.player.aim;
+        let extra = self.ups.get(Up::Multishot) as i32;
+        let speed = 920.0 * gun.speed * (1.0 + 0.2 * self.ups.f(Up::Velocity));
+        let life = 0.62 * gun.life * (1.0 + 0.15 * self.ups.f(Up::Velocity));
+        let dmg = 10.0 * gun.dmg * self.dmg_mult();
+        let pierce = self.ups.get(Up::Pierce) as i32 + gun.pierce;
         let bounces = self.ups.get(Up::Ricochet) as i32;
         let crit_c = self.crit_chance();
         let shoot = |g: &mut Game, a: f32| {
+            let a = a + if gun.jitter > 0.0 {
+                g.rng.range(-gun.jitter, gun.jitter)
+            } else {
+                0.0
+            };
             let dir = V2::from_angle(a);
             let crit = g.rng.chance(crit_c);
-            let start = ppos + dir * 24.0;
+            let start = ppos + dir * gun.len;
             g.bullets.push(Bullet {
                 pos: start,
                 prev: start - dir * 6.0,
                 vel: dir * speed * g.rng.range(0.97, 1.03),
                 dmg: if crit { dmg * 2.5 } else { dmg },
-                life,
+                life: life
+                    * if gun.pellets > 1 {
+                        g.rng.range(0.85, 1.1)
+                    } else {
+                        1.0
+                    },
                 pierce,
                 bounces,
-                r: if crit { 6.0 } else { 4.5 },
+                r: gun.bullet_r * if crit { 1.35 } else { 1.0 },
                 crit,
                 last_hit: 0,
                 dead: false,
+                blast: gun.blast,
+                knock: gun.knock,
             });
         };
+        let n = gun.pellets as i32 + extra;
+        // multi-pellet guns fan across their spread; others add 0.1 rad per extra shot
+        let fan = if gun.pellets > 1 {
+            gun.spread + 0.06 * extra as f32
+        } else {
+            0.10 * (n - 1) as f32
+        };
         for k in 0..n {
-            let a = aim + (k as f32 - (n - 1) as f32 * 0.5) * spread;
-            shoot(self, a);
+            let f = if n > 1 {
+                k as f32 / (n - 1) as f32 - 0.5
+            } else {
+                0.0
+            };
+            shoot(self, aim + f * fan);
         }
         let back = self.ups.get(Up::Backshot) as i32;
         for k in 0..back {
@@ -1434,8 +1697,9 @@ impl Game {
             shoot(self, a);
         }
         self.player.recoil = 1.0;
-        let muzzle = ppos + V2::from_angle(aim) * 28.0;
-        for _ in 0..3 {
+        let muzzle = ppos + V2::from_angle(aim) * (gun.len + 4.0);
+        let flash_n = if gun.heavy { 7 } else { 3 };
+        for _ in 0..flash_n {
             if self.particles.len() < 1800 {
                 let a = aim + self.rng.range(-0.4, 0.4);
                 self.particles.push(Particle {
@@ -1453,7 +1717,13 @@ impl Game {
                 });
             }
         }
-        self.sfx(Sfx::Shoot, ppos);
+        if gun.heavy {
+            self.player.vel -= V2::from_angle(aim) * 60.0;
+            self.add_shake(0.06);
+            self.sfx(Sfx::ShootHeavy, ppos);
+        } else {
+            self.sfx(Sfx::Shoot, ppos);
+        }
     }
 
     pub fn damage_zombie(&mut self, j: usize, dmg: f32, dir: V2, knock: f32, crit: bool) -> bool {
@@ -1613,13 +1883,24 @@ impl Game {
                 self.hitstop = 0.12;
                 self.ring(pos, 260.0, 0.6, "#ffb0ff", 12.0);
                 self.burst(pos, 60, 700.0, "#ff6aff", 4.0, 0.8, false, true);
+                let bonus = (50.0 * self.difficulty().coins) as u32;
+                self.coins += bonus;
+                let name = self.zombies[j].boss_var.name();
                 self.banner = Some(Banner {
                     title: "BOSS SLAIN".into(),
-                    sub: format!("Wave {} horror defeated", self.wave.n),
+                    sub: format!("{} defeated · +{} coins", name, bonus),
                     t: 0.0,
                     dur: 2.2,
                     color: "#ff9cff",
                 });
+                let bosses_left = self.wave.boss_pending
+                    || self
+                        .zombies
+                        .iter()
+                        .any(|z| !z.dead && z.kind == ZKind::Boss);
+                if self.campaign && self.wave.n >= CHAPTERS[self.chapter].waves && !bosses_left {
+                    self.campaign_victory();
+                }
             }
             ZKind::Brute => {
                 self.sfx(Sfx::BigDie, pos);
@@ -1680,6 +1961,9 @@ impl Game {
         if self.phase != Phase::Playing {
             return;
         }
+        if self.victory_t >= 0.0 {
+            return;
+        }
         let p = &mut self.player;
         if p.iframes > 0.0 || p.dash_t > 0.0 {
             return;
@@ -1708,10 +1992,11 @@ impl Game {
 
     fn update_zombies(&mut self) {
         let ppos = self.player.pos;
-        let wave_n = self.wave.n;
+        let wave_n = self.scale_n();
         let mut contacts: Vec<usize> = Vec::new();
         let mut fuses: Vec<usize> = Vec::new();
-        let mut boss_summons: Vec<V2> = Vec::new();
+        let mut boss_summons: Vec<(V2, ZKind, u32)> = Vec::new();
+        let mut blasts: Vec<V2> = Vec::new();
         let relocate_r = self.spawn_r * 1.7;
         let pvel = self.player.vel;
         let playing = self.phase == Phase::Playing;
@@ -1787,11 +2072,97 @@ impl Game {
                 }
                 ZKind::Boss => {
                     z.timer -= DT;
+                    z.special_t -= DT;
+                    let enraged = z.hp < z.max_hp * 0.5;
+                    let var = z.boss_var;
+                    // signature special attacks
+                    if playing && z.special_t <= 0.0 {
+                        let shot_dmg = z.dmg * 0.55;
+                        let mut ring =
+                            |count: usize, offset: f32, spread: Option<f32>, speed: f32| {
+                                for k in 0..count {
+                                    let a = match spread {
+                                        Some(sp) => {
+                                            dir.angle()
+                                                + (k as f32 / (count - 1).max(1) as f32 - 0.5) * sp
+                                        }
+                                        None => offset + k as f32 * TAU / count as f32,
+                                    };
+                                    let sd = V2::from_angle(a);
+                                    self.eshots.push(EShot {
+                                        pos: z.pos + sd * z.r,
+                                        prev: z.pos,
+                                        vel: sd * speed,
+                                        life: 2.6,
+                                        dmg: shot_dmg,
+                                        dead: false,
+                                    });
+                                }
+                            };
+                        match var {
+                            BossVar::Abomination => z.special_t = 99.0,
+                            BossVar::Gravedigger => {
+                                z.special_t = if enraged { 3.5 } else { 5.0 };
+                                boss_summons.push((
+                                    z.pos,
+                                    ZKind::Walker,
+                                    if enraged { 7 } else { 5 },
+                                ));
+                                self.pending_sfx.push((Sfx::Groan, z.pos));
+                            }
+                            BossVar::Matriarch => {
+                                z.special_t = if enraged { 1.5 } else { 2.3 };
+                                ring(if enraged { 7 } else { 5 }, 0.0, Some(0.7), 320.0);
+                                self.pending_sfx.push((Sfx::Spit, z.pos));
+                                if self.rng.chance(0.3) {
+                                    boss_summons.push((z.pos, ZKind::Spitter, 2));
+                                }
+                            }
+                            BossVar::CinderKing => {
+                                z.special_t = 5.5;
+                                boss_summons.push((
+                                    z.pos,
+                                    ZKind::Exploder,
+                                    if enraged { 4 } else { 3 },
+                                ));
+                            }
+                            BossVar::Wraith => {
+                                z.special_t = if enraged { 2.4 } else { 3.4 };
+                                ring(8, self.rng.angle(), None, 260.0);
+                                self.pending_sfx.push((Sfx::Nova, z.pos));
+                            }
+                            BossVar::BloomHeart => {
+                                z.special_t = if enraged { 2.0 } else { 3.0 };
+                                ring(if enraged { 18 } else { 12 }, self.rng.angle(), None, 240.0);
+                                boss_summons.push((z.pos, ZKind::Runner, 3));
+                                self.pending_sfx.push((Sfx::Spit, z.pos));
+                            }
+                        }
+                    }
+                    if var == BossVar::Matriarch {
+                        // keeps her distance and strafes
+                        if dist < 300.0 {
+                            want = -dir;
+                        } else if dist < 460.0 {
+                            want = (dir.perp() * z.strafe + dir * 0.1).norm();
+                            spd *= 0.7;
+                        }
+                    }
+                    let charges = match var {
+                        BossVar::Matriarch => false,
+                        BossVar::BloomHeart => enraged,
+                        _ => true,
+                    };
+                    let (wind, charge_speed) = match var {
+                        BossVar::Wraith => (0.55, 760.0),
+                        BossVar::BloomHeart => (0.9, 520.0),
+                        _ => (0.75, 640.0),
+                    };
                     match z.state {
                         0 => {
-                            if z.timer <= 0.0 && playing {
+                            if z.timer <= 0.0 && playing && charges {
                                 z.state = 1;
-                                z.timer = 0.75;
+                                z.timer = wind;
                                 z.charge_dir = dir;
                             }
                         }
@@ -1807,13 +2178,16 @@ impl Game {
                         }
                         _ => {
                             want = z.charge_dir;
-                            spd = 640.0;
+                            spd = charge_speed;
                             accel = 20.0;
                             if z.timer <= 0.0 {
                                 z.state = 0;
                                 z.timer = 3.2 + self.rng.range(0.0, 1.0);
-                                if wave_n >= 10 {
-                                    boss_summons.push(z.pos);
+                                if var == BossVar::CinderKing {
+                                    blasts.push(z.pos);
+                                }
+                                if var == BossVar::Abomination && wave_n >= 10 {
+                                    boss_summons.push((z.pos, ZKind::Runner, 4));
                                 }
                             }
                         }
@@ -1873,11 +2247,16 @@ impl Game {
                 self.kill_zombie(i);
             }
         }
-        for at in boss_summons {
-            for _ in 0..4 {
-                let p = at + self.rng.unit() * 70.0;
-                self.spawn_zombie(ZKind::Runner, p);
+        for (at, kind, count) in boss_summons {
+            for _ in 0..count {
+                let p = at + self.rng.unit() * self.rng.range(60.0, 120.0);
+                self.spawn_zombie(kind, p);
+                self.burst(p, 6, 120.0, "#4a3a2a", 4.0, 0.5, true, false);
             }
+        }
+        for at in blasts {
+            let dmg = 28.0 * self.difficulty().dmg;
+            self.explode(at, 150.0, dmg, true);
         }
 
         // periodic ambient groans
@@ -1992,12 +2371,16 @@ impl Game {
             if let Some(j) = hit {
                 let uid = self.zombies[j].uid;
                 let dir = b.vel.norm();
-                self.damage_zombie(j, b.dmg, dir, 150.0, b.crit);
+                self.damage_zombie(j, b.dmg, dir, b.knock, b.crit);
                 b.last_hit = uid;
                 // impact sparks
                 let col = if b.crit { "#ffd34a" } else { "#fff1c0" };
                 self.burst(b.pos, 3, 200.0, col, 2.0, 0.15, false, true);
-                if expl > 0 {
+                if b.blast > 0.0 {
+                    let r = b.blast * (1.0 + 0.3 * expl as f32);
+                    self.small_blast(b.pos, r, b.dmg * 0.7, uid);
+                    self.add_shake(0.08);
+                } else if expl > 0 {
                     let r = 55.0 * (1.0 + 0.3 * (expl as f32 - 1.0));
                     let d = b.dmg * 0.45 * (1.0 + 0.3 * (expl as f32 - 1.0));
                     self.small_blast(b.pos, r, d, uid);
@@ -2188,39 +2571,110 @@ impl Game {
     }
 
     // ---------------------------------------------------------------- waves
+    fn is_boss_wave(&self, n: u32) -> bool {
+        if self.campaign {
+            n == CHAPTERS[self.chapter].waves
+        } else {
+            n % 5 == 0
+        }
+    }
+
     fn start_wave(&mut self, n: u32) {
         self.wave.n = n;
-        let w = (n - 1) as f32;
-        self.wave.total = 12 + 7 * (n - 1) + w.powf(1.45) as u32;
+        let lvl = self.scale_n();
+        let w = (lvl - 1) as f32;
+        let base_total = 12.0 + 7.0 * w + w.powf(1.45);
+        let camp = if self.campaign { 0.85 } else { 1.0 };
+        self.wave.total = (base_total * self.difficulty().count * camp) as u32;
         self.wave.spawned = 0;
         self.wave.timer = 0.6;
-        let boss = n % 5 == 0;
+        let boss = self.is_boss_wave(n);
         self.wave.boss_pending = boss;
         self.wave.boss_timer = 2.5;
-        let new_record = self.best_wave > 0 && n > self.best_wave;
+        let new_record = !self.campaign && self.best_wave > 0 && n > self.best_wave;
+        let (title, sub) = if self.campaign {
+            let ch = &CHAPTERS[self.chapter];
+            let t = if boss {
+                format!("FINAL WAVE {}/{}", n, ch.waves)
+            } else {
+                format!("WAVE {}/{}", n, ch.waves)
+            };
+            let line = ch.radio.get((n - 1) as usize).copied().unwrap_or("");
+            (t, line.to_string())
+        } else {
+            (
+                if boss {
+                    format!("WAVE {} — BOSS", n)
+                } else {
+                    format!("WAVE {}", n)
+                },
+                if new_record {
+                    "NEW PERSONAL BEST!".into()
+                } else {
+                    format!(
+                        "{} undead approach",
+                        self.wave.total + if boss { 1 } else { 0 }
+                    )
+                },
+            )
+        };
         self.banner = Some(Banner {
-            title: if boss {
-                format!("WAVE {} — BOSS", n)
-            } else {
-                format!("WAVE {}", n)
-            },
-            sub: if new_record {
-                "NEW PERSONAL BEST!".into()
-            } else {
-                format!(
-                    "{} undead approach",
-                    self.wave.total + if boss { 1 } else { 0 }
-                )
-            },
+            title,
+            sub,
             t: 0.0,
-            dur: 2.4,
+            dur: if self.campaign { 3.6 } else { 2.4 },
             color: if boss { "#ff6a8a" } else { "#e8f0ff" },
         });
         self.sfx(Sfx::WaveStart, self.player.pos);
     }
 
+    fn spawn_boss(&mut self, var: BossVar, pos: V2) {
+        self.spawn_zombie(ZKind::Boss, pos);
+        let (hm, r, sm) = var.stats();
+        if let Some(z) = self.zombies.last_mut() {
+            z.boss_var = var;
+            z.hp *= hm;
+            z.max_hp = z.hp;
+            z.r = r;
+            z.speed *= sm;
+            z.special_t = 2.5;
+            if var == BossVar::BloomHeart {
+                z.xp *= 3;
+            }
+        }
+    }
+
+    fn campaign_victory(&mut self) {
+        if self.victory_t >= 0.0 {
+            return;
+        }
+        self.victory_t = 0.0;
+        let bonus = (100.0 * (self.chapter + 1) as f32 * self.difficulty().coins) as u32;
+        self.coins += bonus;
+        // the horde collapses with its master
+        for z in self.zombies.iter_mut() {
+            z.dead = true;
+        }
+        for g in self.gems.iter_mut() {
+            g.magnet = true;
+        }
+        self.eshots.clear();
+        let p = self.player.pos;
+        self.ring(p, 900.0, 1.2, "#ffd36a", 14.0);
+        self.burst(p, 60, 700.0, "#ffd36a", 4.0, 1.0, false, true);
+        self.banner = Some(Banner {
+            title: "CHAPTER COMPLETE".into(),
+            sub: format!("{} · +{} coins", CHAPTERS[self.chapter].title, bonus),
+            t: 0.0,
+            dur: 3.2,
+            color: "#ffd36a",
+        });
+        self.audio.play(Sfx::WaveClear);
+        self.audio.play(Sfx::LevelUp);
+    }
+
     fn pick_kind(&mut self) -> ZKind {
-        let n = self.wave.n as f32;
+        let n = self.scale_n() as f32;
         let mut opts: Vec<(ZKind, f32)> = vec![(ZKind::Walker, 10.0)];
         if n >= 2.0 {
             opts.push((ZKind::Runner, (2.0 + n * 0.4).min(8.0)));
@@ -2247,7 +2701,9 @@ impl Game {
 
     fn spawn_zombie(&mut self, kind: ZKind, pos: V2) {
         let (hp, speed, r, dmg, xp) = kind.base();
-        let n = self.wave.n.max(1);
+        let n = self.scale_n();
+        let df = self.difficulty();
+        let (dhp, dspeed, ddmg) = (df.hp, df.speed, df.dmg);
         let hm = hp_mult(n)
             * if kind == ZKind::Boss {
                 1.0 + (n / 5) as f32 * 0.35
@@ -2264,17 +2720,18 @@ impl Game {
             prev: p,
             vel: V2::ZERO,
             kind,
-            hp: hp * hm,
-            max_hp: hp * hm,
+            hp: hp * hm * dhp,
+            max_hp: hp * hm * dhp,
             speed: speed
                 * sm
+                * dspeed
                 * if kind == ZKind::Boss {
                     1.0
                 } else {
                     self.rng.range(0.88, 1.12)
                 },
             r,
-            dmg: dmg * (1.0 + 0.04 * (n - 1) as f32),
+            dmg: dmg * (1.0 + 0.04 * (n - 1) as f32) * ddmg,
             xp,
             flash: 0.0,
             anim: self.rng.range(0.0, 10.0),
@@ -2295,10 +2752,15 @@ impl Game {
             face,
             strafe: if self.rng.chance(0.5) { 1.0 } else { -1.0 },
             tint: self.rng.f(),
+            boss_var: BossVar::Abomination,
+            special_t: 2.0,
         });
     }
 
     fn update_waves(&mut self) {
+        if self.victory_t >= 0.0 {
+            return;
+        }
         if self.wave.intermission > 0.0 {
             self.wave.intermission -= DT;
             if self.wave.intermission <= 0.0 {
@@ -2308,13 +2770,14 @@ impl Game {
             return;
         }
         let n = self.wave.n;
-        let max_alive = (150 + 8 * n).min(340);
+        let lvl = self.scale_n();
+        let max_alive = (150 + 8 * lvl).min(340);
         let alive = self.alive();
         self.wave.timer -= DT;
         if self.wave.spawned < self.wave.total && self.wave.timer <= 0.0 && alive < max_alive {
-            let interval = (1.1 - n as f32 * 0.045).max(0.22);
+            let interval = (1.1 - lvl as f32 * 0.045).max(0.22) / self.difficulty().count;
             self.wave.timer = interval * self.rng.range(0.7, 1.3);
-            let gmax = 3 + n / 2;
+            let gmax = 3 + lvl / 2;
             let g =
                 (2 + self.rng.below(gmax as usize) as u32).min(self.wave.total - self.wave.spawned);
             let ppos = self.player.pos;
@@ -2336,9 +2799,21 @@ impl Game {
             self.wave.boss_timer -= DT;
             if self.wave.boss_timer <= 0.0 {
                 self.wave.boss_pending = false;
+                let (var, twin) = if self.campaign {
+                    let ch = &CHAPTERS[self.chapter];
+                    (ch.boss, ch.twin)
+                } else {
+                    let i = ((n / 5).max(1) - 1) as usize % content::INFINITE_BOSSES.len();
+                    (content::INFINITE_BOSSES[i], false)
+                };
                 let a = self.rng.angle();
                 let p = self.player.pos + V2::from_angle(a) * (self.spawn_r - 40.0);
-                self.spawn_zombie(ZKind::Boss, p);
+                self.spawn_boss(var, p);
+                if twin {
+                    let p2 = self.player.pos + V2::from_angle(a + PI) * (self.spawn_r - 40.0);
+                    self.spawn_boss(var, p2);
+                }
+                self.toast = Some((var.name().to_string(), 2.5));
                 self.sfx(Sfx::BossRoar, self.player.pos);
                 self.add_shake(0.5);
             }
@@ -2357,9 +2832,14 @@ impl Game {
         }
         let heal = self.player.max_hp * 0.1;
         self.player.hp = (self.player.hp + heal).min(self.player.max_hp);
+        let earned = ((10 + 5 * self.scale_n()) as f32 * self.difficulty().coins) as u32;
+        self.coins += earned;
         self.banner = Some(Banner {
             title: format!("WAVE {} CLEARED", self.wave.n),
-            sub: format!("+{} HP · next wave incoming", heal as i32),
+            sub: format!(
+                "+{} coins · +{} HP · next wave incoming",
+                earned, heal as i32
+            ),
             t: 0.0,
             dur: 2.6,
             color: "#9cffb8",

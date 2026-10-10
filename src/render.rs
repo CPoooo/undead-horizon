@@ -2,6 +2,7 @@
 //! (tree canopies, rock tops, gravestones) away from the camera centre, so they
 //! parallax as you move — plus soft shadows, depth sorting and dynamic lighting.
 
+use crate::content::{CHAPTERS, GUNS, HATS, SKINS, TRACERS};
 use crate::game::*;
 use crate::math::*;
 use crate::upgrades::ALL;
@@ -173,6 +174,52 @@ impl Game {
         self.draw_bullets(c, a);
         self.draw_particles(c);
         self.draw_canopies(c, &obs, ppos);
+        if self.phase == Phase::Menu {
+            // character showcase: the player model, scaled up on a glowing pedestal
+            let s = (3.2 / self.zoom.max(0.5)).clamp(2.0, 4.5);
+            c.save();
+            let _ = c.translate(d(ppos.x), d(ppos.y));
+            let _ = c.scale(d(s), d(s));
+            let _ = c.translate(d(-ppos.x), d(-ppos.y));
+            let pulse = 0.5 + 0.5 * (t * 2.0).sin();
+            let _ = c.set_global_composite_operation("lighter");
+            c.set_global_alpha(d(0.18 + 0.1 * pulse));
+            c.set_fill_style_str("#7ad7ff");
+            c.begin_path();
+            let _ = c.ellipse(d(ppos.x), d(ppos.y + 6.0), 30.0, 15.0, 0.0, 0.0, TAU64);
+            c.fill();
+            c.set_global_alpha(0.6);
+            c.set_stroke_style_str("#7ad7ff");
+            c.set_line_width(1.2);
+            c.begin_path();
+            let _ = c.ellipse(
+                d(ppos.x),
+                d(ppos.y + 6.0),
+                d(24.0 + 4.0 * pulse),
+                d(12.0 + 2.0 * pulse),
+                0.0,
+                0.0,
+                TAU64,
+            );
+            c.stroke();
+            let _ = c.set_global_composite_operation("source-over");
+            c.set_global_alpha(0.35);
+            c.set_fill_style_str("#000");
+            c.begin_path();
+            let _ = c.ellipse(
+                d(ppos.x + 3.0),
+                d(ppos.y + 8.0),
+                d(PR * 1.1),
+                d(PR * 0.5),
+                0.0,
+                0.0,
+                TAU64,
+            );
+            c.fill();
+            c.set_global_alpha(1.0);
+            self.draw_player(c, ppos, t);
+            c.restore();
+        }
         self.draw_bolts(c, t);
         self.draw_texts(c);
         c.restore();
@@ -513,8 +560,10 @@ impl Game {
         let moving = pl.vel.len() > 30.0;
         let step = if moving { (pl.walk * 2.2).sin() } else { 0.0 };
 
+        let skin = &SKINS[self.skin];
+        let gun = &GUNS[self.gun];
         // feet
-        c.set_fill_style_str("#1d2433");
+        c.set_fill_style_str(skin.feet);
         let mv = if moving { pl.vel.norm() } else { fwd };
         let f1 = p + side * 7.0 + mv * (step * 6.0);
         let f2 = p - side * 7.0 - mv * (step * 6.0);
@@ -529,16 +578,26 @@ impl Game {
         // gun
         let rec = pl.recoil * 4.0;
         let g0 = p + fwd * (6.0 - rec) + side * 5.0;
-        let g1 = p + fwd * (30.0 - rec) + side * 5.0;
-        c.set_stroke_style_str("#2a2d34");
-        c.set_line_width(7.0);
+        let g1 = p + fwd * (gun.len + 6.0 - rec) + side * 5.0;
+        c.set_stroke_style_str(gun.color);
+        c.set_line_width(d(gun.width));
         c.set_line_cap("round");
         c.begin_path();
         c.move_to(d(g0.x), d(g0.y - 4.0));
         c.line_to(d(g1.x), d(g1.y - 4.0));
         c.stroke();
+        if gun.pellets > 1 {
+            // double barrel
+            let g2 = g1 - side * 3.0;
+            c.set_stroke_style_str("#1a1a1e");
+            c.set_line_width(3.0);
+            c.begin_path();
+            c.move_to(d(g0.x - side.x * 3.0), d(g0.y - side.y * 3.0 - 4.0));
+            c.line_to(d(g2.x), d(g2.y - 4.0));
+            c.stroke();
+        }
         c.set_stroke_style_str("#6b7280");
-        c.set_line_width(3.0);
+        c.set_line_width((gun.width * 0.4).max(2.0) as f64);
         c.begin_path();
         c.move_to(d(g0.x), d(g0.y - 5.0));
         c.line_to(d(g1.x), d(g1.y - 5.0));
@@ -546,9 +605,9 @@ impl Game {
 
         // body (two-tone for volume)
         let body = p + v2(0.0, -4.0);
-        c.set_fill_style_str("#1e4fa8");
+        c.set_fill_style_str(skin.dark);
         circle(c, body.x, body.y, PR);
-        c.set_fill_style_str("#3b7bea");
+        c.set_fill_style_str(skin.light);
         circle(c, body.x - 2.0, body.y - 3.0, PR * 0.78);
         if pl.frenzy > 0.0 {
             let _ = c.set_global_composite_operation("lighter");
@@ -583,6 +642,7 @@ impl Game {
         let e2 = head + fwd * 5.0 - side * 3.0;
         circle(c, e1.x, e1.y, 1.4);
         circle(c, e2.x, e2.y, 1.4);
+        self.draw_hat(c, head, aim, t);
         if pl.hurt_flash > 0.0 {
             c.set_global_alpha(d(pl.hurt_flash * 0.7));
             c.set_fill_style_str("#ff2a2a");
@@ -592,7 +652,7 @@ impl Game {
 
         // muzzle flash
         if pl.recoil > 0.6 {
-            let m = p + fwd * 34.0 + side * 5.0 + v2(0.0, -4.0);
+            let m = p + fwd * (gun.len + 10.0) + side * 5.0 + v2(0.0, -4.0);
             let _ = c.set_global_composite_operation("lighter");
             c.set_fill_style_str("#ffcf6a");
             c.set_global_alpha(d((pl.recoil - 0.6) * 2.2));
@@ -601,6 +661,116 @@ impl Game {
             circle(c, m.x, m.y, 4.0);
             let _ = c.set_global_composite_operation("source-over");
             c.set_global_alpha(1.0);
+        }
+    }
+
+    fn draw_hat(&self, c: &Ctx, head: V2, aim: f32, t: f32) {
+        let fwd = V2::from_angle(aim);
+        let side = fwd.perp();
+        match HATS[self.hat] {
+            "cap" => {
+                c.set_fill_style_str("#c0283a");
+                circle(c, head.x - fwd.x, head.y - fwd.y - 1.0, 8.5);
+                let b = head + fwd * 8.0;
+                c.begin_path();
+                let _ = c.ellipse(d(b.x), d(b.y - 1.0), 6.0, 3.5, d(aim), 0.0, TAU64);
+                c.fill();
+            }
+            "headband" => {
+                c.set_stroke_style_str("#e02020");
+                c.set_line_width(3.0);
+                c.begin_path();
+                let _ = c.arc(d(head.x), d(head.y), 8.5, d(aim - 1.3), d(aim + 1.3));
+                c.stroke();
+                let back = head - fwd * 9.0;
+                let sway = (t * 8.0).sin() * 3.0;
+                c.begin_path();
+                c.move_to(d(back.x), d(back.y));
+                c.line_to(
+                    d(back.x - fwd.x * 9.0 + side.x * sway),
+                    d(back.y - fwd.y * 9.0 + side.y * sway),
+                );
+                c.move_to(d(back.x), d(back.y));
+                c.line_to(
+                    d(back.x - fwd.x * 8.0 - side.x * (4.0 + sway)),
+                    d(back.y - fwd.y * 8.0 - side.y * (4.0 + sway)),
+                );
+                c.stroke();
+            }
+            "cowboy" => {
+                c.set_fill_style_str("#6a4424");
+                c.begin_path();
+                let _ = c.ellipse(d(head.x), d(head.y), 15.0, 12.0, d(aim), 0.0, TAU64);
+                c.fill();
+                c.set_fill_style_str("#8a5a30");
+                circle(c, head.x, head.y - 1.0, 8.0);
+                c.set_fill_style_str("#3a2414");
+                c.fill_rect(d(head.x - 8.0), d(head.y + 1.0), 16.0, 2.0);
+            }
+            "tophat" => {
+                c.set_fill_style_str("#111116");
+                circle(c, head.x, head.y, 11.0);
+                c.set_fill_style_str("#1c1c24");
+                circle(c, head.x, head.y - 3.0, 7.5);
+                c.set_stroke_style_str("#a0203a");
+                c.set_line_width(2.0);
+                c.begin_path();
+                let _ = c.arc(d(head.x), d(head.y - 3.0), 7.5, 0.0, TAU64);
+                c.stroke();
+            }
+            "horns" => {
+                c.set_fill_style_str("#ece0c8");
+                for sgn in [-1.0f32, 1.0] {
+                    let base = head + side * (7.0 * sgn) - fwd * 1.0;
+                    let tip = head + side * (15.0 * sgn) + fwd * 3.0 + v2(0.0, -7.0);
+                    let w = fwd * 3.0;
+                    c.begin_path();
+                    c.move_to(d(base.x + w.x), d(base.y + w.y));
+                    c.line_to(d(tip.x), d(tip.y));
+                    c.line_to(d(base.x - w.x), d(base.y - w.y));
+                    c.close_path();
+                    c.fill();
+                }
+                c.set_fill_style_str("#8a8a90");
+                circle(c, head.x, head.y - 1.0, 8.0);
+            }
+            "crown" => {
+                c.set_fill_style_str("#ffcf3a");
+                c.begin_path();
+                for k in 0..10 {
+                    let an = k as f32 * TAU / 10.0;
+                    let rr = if k % 2 == 0 { 10.5 } else { 6.5 };
+                    let q = head + V2::from_angle(an) * rr + v2(0.0, -2.0);
+                    if k == 0 {
+                        c.move_to(d(q.x), d(q.y));
+                    } else {
+                        c.line_to(d(q.x), d(q.y));
+                    }
+                }
+                c.close_path();
+                c.fill();
+                c.set_fill_style_str("#e0203a");
+                circle(c, head.x, head.y - 2.0, 2.5);
+            }
+            "halo" => {
+                let _ = c.set_global_composite_operation("lighter");
+                c.set_stroke_style_str("#ffe68a");
+                c.set_line_width(3.0);
+                c.begin_path();
+                let bob = (t * 3.0).sin() * 1.5;
+                let _ = c.ellipse(
+                    d(head.x),
+                    d(head.y - 12.0 + bob),
+                    10.0,
+                    4.0,
+                    0.0,
+                    0.0,
+                    TAU64,
+                );
+                c.stroke();
+                let _ = c.set_global_composite_operation("source-over");
+            }
+            _ => {}
         }
     }
 
@@ -623,7 +793,7 @@ impl Game {
             ZKind::Brute => ("#3a3f4a", "#5f7f45", "#1d2418"),
             ZKind::Spitter => ("#4a6b2a", "#9fd04f", "#2a3d14"),
             ZKind::Exploder => ("#a3501c", "#d0904a", "#4a200a"),
-            ZKind::Boss => ("#3a2040", "#7a5a8a", "#1a0a1e"),
+            ZKind::Boss => z.boss_var.colors(),
         };
 
         // arms reaching toward the player
@@ -947,7 +1117,17 @@ impl Game {
     fn draw_bullets(&self, c: &Ctx, a: f32) {
         let _ = c.set_global_composite_operation("lighter");
         c.set_line_cap("round");
-        for (crit, col, w) in [(false, "#ffbe5a", 5.0f32), (true, "#ff7a2a", 8.0)] {
+        let tr = TRACERS[self.tracer];
+        let rainbow = [
+            "#ff4a4a", "#ffb84a", "#fff04a", "#4aff7a", "#4ac8ff", "#c04aff",
+        ];
+        let (trail, core) = if tr.0 == "rainbow" {
+            let k = (self.real_time * 6.0) as usize % rainbow.len();
+            (rainbow[k], "#ffffff")
+        } else {
+            (tr.1, tr.2)
+        };
+        for (crit, col, w) in [(false, trail, 5.0f32), (true, "#ff7a2a", 8.0)] {
             c.set_stroke_style_str(col);
             c.set_line_width(d(w));
             c.set_global_alpha(0.55);
@@ -960,7 +1140,7 @@ impl Game {
             }
             c.stroke();
             c.set_global_alpha(1.0);
-            c.set_fill_style_str(if crit { "#fff2a0" } else { "#fff6dc" });
+            c.set_fill_style_str(if crit { "#fff2a0" } else { core });
             c.begin_path();
             for b in self.bullets.iter().filter(|b| b.crit == crit) {
                 let p = b.prev.lerp(b.pos, a);
@@ -1297,7 +1477,15 @@ impl Game {
         c.set_font(&format!("900 {}px {}", if small { 22 } else { 30 }, font));
         outlined(
             c,
-            &format!("WAVE {}", self.wave.n.max(1)),
+            &if self.campaign {
+                format!(
+                    "WAVE {}/{}",
+                    self.wave.n.max(1),
+                    CHAPTERS[self.chapter].waves
+                )
+            } else {
+                format!("WAVE {}", self.wave.n.max(1))
+            },
             w - 18.0,
             44.0,
             5.0,
@@ -1314,7 +1502,13 @@ impl Game {
         c.set_fill_style_str("#9aa4bb");
         outlined(
             c,
-            &format!("☠ {}   ⏱ {}:{:02}", self.kills, secs / 60, secs % 60),
+            &format!(
+                "🪙 {}   ☠ {}   ⏱ {}:{:02}",
+                self.coins,
+                self.kills,
+                secs / 60,
+                secs % 60
+            ),
             w - 18.0,
             82.0,
             3.0,
@@ -1352,7 +1546,17 @@ impl Game {
             c.set_text_align("center");
             c.set_font(&format!("800 13px {}", font));
             c.set_fill_style_str("#ff9cff");
-            outlined(c, "THE ABOMINATION", w * 0.5, by - 6.0, 3.0);
+            let bosses = self
+                .zombies
+                .iter()
+                .filter(|z| z.kind == ZKind::Boss)
+                .count();
+            let label = if bosses > 1 {
+                format!("{} ×{}", b.boss_var.name(), bosses)
+            } else {
+                b.boss_var.name().to_string()
+            };
+            outlined(c, &label, w * 0.5, by - 6.0, 3.0);
             round_rect(c, bx, by, bw2, 12.0, 4.0);
             c.set_fill_style_str("rgba(10,0,16,0.8)");
             c.fill();

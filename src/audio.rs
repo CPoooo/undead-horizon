@@ -32,9 +32,10 @@ pub enum Sfx {
     Groan,
     Heal,
     UltReady,
+    ShootHeavy,
 }
 
-const SFX_COUNT: usize = 24;
+const SFX_COUNT: usize = 25;
 
 impl Sfx {
     fn idx(self) -> usize {
@@ -44,6 +45,7 @@ impl Sfx {
     fn min_gap(self) -> f64 {
         match self {
             Sfx::Shoot => 0.045,
+            Sfx::ShootHeavy => 0.06,
             Sfx::Hit => 0.03,
             Sfx::Crit => 0.05,
             Sfx::ZombieDie => 0.035,
@@ -305,6 +307,11 @@ impl Audio {
         let d = self.out(pan)?;
         let jit = 1.0 + ((t * 113.7).fract() as f32 - 0.5) * 0.12; // pitch variety
         match s {
+            Sfx::ShootHeavy => {
+                self.noise(&d, t, F::Lowpass, 2600.0 * jit, 150.0, 1.0, 0.28, 0.55 * v)?;
+                self.tone(&d, O::Sine, t, 140.0, 38.0, 0.25, 0.5 * v, 0.002)?;
+                self.tone(&d, O::Square, t, 420.0 * jit, 90.0, 0.08, 0.06 * v, 0.002)?;
+            }
             Sfx::Shoot => {
                 self.tone(&d, O::Square, t, 880.0 * jit, 180.0, 0.07, 0.07 * v, 0.002)?;
                 self.noise(&d, t, F::Highpass, 3000.0, 1500.0, 0.7, 0.05, 0.12 * v)?;
