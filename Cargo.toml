@@ -1,0 +1,30 @@
+[package]
+name = "undead-horizon"
+version = "0.1.0"
+edition = "2021"
+description = "Infinite 2.5D zombie wave survival in Rust + WebAssembly"
+license = "MIT"
+
+[dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement",
+  "CanvasRenderingContext2d", "CanvasGradient", "TextMetrics",
+  "KeyboardEvent", "MouseEvent", "WheelEvent", "TouchEvent", "Touch", "TouchList",
+  "FocusEvent", "Event", "EventTarget", "Performance", "Storage",
+  "AudioContext", "BaseAudioContext", "AudioContextState", "AudioNode", "AudioParam",
+  "AudioDestinationNode", "AudioScheduledSourceNode", "OscillatorNode", "OscillatorType",
+  "GainNode", "BiquadFilterNode", "BiquadFilterType", "AudioBuffer",
+  "AudioBufferSourceNode", "DynamicsCompressorNode", "StereoPannerNode",
+  "DomRect", "CssStyleDeclaration", "console",
+]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

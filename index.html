@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#05060c" />
+  <title>Undead Horizon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link data-trunk rel="rust" data-wasm-opt="3" />
+  <link data-trunk rel="copy-file" href="assets/favicon.svg" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    :root {
+      --bg: #05060c;
+      --panel: rgba(14, 17, 28, 0.82);
+      --line: rgba(160, 180, 255, 0.16);
+      --text: #e8eefc;
+      --muted: #94a0bd;
+      --accent: #7ad7ff;
+      --blood: #ff3b55;
+      --gold: #ffd36a;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+      touch-action: none; overscroll-behavior: none;
+    }
+    canvas#game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+    body.playing canvas#game { cursor: none; }
+
+    .overlay {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      padding: 16px; z-index: 10; opacity: 0; pointer-events: none; transition: opacity .25s ease;
+      background: radial-gradient(ellipse at center, rgba(5,6,12,.35), rgba(5,6,12,.85));
+      overflow-y: auto;
+    }
+    .overlay.show { opacity: 1; pointer-events: auto; }
+    .card {
+      width: min(920px, 100%); background: var(--panel); border: 1px solid var(--line);
+      border-radius: 20px; padding: 28px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 30px 80px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
+      transform: translateY(12px) scale(.98); transition: transform .3s cubic-bezier(.2,.9,.3,1.2);
+      margin: auto;
+    }
+    .overlay.show .card { transform: none; }
+    .card.narrow { width: min(460px, 100%); }
+    h1.title {
+      font-family: 'Creepster', 'Inter', cursive; font-weight: 400; letter-spacing: 3px;
+      font-size: clamp(48px, 9vw, 92px); margin: 0; line-height: .95; text-align: center;
+      background: linear-gradient(180deg, #d6ffb0 0%, #7fd65a 45%, #2f6b1c 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      filter: drop-shadow(0 6px 0 rgba(0,0,0,.6)) drop-shadow(0 0 30px rgba(120,255,120,.15));
+      animation: breathe 4s ease-in-out infinite;
+    }
+    @keyframes breathe { 50% { transform: scale(1.02) rotate(-.4deg); } }
+    .tagline { text-align: center; color: var(--muted); margin: 10px 0 24px; font-size: 15px; }
+    .grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; }
+    @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .card { padding: 20px; } }
+    label.field { display: block; font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+    input[type=text] {
+      width: 100%; font: inherit; font-size: 18px; font-weight: 700; color: var(--text);
+      background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; outline: none;
+      transition: border-color .15s, box-shadow .15s; user-select: text; -webkit-user-select: text;
+    }
+    input[type=text]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122,215,255,.18); }
+    .btn {
+      appearance: none; border: 0; cursor: pointer; font: inherit; font-weight: 800; letter-spacing: .5px;
+      border-radius: 12px; padding: 14px 20px; font-size: 16px; color: #0b0d14;
+      background: linear-gradient(180deg, #9cff7a, #45c234); box-shadow: 0 6px 0 #22661a, 0 10px 24px rgba(80,255,80,.2);
+      transition: transform .08s, box-shadow .08s, filter .15s; width: 100%;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #22661a; }
+    .btn.secondary { background: rgba(255,255,255,.08); color: var(--text); box-shadow: 0 4px 0 rgba(0,0,0,.4); border: 1px solid var(--line); }
+    .btn.secondary:active { box-shadow: 0 1px 0 rgba(0,0,0,.4); }
+    .row { display: flex; gap: 12px; margin-top: 14px; }
+    .row > * { flex: 1; }
+    .play-big { font-size: 22px; padding: 18px; margin-top: 14px; }
+    .kbd { display: inline-block; min-width: 26px; text-align: center; padding: 3px 7px; border-radius: 6px; background: rgba(255,255,255,.08); border: 1px solid var(--line); border-bottom-width: 3px; font-size: 12px; font-weight: 800; }
+    .controls { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; font-size: 14px; color: var(--muted); margin-top: 18px; }
+    .controls b { color: var(--text); font-weight: 600; }
+    h2 { margin: 0 0 12px; font-size: 14px; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); display: flex; align-items: center; gap: 8px; }
+    table.lb { width: 100%; border-collapse: collapse; font-size: 14px; }
+    table.lb th { text-align: left; color: var(--muted); font-weight: 700; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+    table.lb td { padding: 8px; border-bottom: 1px solid rgba(255,255,255,.04); font-variant-numeric: tabular-nums; }
+    table.lb td.rank { width: 34px; font-weight: 900; color: var(--muted); }
+    table.lb tr:nth-child(1) td.rank { color: #ffd36a; }
+    table.lb tr:nth-child(2) td.rank { color: #d8dde8; }
+    table.lb tr:nth-child(3) td.rank { color: #e0a070; }
+    table.lb td.wave { font-weight: 900; color: var(--text); }
+    table.lb td.name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    table.lb tr.me td { background: rgba(122,215,255,.12); }
+    table.lb tr.me td:first-child { border-radius: 8px 0 0 8px; }
+    table.lb tr.me td:last-child { border-radius: 0 8px 8px 0; }
+    .empty { color: var(--muted); font-size: 14px; padding: 18px 0; text-align: center; }
+    .settings { display: grid; gap: 14px; margin-top: 16px; }
+    .setting { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--muted); }
+    .setting span.lbl { width: 90px; font-weight: 600; }
+    input[type=range] { flex: 1; accent-color: #7fd65a; }
+    .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--muted); font-weight: 600; }
+    .toggle input { width: 18px; height: 18px; accent-color: #7fd65a; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 18px 0 6px; }
+    @media (max-width: 560px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+    .stat { background: rgba(0,0,0,.3); border: 1px solid var(--line); border-radius: 14px; padding: 14px; text-align: center; }
+    .stat .v { font-size: 28px; font-weight: 900; }
+    .stat .k { font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; font-weight: 700; margin-top: 2px; }
+    .dead-title { font-family: 'Creepster', cursive; font-size: clamp(44px, 8vw, 76px); text-align: center; margin: 0; color: var(--blood); text-shadow: 0 6px 0 rgba(0,0,0,.6), 0 0 40px rgba(255,40,60,.35); letter-spacing: 2px; }
+    .record { text-align: center; font-weight: 900; color: var(--gold); letter-spacing: 2px; margin-top: 6px; min-height: 22px; animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .55; transform: scale(1.04); } }
+    .pause-title { text-align: center; font-size: 40px; font-weight: 900; letter-spacing: 6px; margin: 0 0 6px; }
+    .center-muted { text-align: center; color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+
+    #loader { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 16px; align-items: center; justify-content: center; z-index: 50; background: var(--bg); transition: opacity .4s; }
+    #loader.hide { opacity: 0; pointer-events: none; }
+    .spinner { width: 46px; height: 46px; border-radius: 50%; border: 4px solid rgba(127,214,90,.2); border-top-color: #7fd65a; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #touch-ui { position: fixed; right: 18px; bottom: 26px; z-index: 5; display: none; gap: 14px; align-items: flex-end; }
+    body.touch.playing #touch-ui { display: flex; }
+    .tbtn { width: 74px; height: 74px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(20,24,40,.55); color: #fff; font-weight: 900; font-size: 13px; backdrop-filter: blur(4px); display: grid; place-items: center; }
+    .tbtn.ult { width: 62px; height: 62px; margin-bottom: 70px; border-color: rgba(255,211,106,.5); }
+    .tbtn:active { transform: scale(.92); background: rgba(80,100,160,.6); }
+    #pause-btn { position: fixed; top: 52px; left: 16px; z-index: 5; display: none; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: rgba(14,17,28,.6); color: #fff; font-weight: 900; }
+    body.touch.playing #pause-btn { display: block; }
+    .footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; opacity: .7; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="loader"><div class="spinner"></div><div style="color:#94a0bd;font-weight:600">Raising the dead…</div></div>
+
+  <!-- TITLE -->
+  <div id="menu" class="overlay">
+    <div class="card">
+      <h1 class="title">Undead Horizon</h1>
+      <p class="tagline">The horde is endless. How many waves can you survive?</p>
+      <div class="grid">
+        <div>
+          <label class="field" for="name">Survivor name</label>
+          <input id="name" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off" spellcheck="false" />
+          <button id="play" class="btn play-big">▶ PLAY</button>
+          <div class="controls" id="controls-help">
+            <span><span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span></span><b>Move</b>
+            <span><span class="kbd">Mouse</span></span><b>Aim (fires automatically)</b>
+            <span><span class="kbd">Space</span></span><b>Dash (invulnerable)</b>
+            <span><span class="kbd">Q</span> / <span class="kbd">RMB</span></span><b>Ultimate nuke when charged</b>
+            <span><span class="kbd">F</span></span><b>Toggle auto-aim</b>
+            <span><span class="kbd">Esc</span></span><b>Pause</b>
+          </div>
+          <div class="settings">
+            <div class="setting"><span class="lbl">Sound</span><input id="vol" type="range" min="0" max="1" step="0.05" /></div>
+            <div class="setting"><span class="lbl">Music</span><input id="music" type="range" min="0" max="1" step="0.05" /></div>
+            <label class="toggle"><input id="autoaim" type="checkbox" /> Auto-aim (aims at nearest zombie)</label>
+          </div>
+        </div>
+        <div>
+          <h2>🏆 Leaderboard</h2>
+          <div id="lb-menu"></div>
+        </div>
+      </div>
+      <div class="footer">Written in Rust, compiled to WebAssembly. Every sound is synthesized live.</div>
+    </div>
+  </div>
+
+  <!-- PAUSE -->
+  <div id="pause" class="overlay">
+    <div class="card narrow">
+      <p class="pause-title">PAUSED</p>
+      <p class="center-muted">Take a breath. They're still out there.</p>
+      <button id="resume" class="btn">▶ RESUME</button>
+      <div class="settings">
+        <div class="setting"><span class="lbl">Sound</span><input id="vol2" type="range" min="0" max="1" step="0.05" /></div>
+        <div class="setting"><span class="lbl">Music</span><input id="music2" type="range" min="0" max="1" step="0.05" /></div>
+        <label class="toggle"><input id="autoaim2" type="checkbox" /> Auto-aim</label>
+      </div>
+      <div class="row"><button id="quit" class="btn secondary">Quit to menu</button></div>
+    </div>
+  </div>
+
+  <!-- GAME OVER -->
+  <div id="gameover" class="overlay">
+    <div class="card">
+      <h1 class="dead-title">YOU DIED</h1>
+      <div class="record" id="record"></div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-wave">0</div><div class="k">Wave reached</div></div>
+        <div class="stat"><div class="v" id="s-level">0</div><div class="k">Level</div></div>
+        <div class="stat"><div class="v" id="s-kills">0</div><div class="k">Kills</div></div>
+        <div class="stat"><div class="v" id="s-time">0:00</div><div class="k">Survived</div></div>
+      </div>
+      <h2 style="margin-top:18px">🏆 Leaderboard</h2>
+      <div id="lb-over"></div>
+      <div class="row">
+        <button id="again" class="btn">↻ PLAY AGAIN</button>
+        <button id="tomenu" class="btn secondary">Main menu</button>
+      </div>
+      <div class="footer"><span class="kbd">Enter</span> to play again</div>
+    </div>
+  </div>
+
+  <button id="pause-btn" aria-label="Pause">II</button>
+  <div id="touch-ui">
+    <button class="tbtn ult" id="t-ult">☢️</button>
+    <button class="tbtn" id="t-dash">DASH</button>
+  </div>
+
+  <script>
+  (() => {
+    const $ = (id) => document.getElementById(id);
+    const LB_KEY = 'undeadHorizon.leaderboard.v1';
+    const SET_KEY = 'undeadHorizon.settings.v1';
+    const store = {
+      get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+      set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+    };
+
+    // ---- bridge to Rust
+    const queue = [];
+    window.uhPoll = () => (queue.length ? queue.shift() : undefined);
+    const send = (cmd) => queue.push(cmd);
+
+    let state = 'loading';
+    let lastRunId = null;
+    const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+    if (isTouch) {
+      document.body.classList.add('touch');
+      $('controls-help').innerHTML = '<span>👈 Left side</span><b>Drag to move</b><span>👉 Right side</span><b>Tap to dash</b><span>☢️</span><b>Ultimate when charged</b><span>🎯</span><b>Aiming &amp; firing are automatic</b>';
+    }
+
+    // ---- settings
+    const settings = Object.assign({ vol: 0.7, music: 0.5, autoaim: false, name: '' }, store.get(SET_KEY, {}));
+    function applySettings() {
+      for (const id of ['vol', 'vol2']) $(id).value = settings.vol;
+      for (const id of ['music', 'music2']) $(id).value = settings.music;
+      for (const id of ['autoaim', 'autoaim2']) $(id).checked = settings.autoaim;
+      send('vol|' + settings.vol);
+      send('music|' + settings.music);
+      send('autoaim|' + (settings.autoaim ? 1 : 0));
+      store.set(SET_KEY, settings);
+    }
+    for (const id of ['vol', 'vol2']) $(id).addEventListener('input', (e) => { settings.vol = +e.target.value; applySettings(); });
+    for (const id of ['music', 'music2']) $(id).addEventListener('input', (e) => { settings.music = +e.target.value; applySettings(); });
+    for (const id of ['autoaim', 'autoaim2']) $(id).addEventListener('change', (e) => { settings.autoaim = e.target.checked; applySettings(); });
+    $('name').value = settings.name || '';
+
+    // ---- leaderboard (best wave reached, then level, then kills)
+    const loadLB = () => store.get(LB_KEY, []);
+    const cmp = (a, b) => b.wave - a.wave || b.level - a.level || b.kills - a.kills || a.time - b.time;
+    function addScore(s) {
+      const lb = loadLB();
+      const entry = { ...s, id: Date.now() + Math.random(), date: new Date().toISOString() };
+      lb.push(entry);
+      lb.sort(cmp);
+      store.set(LB_KEY, lb.slice(0, 50));
+      return { entry, rank: lb.indexOf(entry) + 1 };
+    }
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    function renderLB(el, highlightId) {
+      const lb = loadLB().slice(0, 10);
+      if (!lb.length) { el.innerHTML = '<div class="empty">No runs yet. Be the first legend.</div>'; return; }
+      el.innerHTML = '<table class="lb"><thead><tr><th>#</th><th>Name</th><th>Wave</th><th>Lv</th><th>Kills</th><th>Time</th></tr></thead><tbody>' +
+        lb.map((e, i) => `<tr class="${e.id === highlightId ? 'me' : ''}"><td class="rank">${i + 1}</td><td class="name">${esc(e.name)}</td><td class="wave">${e.wave}</td><td>${e.level}</td><td>${e.kills}</td><td>${fmtTime(e.time)}</td></tr>`).join('') +
+        '</tbody></table>';
+    }
+    const personalBest = (name) => loadLB().filter((e) => e.name === name).reduce((m, e) => Math.max(m, e.wave), 0);
+
+    // ---- screens
+    function show(id) {
+      for (const o of ['menu', 'pause', 'gameover']) $(o).classList.toggle('show', o === id);
+      document.body.classList.toggle('playing', id === null);
+    }
+    function toMenu() { state = 'menu'; renderLB($('lb-menu')); show('menu'); setTimeout(() => !isTouch && $('name').focus(), 50); }
+    function start() {
+      const name = ($('name').value || '').trim() || 'Survivor';
+      settings.name = name; store.set(SET_KEY, settings);
+      state = 'playing';
+      show(null);
+      $('name').blur();
+      send(`start|${name.replace(/\|/g, '')}|${personalBest(name)}`);
+      applySettings();
+    }
+
+    $('play').addEventListener('click', start);
+    $('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
+    $('resume').addEventListener('click', () => send('resume'));
+    $('quit').addEventListener('click', () => { send('menu'); toMenu(); });
+    $('again').addEventListener('click', start);
+    $('tomenu').addEventListener('click', () => { send('menu'); toMenu(); });
+    $('pause-btn').addEventListener('click', () => send('pause'));
+    const tap = (id, cmd) => $(id).addEventListener('touchstart', (e) => { e.preventDefault(); send(cmd); }, { passive: false });
+    tap('t-dash', 'dash'); tap('t-ult', 'ult');
+    if (isTouch) send('touch|1');
+
+    window.addEventListener('keydown', (e) => {
+      if (state === 'menu' && e.key === 'Enter' && document.activeElement !== $('name')) start();
+      else if (state === 'gameover' && e.key === 'Enter') start();
+    });
+
+    // ---- events from Rust
+    window.uhEvent = (kind, data) => {
+      switch (kind) {
+        case 'ready':
+          $('loader').classList.add('hide');
+          applySettings();
+          toMenu();
+          break;
+        case 'pause': state = 'paused'; applySettings(); show('pause'); break;
+        case 'resume': state = 'playing'; show(null); break;
+        case 'autoaim': settings.autoaim = data === '1'; applySettings(); break;
+        case 'gameover': {
+          const s = JSON.parse(data);
+          const prevBest = personalBest(s.name);
+          const top = loadLB()[0];
+          const { entry, rank } = addScore(s);
+          $('s-wave').textContent = s.wave;
+          $('s-level').textContent = s.level;
+          $('s-kills').textContent = s.kills;
+          $('s-time').textContent = fmtTime(s.time);
+          let rec = '';
+          if (!top || cmp(entry, top) < 0) rec = '👑 NEW WORLD RECORD! 👑';
+          else if (s.wave > prevBest) rec = '★ NEW PERSONAL BEST ★';
+          else if (rank <= 10) rec = `Ranked #${rank} on the leaderboard`;
+          $('record').textContent = rec;
+          renderLB($('lb-over'), entry.id);
+          state = 'gameover';
+          show('gameover');
+          break;
+        }
+      }
+    };
+  })();
+  </script>
+</body>
+</html>
