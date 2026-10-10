@@ -28,6 +28,11 @@ fn path_circle(c: &Ctx, x: f32, y: f32, r: f32) {
     let _ = c.arc(d(x), d(y), d(r.max(0.1)), 0.0, TAU64);
 }
 
+fn path_circle_stroke(c: &Ctx, x: f32, y: f32, r: f32) {
+    c.move_to(d(x + r), d(y));
+    let _ = c.arc(d(x), d(y), d(r.max(0.1)), 0.0, TAU64);
+}
+
 fn round_rect(c: &Ctx, x: f32, y: f32, w: f32, h: f32, r: f32) {
     let r = r.min(w * 0.5).min(h * 0.5);
     c.begin_path();
@@ -177,6 +182,7 @@ impl Game {
         if !matches!(self.phase, Phase::Menu) {
             self.draw_offscreen(c, w, h, a, t);
             self.draw_hud(c, w, h, t);
+            self.draw_minimap(c, w, h, a, t);
         }
         if self.phase == Phase::LevelUp {
             self.draw_levelup(c, w, h, t);
@@ -1510,6 +1516,239 @@ impl Game {
             c.set_fill_style_str("#ff5a5a");
             circle(c, m.x, m.y, 1.8);
         }
+    }
+
+    /// Circular radar: terrain, zombies, pickups and the visible area around the
+    /// player, plus red rim arcs showing which directions hordes are coming from
+    /// (including zombies beyond radar range).
+    fn draw_minimap(&self, c: &Ctx, w: f32, h: f32, a: f32, t: f32) {
+        if !self.show_minimap
+            || !matches!(self.phase, Phase::Playing | Phase::LevelUp | Phase::Paused)
+        {
+            return;
+        }
+        let small = w < 640.0;
+        let r = if small { 52.0 } else { 76.0 };
+        // touch: top-right under the wave info (bottom-right holds the touch buttons)
+        let (cx, cy) = if self.input.is_touch {
+            (w - r - 16.0, 140.0 + r)
+        } else {
+            (w - r - 20.0, h - r - 30.0)
+        };
+        let centre = v2(cx, cy);
+        let range = self.spawn_r * 1.5;
+        let k = r / range;
+        let cam = self.cam;
+        let to_map = |p: V2| centre + (p - cam) * k;
+
+        // backdrop
+        c.set_global_alpha(1.0);
+        c.set_fill_style_str("rgba(8,12,22,0.78)");
+        circle(c, cx, cy, r + 3.0);
+
+        c.save();
+        c.begin_path();
+        let _ = c.arc(d(cx), d(cy), d(r), 0.0, TAU64);
+        c.clip();
+
+        // range rings
+        c.set_stroke_style_str("rgba(150,170,220,0.12)");
+        c.set_line_width(1.0);
+        c.begin_path();
+        path_circle_stroke(c, cx, cy, r * 0.33);
+        path_circle_stroke(c, cx, cy, r * 0.66);
+        c.move_to(d(cx - r), d(cy));
+        c.line_to(d(cx + r), d(cy));
+        c.move_to(d(cx), d(cy - r));
+        c.line_to(d(cx), d(cy + r));
+        c.stroke();
+
+        // terrain
+        let ext = v2(range, range);
+        let mut trees = Vec::new();
+        let mut rocks = Vec::new();
+        world::for_obstacles_in(cam - ext, cam + ext, |o| {
+            if o.kind == ObKind::Tree {
+                trees.push(*o)
+            } else {
+                rocks.push(*o)
+            }
+        });
+        c.set_fill_style_str("#2f5a2c");
+        c.begin_path();
+        for o in trees.iter() {
+            let m = to_map(o.pos);
+            path_circle(c, m.x, m.y, (o.r * 2.0 * k).max(1.6));
+        }
+        c.fill();
+        c.set_fill_style_str("#555a66");
+        c.begin_path();
+        for o in rocks.iter() {
+            let m = to_map(o.pos);
+            path_circle(c, m.x, m.y, (o.r * k).max(1.1));
+        }
+        c.fill();
+
+        // visible screen area
+        let half = self.screen * (0.5 / self.zoom.max(0.01));
+        let tl = to_map(cam - half);
+        c.set_stroke_style_str("rgba(255,255,255,0.28)");
+        c.set_line_width(1.0);
+        c.stroke_rect(d(tl.x), d(tl.y), d(half.x * 2.0 * k), d(half.y * 2.0 * k));
+
+        // starting point
+        let home = to_map(V2::ZERO);
+        if home.dist(centre) < r - 4.0 {
+            c.set_fill_style_str("#7ad7ff");
+            c.begin_path();
+            c.move_to(d(home.x), d(home.y - 4.0));
+            c.line_to(d(home.x + 4.0), d(home.y));
+            c.line_to(d(home.x), d(home.y + 4.0));
+            c.line_to(d(home.x - 4.0), d(home.y));
+            c.close_path();
+            c.fill();
+        }
+
+        // pickups
+        for p in self.pickups.iter() {
+            let col = match p.kind {
+                PickKind::Heart => "#ff5c7a",
+                PickKind::Vacuum => "#b48cff",
+                PickKind::Frenzy => "#ffd84a",
+            };
+            c.set_fill_style_str(col);
+            let m = to_map(p.pos);
+            circle(c, m.x, m.y, 2.6);
+        }
+
+        // zombies, batched by colour
+        for (col, kinds, size) in [
+            ("#ff4a3a", [ZKind::Walker, ZKind::Runner], 1.7f32),
+            ("#ff9a3a", [ZKind::Exploder, ZKind::Exploder], 2.0),
+            ("#9be04a", [ZKind::Spitter, ZKind::Spitter], 2.0),
+            ("#ff6a5a", [ZKind::Brute, ZKind::Brute], 2.8),
+        ] {
+            c.set_fill_style_str(col);
+            c.begin_path();
+            for z in self.zombies.iter() {
+                if kinds.contains(&z.kind) {
+                    let m = to_map(z.prev.lerp(z.pos, a));
+                    path_circle(c, m.x, m.y, size);
+                }
+            }
+            c.fill();
+        }
+        c.restore();
+
+        // threat arcs: which directions zombies are coming from (off-screen ones)
+        const SECTORS: usize = 24;
+        let mut threat = [0f32; SECTORS];
+        let mut boss_dir = None;
+        for z in self.zombies.iter() {
+            let d0 = z.pos - cam;
+            let off_screen = d0.x.abs() > half.x || d0.y.abs() > half.y;
+            if z.kind == ZKind::Boss {
+                boss_dir = Some(d0);
+            }
+            if !off_screen {
+                continue;
+            }
+            let ang = d0.angle().rem_euclid(TAU);
+            let s = ((ang / TAU) * SECTORS as f32) as usize % SECTORS;
+            let wgt = match z.kind {
+                ZKind::Boss => 8.0,
+                ZKind::Brute => 2.0,
+                _ => 1.0,
+            };
+            threat[s] += wgt;
+        }
+        c.set_stroke_style_str("#ff3b3b");
+        c.set_line_cap("butt");
+        let seg = TAU / SECTORS as f32;
+        for (i, v) in threat.iter().enumerate() {
+            if *v <= 0.0 {
+                continue;
+            }
+            let intensity = (v / 10.0).min(1.0);
+            c.set_global_alpha(d(0.3 + 0.6 * intensity));
+            c.set_line_width(d(2.5 + 3.5 * intensity));
+            c.begin_path();
+            let a0 = i as f32 * seg + 0.03;
+            let _ = c.arc(d(cx), d(cy), d(r + 1.5), d(a0), d(a0 + seg - 0.06));
+            c.stroke();
+        }
+        c.set_global_alpha(1.0);
+
+        // rim
+        c.set_stroke_style_str("rgba(160,180,255,0.4)");
+        c.set_line_width(1.5);
+        c.begin_path();
+        let _ = c.arc(d(cx), d(cy), d(r + 3.0), 0.0, TAU64);
+        c.stroke();
+
+        // boss: pulsing marker, pinned to the rim when out of range
+        if let Some(bd) = boss_dir {
+            let mut m = bd * k;
+            if m.len() > r - 5.0 {
+                m = m.norm() * (r - 5.0);
+            }
+            let p = centre + m;
+            let pulse = 4.0 + 1.5 * (t * 6.0).sin();
+            c.set_fill_style_str("#ff40ff");
+            circle(c, p.x, p.y, pulse);
+            c.set_stroke_style_str("#ffffff");
+            c.set_line_width(1.0);
+            c.begin_path();
+            let _ = c.arc(d(p.x), d(p.y), d(pulse + 1.5), 0.0, TAU64);
+            c.stroke();
+        }
+
+        // player arrow (points along aim)
+        c.save();
+        let _ = c.translate(d(cx), d(cy));
+        let _ = c.rotate(d(self.player.aim));
+        c.set_fill_style_str("#ffffff");
+        c.set_stroke_style_str("#1e4fa8");
+        c.set_line_width(1.5);
+        c.begin_path();
+        c.move_to(7.0, 0.0);
+        c.line_to(-5.0, -5.0);
+        c.line_to(-2.5, 0.0);
+        c.line_to(-5.0, 5.0);
+        c.close_path();
+        c.stroke();
+        c.fill();
+        c.restore();
+
+        // position readout (1 m = 32 world units)
+        let font = "'Inter','Segoe UI',system-ui,sans-serif";
+        c.set_font(&format!("700 10px {}", font));
+        c.set_text_align("center");
+        c.set_text_baseline("middle");
+        c.set_fill_style_str("#c8d2e8");
+        c.set_stroke_style_str("rgba(0,0,0,0.8)");
+        let ty = if self.input.is_touch {
+            cy + r + 14.0
+        } else {
+            cy - r - 12.0
+        };
+        let dist = cam.len() / 32.0;
+        let label = if self.input.is_touch {
+            format!(
+                "{:.0}, {:.0} · {:.0}m from start",
+                cam.x / 32.0,
+                cam.y / 32.0,
+                dist
+            )
+        } else {
+            format!(
+                "{:.0}, {:.0} · {:.0}m from start · [N]",
+                cam.x / 32.0,
+                cam.y / 32.0,
+                dist
+            )
+        };
+        outlined(c, &label, cx, ty, 3.0);
     }
 
     fn draw_levelup(&self, c: &Ctx, w: f32, h: f32, t: f32) {

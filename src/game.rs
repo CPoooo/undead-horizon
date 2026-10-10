@@ -364,6 +364,7 @@ pub struct Game {
     pub best_wave: u32,
     pub auto_aim: bool,
     pub show_fps: bool,
+    pub show_minimap: bool,
     pub fps: f32,
     pub sep: Vec<V2>,
     pub groan_t: f32,
@@ -445,6 +446,7 @@ impl Game {
             best_wave: 0,
             auto_aim: false,
             show_fps: false,
+            show_minimap: true,
             fps: 60.0,
             sep: Vec::new(),
             groan_t: 3.0,
@@ -826,6 +828,16 @@ impl Game {
                         ));
                     }
                     "Backquote" => self.show_fps = !self.show_fps,
+                    "KeyN" => {
+                        self.show_minimap = !self.show_minimap;
+                        let msg = if self.show_minimap {
+                            "Minimap ON"
+                        } else {
+                            "Minimap OFF"
+                        };
+                        self.toast = Some((msg.into(), 1.0));
+                        self.audio.play(Sfx::UiMove);
+                    }
                     _ => {}
                 },
                 Phase::Paused => {
