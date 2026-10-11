@@ -75,6 +75,36 @@ try {
   await A.waitForFunction(() => window.UHCoop.debug.inGame, null, { timeout: 5000 });
   await B.waitForFunction(() => !window.UHCoop.debug.loading, null, { timeout: 15000 });
   check(!(await B.evaluate(() => window.UHCoop.debug.inGame)), 'client exits the loading screen when the host starts without them');
+
+  // match 3: both sides relay-only, so the link must go through the TURN server
+  // (what a phone on cellular / strict NAT needs)
+  await A.keyboard.press('Escape');
+  await A.waitForSelector('#pause.show', { timeout: 5000 });
+  A.once('dialog', (d) => d.accept());
+  await A.click('#quit');
+  await A.evaluate(() => window.UHUI.toMenu());
+  await A.waitForFunction(() => window.UHCoop.debug.party?.status === 'open', null, { timeout: 15000 });
+  for (const p of [A, B]) {
+    await p.reload();
+    await p.waitForFunction(() => window.UHCoop?.debug?.party?.status === 'open', null, { timeout: 30000 })
+      .catch(async (e) => { console.log('debug', JSON.stringify(await p.evaluate(() => { const d = window.UHCoop?.debug; return d && { party: d.party, me: d.me, inGame: d.inGame }; }))); throw e; });
+    await p.evaluate(() => {
+      const Orig = window.RTCPeerConnection;
+      window.RTCPeerConnection = function (cfg) { return new Orig({ ...cfg, iceTransportPolicy: 'relay' }); };
+    });
+  }
+  await B.waitForSelector('#party-ready', { timeout: 10000 });
+  if (!(await B.evaluate(() => window.UHCoop.debug.party.members.find((m) => m.id === window.UHCoop.debug.me.id).ready))) await B.click('#party-ready');
+  await A.waitForFunction(() => !document.getElementById('party-start')?.disabled, null, { timeout: 10000 });
+  await A.click('#party-start');
+  await Promise.all([A, B].map((p) => p.waitForFunction(() => window.UHCoop.debug.inGame, null, { timeout: 30000 })));
+  const relay = await A.evaluate(async () => {
+    const pc = window.UHCoop.debug.pcs[0];
+    const st = await pc.getStats();
+    let pair; st.forEach((r) => { if (r.type === 'transport' && r.selectedCandidatePairId) pair = st.get(r.selectedCandidatePairId); });
+    return pair ? st.get(pair.localCandidateId)?.candidateType : null;
+  });
+  check(relay === 'relay', `relay-only match connects through TURN (local candidate: ${relay})`);
 } finally {
   console.log(log.length ? 'PAGE ERRORS:\n' + log.slice(0, 20).join('\n') : 'no page errors');
   await browser.close();

@@ -650,7 +650,7 @@
     lookChanged() { if (S.party) wsSend({ t: 'party.look', look: look() }); },
     render,
     /** for tests/debugging */
-    get debug() { return { slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), party: S.party, me: S.me }; },
+    get debug() { return { slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
     inviteLink,
   };
 

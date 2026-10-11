@@ -8,6 +8,11 @@ export default defineConfig({
     api: {
       name: "undead horizon api",
       source: "server/index.ts",
+      // TURN relay for co-op (GET /turn); values live in the gitignored .env.local
+      env: {
+        METERED_APP: process.env.METERED_APP!,
+        METERED_SECRET_KEY: process.env.METERED_SECRET_KEY!,
+      },
     },
   },
 });
