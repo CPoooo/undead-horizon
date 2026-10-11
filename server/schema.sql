@@ -104,3 +104,11 @@ create table if not exists events (
 create index if not exists events_user_idx on events (user_id, id);
 
 alter table runs add column if not exists players integer not null default 1;
+alter table party_members add column if not exists look jsonb not null default '{}';
+alter table parties add column if not exists token text not null default substr(md5(random()::text), 1, 12);
+
+-- Two save slots per player: one Infinite run and one Campaign run.
+alter table saves add column if not exists slot text not null default 'infinite' check (slot in ('infinite','campaign'));
+update saves set slot = coalesce(summary->>'mode', 'infinite') where slot is distinct from coalesce(summary->>'mode', 'infinite');
+alter table saves drop constraint if exists saves_pkey;
+alter table saves add constraint saves_pkey primary key (user_id, slot);

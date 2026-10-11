@@ -77,6 +77,15 @@ pub struct Audio {
     beat: u32,
     pub intensity: f32,
     pub music_on: bool,
+    /// which tune plays: gameplay score or the lobby theme
+    track: Track,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Track {
+    Gameplay,
+    /// "Graveyard Shuffle": swung, spooky-fun lobby theme
+    Lobby,
 }
 
 impl Audio {
@@ -96,7 +105,8 @@ impl Audio {
             next_beat: 0.0,
             beat: 0,
             intensity: 0.0,
-            music_on: false,
+            music_on: true, // lobby theme starts as soon as audio is unlocked
+            track: Track::Lobby,
         }
     }
 
@@ -487,6 +497,163 @@ impl Audio {
     }
 
     /// Lookahead-scheduled procedural soundtrack. `intensity` 0..1 drives tempo/layers.
+    pub fn set_track(&mut self, track: Track) {
+        if self.track != track {
+            self.track = track;
+            self.beat = 0;
+            self.next_beat = self.now() + 0.15;
+        }
+    }
+
+    /// Sine "theremin" voice with vibrato, for the lobby melody.
+    fn theremin(&self, dest: &AudioNode, t: f64, freq: f32, dur: f64, gain: f32) -> Option<()> {
+        let ctx = self.ctx.as_ref()?;
+        let o = ctx.create_oscillator().ok()?;
+        o.set_type(OscillatorType::Sine);
+        // slight upward scoop into the note, theremin style
+        o.frequency().set_value_at_time(freq * 0.94, t).ok()?;
+        o.frequency()
+            .exponential_ramp_to_value_at_time(freq, t + 0.06)
+            .ok()?;
+        let lfo = ctx.create_oscillator().ok()?;
+        lfo.frequency().set_value(5.8);
+        let depth = ctx.create_gain().ok()?;
+        depth.gain().set_value(freq * 0.018);
+        lfo.connect_with_audio_node(&depth).ok()?;
+        depth.connect_with_audio_param(&o.frequency()).ok()?;
+        let g = ctx.create_gain().ok()?;
+        g.gain().set_value_at_time(0.0001, t).ok()?;
+        g.gain()
+            .exponential_ramp_to_value_at_time(gain, t + 0.05)
+            .ok()?;
+        g.gain().set_value_at_time(gain, t + dur * 0.7).ok()?;
+        g.gain()
+            .exponential_ramp_to_value_at_time(0.0001, t + dur)
+            .ok()?;
+        o.connect_with_audio_node(&g).ok()?;
+        g.connect_with_audio_node(dest).ok()?;
+        o.start_with_when(t).ok()?;
+        lfo.start_with_when(t).ok()?;
+        o.stop_with_when(t + dur + 0.05).ok()?;
+        lfo.stop_with_when(t + dur + 0.05).ok()?;
+        Some(())
+    }
+
+    /// Lobby theme: a swung walking bass, organ offbeats, a wobbly theremin
+    /// melody and the occasional zombie moan. 16 steps per bar (16th notes,
+    /// swung), 8-bar loop over i - VI - iv - V in D minor.
+    fn lobby_step(&mut self, bus: &AudioNode, t: f64, sixteenth: f64) -> Option<()> {
+        use BiquadFilterType as F;
+        use OscillatorType as O;
+        let mtof = |m: i32| 440.0 * 2f32.powf((m - 69) as f32 / 12.0);
+        let b = self.beat;
+        let st = b % 16;
+        let bar = (b / 16) % 8;
+        // chord per bar: Dm, Bb, Gm, A  (x2)
+        let chords: [[i32; 4]; 4] = [
+            [38, 41, 45, 41],
+            [34, 38, 41, 38],
+            [31, 34, 38, 34],
+            [33, 37, 40, 37],
+        ];
+        let ch = chords[(bar % 4) as usize];
+        // walking bass on each beat (steps 0, 4, 8, 12)
+        if st % 4 == 0 {
+            let n = ch[(st / 4) as usize];
+            let f = mtof(n);
+            self.tone(bus, O::Triangle, t, f, f, sixteenth * 3.2, 0.32, 0.005)?;
+            self.tone(
+                bus,
+                O::Sawtooth,
+                t,
+                f,
+                f * 0.995,
+                sixteenth * 1.6,
+                0.05,
+                0.005,
+            )?;
+        }
+        // organ stabs on the offbeats ("and" of each beat)
+        if st % 4 == 2 {
+            for (k, n) in [ch[0] + 24, ch[1] + 24, ch[2] + 24].iter().enumerate() {
+                let f = mtof(*n);
+                let det = 1.0 + (k as f32 - 1.0) * 0.004;
+                self.tone(
+                    bus,
+                    O::Square,
+                    t,
+                    f * det,
+                    f * det,
+                    sixteenth * 1.4,
+                    0.022,
+                    0.004,
+                )?;
+            }
+        }
+        // drums: kick 1 & 3, clap 2 & 4, swung hats
+        if st == 0 || st == 8 || (bar % 2 == 1 && st == 14) {
+            self.tone(bus, O::Sine, t, 140.0, 42.0, 0.16, 0.5, 0.003)?;
+        }
+        if st == 4 || st == 12 {
+            self.noise(bus, t, F::Bandpass, 1600.0, 1200.0, 1.2, 0.12, 0.2)?;
+            self.noise(bus, t + 0.012, F::Bandpass, 2100.0, 1500.0, 1.5, 0.08, 0.12)?;
+        }
+        if st % 2 == 0 {
+            let open = st % 8 == 6;
+            self.noise(
+                bus,
+                t,
+                F::Highpass,
+                8000.0,
+                8000.0,
+                0.7,
+                if open { 0.12 } else { 0.035 },
+                0.05,
+            )?;
+        }
+        // theremin melody: (bar, step, midi note, length in 16ths)
+        const MELODY: [(u32, u32, i32, u32); 22] = [
+            (0, 0, 74, 3),
+            (0, 4, 77, 2),
+            (0, 6, 76, 2),
+            (0, 8, 74, 4),
+            (0, 14, 69, 2),
+            (1, 0, 70, 6),
+            (1, 8, 74, 2),
+            (1, 10, 73, 2),
+            (1, 12, 70, 4),
+            (2, 0, 67, 3),
+            (2, 4, 70, 2),
+            (2, 6, 74, 2),
+            (2, 8, 79, 6),
+            (3, 0, 76, 3),
+            (3, 4, 73, 3),
+            (3, 8, 69, 8),
+            (6, 0, 81, 4),
+            (6, 6, 79, 2),
+            (6, 8, 77, 4),
+            (7, 0, 76, 4),
+            (7, 4, 73, 4),
+            (7, 8, 74, 8),
+        ];
+        for (mb, ms, note, len) in MELODY.iter() {
+            if *mb == bar && *ms == st {
+                self.theremin(bus, t, mtof(*note), sixteenth * *len as f64 * 1.05, 0.075)?;
+            }
+        }
+        // bars 4-5: call-and-response "boo-wah" low organ instead of melody
+        if (bar == 4 || bar == 5) && (st == 0 || st == 6) {
+            let f = mtof(ch[0] + 12);
+            self.tone(bus, O::Square, t, f * 1.06, f, sixteenth * 4.0, 0.035, 0.03)?;
+        }
+        // zombie moan pickup at the end of the loop
+        if bar == 7 && st == 12 {
+            self.tone(bus, O::Sawtooth, t, 110.0, 70.0, 0.8, 0.06, 0.15)?;
+            self.noise(bus, t, F::Bandpass, 520.0, 300.0, 9.0, 0.8, 0.07)?;
+        }
+        Some(())
+    }
+
     pub fn update_music(&mut self) -> Option<()> {
         if !self.music_on {
             return Some(());
@@ -499,6 +666,18 @@ impl Audio {
         let bus: AudioNode = self.music_bus.as_ref()?.clone().into();
         if self.next_beat < now {
             self.next_beat = now + 0.05;
+        }
+        if self.track == Track::Lobby {
+            let sixteenth = 60.0 / 116.0 / 4.0;
+            while self.next_beat < now + 0.2 {
+                let t = self.next_beat;
+                self.lobby_step(&bus, t, sixteenth)?;
+                // swing: long-short pairs of 16ths
+                let swing = if self.beat % 2 == 0 { 1.24 } else { 0.76 };
+                self.next_beat += sixteenth * swing;
+                self.beat = self.beat.wrapping_add(1);
+            }
+            return Some(());
         }
         let bpm = 92.0 + self.intensity as f64 * 40.0;
         let step = 60.0 / bpm / 2.0; // eighth notes

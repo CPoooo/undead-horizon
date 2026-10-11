@@ -7,21 +7,15 @@
 //           POST /me/name                change display name
 //           POST /shop/buy               { cat, id }   server-checked price + ownership
 //           POST /equip                  { cat, id }   must own it
-//           PUT  /save                   { data, summary }
-//           POST /save/consume           returns the save and deletes it (resume once)
+//           PUT  /save                   { data, summary }  slot = summary.mode (infinite|campaign)
+//           POST /save/consume           { slot } returns that save and deletes it (resume once)
+//           DELETE /save?slot=           discard a slot (a new run of that mode overwrites it)
 //           POST /runs                   finished/abandoned run -> coins, progress, leaderboard
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { Pool } from "pg";
-import { createRemoteJWKSet, jwtVerify } from "jose";
-import { attachDatabasePool } from "@neon/functions";
-import { PRICES, CHAPTERS, DIFF_COINS, DIFFS, CATEGORIES, waveCoins } from "./catalog";
-
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
-attachDatabasePool(pool);
-
-const jwks = createRemoteJWKSet(new URL(process.env.NEON_AUTH_JWKS_URL!));
-const issuer = new URL(process.env.NEON_AUTH_BASE_URL!).origin;
+import { PRICES, CHAPTERS, DIFFS, CATEGORIES, waveCoins } from "./catalog";
+import { pool, verifyToken, cleanName, ensureProfile } from "./shared";
+import { social } from "./social";
 
 type Env = { Variables: { userId: string } };
 const app = new Hono<Env>();
@@ -32,6 +26,9 @@ const ALLOWED_ORIGINS = [
   "http://127.0.0.1:8080",
   "http://localhost:8765",
 ];
+// WebSocket route first: CORS middleware must not wrap the 101 upgrade.
+app.route("/", social);
+
 app.use(
   "*",
   cors({
@@ -56,7 +53,7 @@ app.get("/leaderboard", async (c) => {
   // Best infinite run per player, then ranked.
   const { rows } = await pool.query(
     `select * from (
-       select distinct on (user_id) id, user_id, name, wave, level, kills, time, diff, gun, created_at
+       select distinct on (user_id) id, user_id, name, wave, level, kills, time, diff, gun, players, created_at
        from runs
        where mode = 'infinite' and not abandoned and ($1::text is null or diff = $1)
        order by user_id, wave desc, level desc, kills desc, time asc
@@ -76,6 +73,7 @@ app.get("/leaderboard", async (c) => {
       time: r.time,
       diff: r.diff,
       gun: r.gun,
+      players: r.players,
       date: r.created_at,
     })),
   );
@@ -92,41 +90,17 @@ app.use("/runs", auth);
 
 async function auth(c: any, next: () => Promise<void>) {
   const h = c.req.header("authorization");
-  if (!h?.toLowerCase().startsWith("bearer ")) return c.json({ error: "unauthorized" }, 401);
-  try {
-    const { payload } = await jwtVerify(h.slice(7), jwks, { issuer });
-    if (!payload.sub) return c.json({ error: "unauthorized" }, 401);
-    c.set("userId", payload.sub);
-  } catch {
-    return c.json({ error: "unauthorized" }, 401);
-  }
+  const uid = h?.toLowerCase().startsWith("bearer ") ? await verifyToken(h.slice(7)) : null;
+  if (!uid) return c.json({ error: "unauthorized" }, 401);
+  c.set("userId", uid);
   await next();
-}
-
-const cleanName = (s: unknown) =>
-  String(s ?? "")
-    .replace(/[^\p{L}\p{N} _.\-]/gu, "")
-    .trim()
-    .slice(0, 16);
-
-async function ensureProfile(userId: string) {
-  const existing = await pool.query("select * from profiles where user_id = $1", [userId]);
-  if (existing.rows[0]) return existing.rows[0];
-  const u = await pool.query(`select name, email from neon_auth."user" where id = $1`, [userId]);
-  const base = u.rows[0]?.name || String(u.rows[0]?.email || "Survivor").split("@")[0];
-  const name = cleanName(base) || "Survivor";
-  const { rows } = await pool.query(
-    `insert into profiles (user_id, display_name) values ($1, $2)
-     on conflict (user_id) do update set user_id = excluded.user_id
-     returning *`,
-    [userId, name],
-  );
-  return rows[0];
 }
 
 async function profileJson(userId: string) {
   const p = await ensureProfile(userId);
-  const s = await pool.query("select summary from saves where user_id = $1", [userId]);
+  const s = await pool.query("select slot, summary from saves where user_id = $1", [userId]);
+  const saves: Record<string, unknown> = { infinite: null, campaign: null };
+  for (const r of s.rows) saves[r.slot] = { summary: r.summary };
   return {
     name: p.display_name,
     coins: p.coins,
@@ -135,7 +109,8 @@ async function profileJson(userId: string) {
     campaign: p.campaign,
     stats: p.stats,
     imported: p.imported,
-    save: s.rows[0] ? { summary: s.rows[0].summary } : null,
+    friendCode: p.friend_code,
+    saves,
   };
 }
 
@@ -227,21 +202,27 @@ app.put("/save", async (c) => {
     date: Date.now(),
   };
   await pool.query(
-    `insert into saves (user_id, data, summary) values ($1, $2, $3)
-     on conflict (user_id) do update set data = excluded.data, summary = excluded.summary, created_at = now()`,
-    [uid, data, sum],
+    `insert into saves (user_id, slot, data, summary) values ($1, $2, $3, $4)
+     on conflict (user_id, slot) do update set data = excluded.data, summary = excluded.summary, created_at = now()`,
+    [uid, sum.mode, data, sum],
   );
   return c.json({ ok: true, summary: sum });
 });
 
+const slotOf = (v: unknown) => (v === "campaign" ? "campaign" : "infinite");
+
 app.post("/save/consume", async (c) => {
-  const { rows } = await pool.query("delete from saves where user_id = $1 returning data, summary", [c.get("userId")]);
+  const body = await c.req.json().catch(() => ({}));
+  const { rows } = await pool.query(
+    "delete from saves where user_id = $1 and slot = $2 returning data, summary",
+    [c.get("userId"), slotOf(body.slot)],
+  );
   if (!rows[0]) return c.json({ error: "no_save" }, 404);
   return c.json(rows[0]);
 });
 
 app.delete("/save", async (c) => {
-  await pool.query("delete from saves where user_id = $1", [c.get("userId")]);
+  await pool.query("delete from saves where user_id = $1 and slot = $2", [c.get("userId"), slotOf(c.req.query("slot"))]);
   return c.json({ ok: true });
 });
 
@@ -260,6 +241,7 @@ app.post("/runs", async (c) => {
   const victory = mode === "campaign" && !!r.victory && wave >= CHAPTERS[chapter].waves;
   const abandoned = !!r.abandoned;
   const gun = String(r.gun || "pistol").slice(0, 20);
+  const players = Math.max(1, Math.min(3, Math.floor(Number(r.players) || 1)));
 
   const p = await ensureProfile(uid);
   // Coins are capped by what the reported progress could plausibly have earned.
@@ -271,9 +253,9 @@ app.post("/runs", async (c) => {
   try {
     await client.query("begin");
     const ins = await client.query(
-      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
-      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned],
+      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
+      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players],
     );
     const campaign = p.campaign as { unlocked: number; cleared: number[] };
     if (victory) {

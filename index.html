@@ -58,9 +58,9 @@
         </div>
         <div class="hint" id="diff-hint"></div>
 
-        <button id="play" class="btn play-big">▶ PLAY</button>
-        <button id="continue" class="btn blue" style="display:none;margin-top:12px">⏯ Continue saved run</button>
-        <div class="hint" id="continue-hint" style="text-align:center"></div>
+        <span class="tip-wrap"><button id="play" class="btn play-big">▶ PLAY</button><span class="tip" id="play-tip" role="tooltip"></span></span>
+        <div class="hint" id="play-warn" style="text-align:center;color:#ffb070"></div>
+        <div id="continues"></div>
       </div>
 
       <!-- centre: character showcase (rendered by the game) -->
@@ -163,9 +163,9 @@
         </div>
         <div class="btncol" style="align-content:start">
           <button id="resume" class="btn">▶ Resume</button>
-          <button id="save" class="btn blue">💾 Save game</button>
+          <span class="tip-wrap"><button id="save" class="btn blue">💾 Save game</button><span class="tip" id="save-tip" role="tooltip"></span></span>
           <button id="save-quit" class="btn secondary">Save &amp; quit to menu</button>
-          <button id="quit" class="btn danger">Abandon run</button>
+          <span class="tip-wrap"><button id="quit" class="btn danger">Abandon run</button><span class="tip" role="tooltip">🪙 Your coins are kept, even if you're taking the coward's way out. The zombies will tell stories about this.</span></span>
           <div class="hint" id="save-hint">Saved runs resume from the start of the current wave.</div>
           <h2 style="margin-top:12px">Settings</h2>
           <div class="settings">

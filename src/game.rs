@@ -1,4 +1,4 @@
-use crate::audio::{Audio, Sfx};
+use crate::audio::{Audio, Sfx, Track};
 use crate::content::{self, BossVar, CHAPTERS, DIFFICULTIES, GUNS};
 use crate::math::*;
 use crate::upgrades::{Levels, Up};
@@ -556,6 +556,7 @@ impl Game {
     pub fn start(&mut self, opts: &str) {
         self.audio.unlock();
         self.audio.music_on = true;
+        self.audio.set_track(Track::Gameplay);
         self.best_wave = 0;
         self.apply_opts(opts);
         self.player = Game::fresh_player();
@@ -1042,13 +1043,14 @@ impl Game {
     }
     pub fn to_menu(&mut self) {
         self.phase = Phase::Menu;
+        self.audio.set_track(Track::Lobby);
+        self.audio.music_on = true;
         self.player = Game::fresh_player();
         self.ups = Levels::default();
         self.victory_t = -1.0;
         self.texts.clear();
         self.particles.clear();
         self.rings.clear();
-        self.audio.music_on = false;
         self.zombies.clear();
         self.bullets.clear();
         self.gems.clear();

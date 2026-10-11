@@ -115,7 +115,7 @@
     owned: ['gun:pistol', 'perk:none', 'skin:default', 'hat:none', 'tracer:default'],
     equipped: { gun: 'pistol', perk: 'none', skin: 'default', hat: 'none', tracer: 'default' },
     campaign: { unlocked: 0, cleared: [] },
-    save: null,
+    saves: { infinite: null, campaign: null },
     stats: { runs: 0, kills: 0, bestWave: 0 },
   });
   const normalizeProfile = (p) => {
@@ -124,6 +124,12 @@
     p.equipped = Object.assign(freshProfile().equipped, p.equipped || {});
     p.campaign = Object.assign({ unlocked: 0, cleared: [] }, p.campaign || {});
     p.stats = Object.assign({ runs: 0, kills: 0, bestWave: 0 }, p.stats || {});
+    // older builds had a single save slot
+    p.saves = Object.assign({ infinite: null, campaign: null }, p.saves || {});
+    if (p.save) {
+      p.saves[p.save.summary?.mode === 'campaign' ? 'campaign' : 'infinite'] = p.save;
+      delete p.save;
+    }
     for (const o of freshProfile().owned) if (!p.owned.includes(o)) p.owned.push(o);
     return p;
   };
@@ -216,26 +222,35 @@
       this.persistLocal();
       return { coins: s.coins, rank, id };
     },
+    /** Each mode has its own slot; saving overwrites that slot only. */
     async putSave(data, summary) {
+      const slot = summary.mode === 'campaign' ? 'campaign' : 'infinite';
       if (this.cloud) {
         const r = await this.cloud.api('/save', { method: 'PUT', body: { data, summary } });
-        this.profile.save = { summary: r.summary };
+        this.profile.saves[slot] = { summary: r.summary };
         return;
       }
-      this.profile.save = { data, summary };
+      this.profile.saves[slot] = { data, summary };
       this.persistLocal();
     },
-    /** Returns the save string and removes it (a save resumes once). */
-    async takeSave() {
+    /** Returns a slot's save string and removes it (a save resumes once). */
+    async takeSave(slot) {
       if (this.cloud) {
-        const r = await this.cloud.api('/save/consume', { method: 'POST' });
-        this.profile.save = null;
+        const r = await this.cloud.api('/save/consume', { method: 'POST', body: { slot } });
+        this.profile.saves[slot] = null;
         return r.data;
       }
-      const d = this.profile.save?.data;
-      this.profile.save = null;
+      const d = this.profile.saves[slot]?.data;
+      this.profile.saves[slot] = null;
       this.persistLocal();
       return d;
+    },
+    /** Starting a new run of a mode overwrites that mode's save. */
+    async discardSave(slot) {
+      if (!this.profile.saves[slot]) return;
+      if (this.cloud) await this.cloud.api('/save?slot=' + slot, { method: 'DELETE' });
+      this.profile.saves[slot] = null;
+      this.persistLocal();
     },
     async leaderboard(filter) {
       if (window.UHCloud) return window.UHCloud.leaderboard(filter);
@@ -313,9 +328,19 @@
           <div class="badge">${locked ? '🔒' : done ? '✅' : ''}</div></div>`;
       }).join('');
     }
-    const sv = Data.profile.save;
-    $('continue').style.display = sv ? '' : 'none';
-    $('continue-hint').textContent = sv ? `${sv.summary.mode === 'campaign' ? 'Chapter ' + (sv.summary.chapter + 1) + ' · ' : ''}Wave ${sv.summary.wave} · Lv ${sv.summary.level} · ${DIFF[sv.summary.diff]?.name || ''} · saved ${new Date(sv.summary.date).toLocaleDateString()}` : '';
+    // saved runs: one slot per mode
+    const saves = Data.profile.saves;
+    const describe = (sv) => `${sv.summary.mode === 'campaign' ? 'Ch ' + (sv.summary.chapter + 1) + ' · ' : ''}Wave ${sv.summary.wave} · Lv ${sv.summary.level} · ${DIFF[sv.summary.diff]?.name || ''} · ${new Date(sv.summary.date).toLocaleDateString()}`;
+    $('continues').innerHTML = ['infinite', 'campaign'].filter((m) => saves[m]).map((m) =>
+      `<button class="btn blue" data-continue="${m}" style="margin-top:12px">⏯ Continue ${m === 'campaign' ? 'Campaign' : 'Infinite'} run</button>
+       <div class="hint" style="text-align:center">${esc(describe(saves[m]))}</div>`).join('');
+    const existing = saves[settings.mode];
+    const sameChapter = existing && (settings.mode !== 'campaign' || existing.summary.chapter === settings.chapter);
+    const warn = existing
+      ? `⚠ Starting a new ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run overwrites your saved ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run (${describe(existing)}).${!sameChapter ? ' It\'s from a different chapter.' : ''}`
+      : '';
+    $('play-tip').textContent = warn || `No saved ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run to overwrite. Have fun!`;
+    $('play-warn').textContent = existing ? 'Overwrites your saved run: hover Play for details' : '';
     saveSettings();
   }
   $('mode-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { settings.mode = b.dataset.mode; renderMode(); send('equip|'); } });
@@ -479,6 +504,8 @@
     settings.name = name; saveSettings();
     $('name').blur();
     if (settings.mode === 'campaign') await showStory(settings.chapter, 'intro', 'Begin ▶');
+    // a new run of this mode overwrites that mode's save (warned in the Play tooltip)
+    await Data.discardSave(settings.mode).catch((e) => console.warn(e));
     const best = settings.mode === 'infinite' ? await personalBest(name) : 0;
     runCtx = { mode: settings.mode, chapter: settings.chapter, diff: settings.diff };
     state = 'playing';
@@ -487,11 +514,11 @@
     pushEquip();
     send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}`);
   }
-  async function continueRun() {
-    const sv = Data.profile.save;
+  async function continueRun(slot) {
+    const sv = Data.profile.saves[slot];
     if (!sv) return;
     let data;
-    try { data = await Data.takeSave(); } catch { toast('Could not load the save.'); renderMode(); return; }
+    try { data = await Data.takeSave(slot); } catch { toast('Could not load the save.'); renderMode(); return; }
     if (!data) { renderMode(); return; }
     runCtx = { mode: sv.summary.mode, chapter: sv.summary.chapter, diff: sv.summary.diff };
     state = 'playing';
@@ -502,7 +529,7 @@
   }
 
   $('play').addEventListener('click', start);
-  $('continue').addEventListener('click', continueRun);
+  $('continues').addEventListener('click', (e) => { const b = e.target.closest('[data-continue]'); if (b) continueRun(b.dataset.continue); });
   $('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
   $('resume').addEventListener('click', () => send('resume'));
   let afterSave = null;
@@ -552,6 +579,12 @@
       `<div class="up"><span>${u.icon}</span><span>${esc(u.name)}</span><span class="pips">${Array.from({ length: u.max }, (_, i) => `<i style="${i < u.lvl ? 'background:' + u.color : ''}"></i>`).join('')}</span></div>`).join('')
       : '<div class="empty" style="padding:8px">No powers yet. Level up to pick some.</div>';
     $('save-hint').textContent = 'Saved runs resume from the start of the current wave.';
+    const slot = r.mode === 'campaign' ? 'campaign' : 'infinite';
+    const label = slot === 'campaign' ? 'Campaign' : 'Infinite';
+    const prev = Data.profile.saves[slot];
+    $('save-tip').textContent = prev
+      ? `⚠ Overwrites your saved ${label} run (Wave ${prev.summary.wave}, Lv ${prev.summary.level}). Your ${slot === 'campaign' ? 'Infinite' : 'Campaign'} save is untouched.`
+      : `Saves to your ${label} slot. Your ${slot === 'campaign' ? 'Infinite' : 'Campaign'} save is untouched.`;
   }
 
   // ------------------------------------------------------------------ events from Rust
