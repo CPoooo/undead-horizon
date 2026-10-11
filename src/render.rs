@@ -952,6 +952,21 @@ impl Game {
             (def.cloth[((z.tint * n as f32) as usize).min(n - 1)], def.skin, def.dark)
         };
 
+        // elite aura under the body
+        let elite = z.affix != crate::elites::Affix::None;
+        if elite {
+            let (_, _, col) = z.affix.def();
+            let pulse = 0.5 + 0.5 * (t * 4.0 + z.tint * 6.0).sin();
+            let _ = c.set_global_composite_operation("lighter");
+            c.set_global_alpha(d(0.25 + 0.2 * pulse));
+            c.set_fill_style_str(col);
+            c.begin_path();
+            let _ = c.ellipse(d(p.x), d(p.y + r * 0.3), d(r * 1.5), d(r * 0.8), 0.0, 0.0, TAU64);
+            c.fill();
+            c.set_global_alpha(1.0);
+            let _ = c.set_global_composite_operation("source-over");
+        }
+
         // arms reaching toward the player
         let arm_w = r * 0.42;
         c.set_stroke_style_str(skin);
@@ -1109,7 +1124,32 @@ impl Game {
             circle(c, head.x, head.y, hr);
             c.set_global_alpha(1.0);
         }
-        if z.hp < z.max_hp && def.hp_bar {
+        if elite {
+            let (name, icon, col) = z.affix.def();
+            if z.shield > 0.0 {
+                c.set_global_alpha(0.35);
+                c.set_stroke_style_str("#9fdcff");
+                c.set_line_width(3.0);
+                c.begin_path();
+                let _ = c.arc(d(body.x), d(body.y - r * 0.1), d(r * 1.35), 0.0, TAU64);
+                c.stroke();
+                c.set_global_alpha(0.12);
+                c.set_fill_style_str("#6cc8ff");
+                circle(c, body.x, body.y - r * 0.1, r * 1.35);
+                c.set_global_alpha(1.0);
+            }
+            if z.kind != ZKind::Boss {
+                c.set_text_align("center");
+                c.set_text_baseline("middle");
+                c.set_font("700 9px 'Inter','Segoe UI',system-ui,sans-serif");
+                c.set_fill_style_str(col);
+                c.set_stroke_style_str("rgba(0,0,0,0.85)");
+                outlined(c, &format!("{} {}", name, def.name), p.x, p.y - r * 2.0 - 12.0, 2.5);
+                c.set_font("12px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif");
+                text(c, icon, p.x, p.y - r * 2.0 - 25.0);
+            }
+        }
+        if z.hp < z.max_hp && (def.hp_bar || elite) {
             let bw = r * 2.0;
             let k = (z.hp / z.max_hp).max(0.0);
             c.set_fill_style_str("rgba(0,0,0,0.6)");

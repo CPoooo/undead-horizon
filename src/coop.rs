@@ -691,6 +691,7 @@ impl Game {
             fl |= (z.state.min(3)) << 2;
             fl |= z.st.bits();
             w.u8(fl);
+            w.u8(z.affix as u8 | if z.shield > 0.0 { 0x80 } else { 0 });
             w.angle(z.charge_dir.angle());
             let aux = match z.kind {
                 ZKind::Exploder => z.fuse.max(0.0) * 200.0,
@@ -755,6 +756,7 @@ impl Game {
                     r.f32()?,
                     r.f32()?,
                     r.u8()?,
+                    r.u8()?,
                     r.angle()?,
                     r.u8()?,
                 ));
@@ -803,7 +805,7 @@ impl Game {
             .as_ref()
             .map(|n| n.snap_interval as f32)
             .unwrap_or(0.05);
-        for (uid, kind, var, pos, face, hp, max_hp, fl, charge, aux) in zs {
+        for (uid, kind, var, pos, face, hp, max_hp, fl, ax, charge, aux) in zs {
             if predicted.contains(&uid) {
                 continue; // we already killed it locally; host confirmation is on its way
             }
@@ -828,6 +830,8 @@ impl Game {
                 z.flash = z.flash.max(0.6);
             }
             z.st = crate::status::Status::from_bits(fl);
+            z.affix = crate::elites::Affix::from_u8(ax & 0x7f);
+            z.shield = if ax & 0x80 != 0 { 1.0 } else { 0.0 };
             z.state = (fl >> 2) & 3;
             z.charge_dir = V2::from_angle(charge);
             match kind {
@@ -1061,6 +1065,8 @@ fn replica(uid: u32, kind: ZKind, var: BossVar, pos: V2) -> Zombie {
         anim: (uid % 97) as f32 * 0.1,
         attack_cd: 0.0,
         st: crate::status::Status::default(),
+        affix: crate::elites::Affix::None,
+        shield: 0.0,
         timer: 1.0,
         state: 0,
         charge_dir: V2::ZERO,

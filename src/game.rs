@@ -105,6 +105,8 @@ pub struct Zombie {
     pub anim: f32,
     pub attack_cd: f32,
     pub st: crate::status::Status,
+    pub affix: crate::elites::Affix,
+    pub shield: f32,
     pub timer: f32,
     pub state: u8,
     pub charge_dir: V2,
@@ -385,6 +387,8 @@ pub struct Game {
     pub chest: Option<crate::chest::Chest>,
     pub chests_opened: u32,
     pub evolved: Vec<Evo>,
+    /// volatile elite blasts waiting to go off: (pos, fuse, damage)
+    pub volatile: Vec<(V2, f32, f32)>,
     /// chests picked up while another overlay was open
     pub pending_chests: u32,
     pub rng: Rng,
@@ -520,6 +524,7 @@ impl Game {
             chest: None,
             chests_opened: 0,
             evolved: Vec::new(),
+            volatile: Vec::new(),
             pending_chests: 0,
             rng: Rng::new(seed),
             grid: Grid::new(),
@@ -728,6 +733,7 @@ impl Game {
         self.chest = None;
         self.chests_opened = 0;
         self.evolved.clear();
+        self.volatile.clear();
         self.pending_chests = 0;
         self.kills = 0;
         self.score = 0;
@@ -1764,6 +1770,8 @@ impl Game {
         } else {
             self.update_zombies();
             self.update_status();
+            self.update_elites();
+            self.update_volatile();
         }
         self.grid.build(self.player.pos, &self.zombies);
         if !client {
@@ -2242,6 +2250,7 @@ impl Game {
         }
         let hit_slot = self.hit_slot;
         let dmg = dmg * self.status_damage_mult(j);
+        let dmg = self.shield_absorb(j, dmg);
         let z = &mut self.zombies[j];
         if z.dead {
             return false;
@@ -2296,6 +2305,7 @@ impl Game {
 
     pub(crate) fn kill_zombie(&mut self, j: usize) {
         let shocked = self.zombies[j].st.shock_t > 0.0;
+        let affix = self.zombies[j].affix;
         let (pos, kind, xp, r, fuse_done, uid, killer) = {
             let z = &mut self.zombies[j];
             z.dead = true;
@@ -2326,6 +2336,9 @@ impl Game {
         self.note_kill(if fuse_done { 255 } else { killer }, kind, pos);
         if shocked {
             self.shock_discharge(pos, uid);
+        }
+        if affix != crate::elites::Affix::None {
+            self.elite_death(pos, kind, affix, r);
         }
         self.kill_effects(pos, kind, r);
         let big = kind.def().big;
@@ -2777,6 +2790,9 @@ impl Game {
             }
             let was_iframe = self.player.iframes > 0.0 || self.player.dash_t > 0.0;
             self.hurt_player(dmg, zp);
+            if !was_iframe {
+                self.elite_bite(i, dmg);
+            }
             let tl = self.ups.get(Up::Thorns);
             if tl > 0 && !was_iframe {
                 let d = (zp - self.player.pos).norm();
@@ -2935,6 +2951,10 @@ impl Game {
                     continue;
                 }
                 self.damage_zombie(j, b.dmg, dir, b.knock, b.crit);
+                if !self.zombies[j].dead {
+                    let from = self.player.pos;
+                    self.reflect_shot(j, from);
+                }
                 b.last_hit = uid;
                 // impact sparks
                 let col = if b.crit { "#ffd34a" } else { "#fff1c0" };
@@ -3249,6 +3269,8 @@ impl Game {
             anim: self.rng.range(0.0, 10.0),
             attack_cd: 0.0,
             st: crate::status::Status::default(),
+            affix: crate::elites::Affix::None,
+            shield: 0.0,
             timer: if kind == ZKind::Boss {
                 3.0
             } else {
@@ -3563,5 +3585,41 @@ mod tests {
         let mut h = Game::new(18);
         h.load_save(&g.save_string());
         assert!(h.has_evo(Evo::ReaperRing));
+    }
+
+    #[test]
+    fn elite_affixes() {
+        use crate::elites::Affix;
+        let mut g = Game::new(19);
+        g.start("diff=rookie");
+        g.wave.n = 8;
+        g.spawn_zombie(ZKind::Walker, v2(200.0, 0.0));
+        let base_hp = g.zombies[0].max_hp;
+        g.make_elite(Affix::Shielded);
+        assert!(g.zombies[0].max_hp > base_hp * 2.5 && g.zombies[0].shield > 0.0);
+        g.grid.build(g.player.pos, &g.zombies);
+        let hp = g.zombies[0].hp;
+        g.damage_zombie(0, 1.0, v2(1.0, 0.0), 0.0, false);
+        assert_eq!(g.zombies[0].hp, hp, "the shield soaks it");
+        // splitting elites burst into three on death
+        g.zombies.clear();
+        g.spawn_zombie(ZKind::Brute, v2(200.0, 0.0));
+        g.make_elite(Affix::Splitting);
+        g.grid.build(g.player.pos, &g.zombies);
+        g.damage_zombie(0, 1.0e9, v2(1.0, 0.0), 0.0, false);
+        assert_eq!(g.zombies.iter().filter(|z| !z.dead).count(), 3);
+        // volatile ones blow up after a fuse
+        g.zombies.clear();
+        g.spawn_zombie(ZKind::Walker, v2(60.0, 0.0));
+        g.make_elite(Affix::Volatile);
+        g.grid.build(g.player.pos, &g.zombies);
+        g.damage_zombie(0, 1.0e9, v2(1.0, 0.0), 0.0, false);
+        assert_eq!(g.volatile.len(), 1);
+        g.player.iframes = 0.0;
+        let hp0 = g.player.hp;
+        for _ in 0..120 {
+            g.update_volatile();
+        }
+        assert!(g.volatile.is_empty() && g.player.hp < hp0, "telegraphed blast hurts");
     }
 }

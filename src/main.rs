@@ -1,6 +1,7 @@
 mod audio;
 mod callouts;
 mod chest;
+mod elites;
 mod content;
 mod coop;
 mod game;
@@ -466,6 +467,14 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
         "dev" => {
             if a == "chest" && g.phase == Phase::Playing {
                 g.open_chest();
+            }
+            if a == "elites" && g.phase == Phase::Playing {
+                let p = g.player.pos;
+                for (k, af) in elites::AFFIXES.iter().enumerate() {
+                    let kind = if k % 2 == 0 { game::ZKind::Brute } else { game::ZKind::Walker };
+                    g.spawn_zombie(kind, p + math::V2::from_angle(k as f32 * 1.05) * 260.0);
+                    g.make_elite(*af);
+                }
             }
         }
         // a one-shot action from a gamepad or an on-screen button

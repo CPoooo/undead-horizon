@@ -62,7 +62,6 @@ pub fn difficulty_index(id: &str) -> usize {
 /// can't be expressed as numbers (spitting, fuses, boss specials) still lives
 /// in `game.rs::update_zombies`, keyed on the kind.
 pub struct EnemyDef {
-    #[allow(dead_code)] // shown by the kill feed and bestiary
     pub name: &'static str,
     pub hp: f32,
     pub speed: f32,

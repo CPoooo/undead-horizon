@@ -87,6 +87,10 @@ impl Game {
                 z.xp *= 3;
             }
         }
+        if self.scale_n() >= 15 {
+            let a = self.roll_affix();
+            self.make_elite(a);
+        }
     }
     pub(crate) fn campaign_victory(&mut self) {
         if self.victory_t >= 0.0 {
@@ -151,6 +155,10 @@ impl Game {
                 let k = self.pick_kind();
                 let p = base + self.rng.unit() * self.rng.range(0.0, 70.0);
                 self.spawn_zombie(k, p);
+                if self.rng.chance(self.elite_chance()) {
+                    let a = self.roll_affix();
+                    self.make_elite(a);
+                }
             }
             self.wave.spawned += g;
         }
