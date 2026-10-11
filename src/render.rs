@@ -401,6 +401,36 @@ impl Game {
         self.draw_hub_overlays(c, t);
         self.draw_texts(c);
         self.draw_teammate_tags(c, t);
+        // squad pings (markers) and teammates' emotes
+        for pg in self.pings.iter() {
+            let fade = (1.0 - (pg.t - crate::ping::PING_T + 1.0).max(0.0)).clamp(0.0, 1.0);
+            c.set_text_align("center");
+            c.set_text_baseline("middle");
+            if let Some(e) = pg.emote {
+                let pos = self.net.as_ref().and_then(|n| n.remotes.get(pg.slot as usize)).filter(|r| r.present).map(|r| r.render_pos(self.real_time)).unwrap_or(pg.pos);
+                c.set_font("26px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif");
+                c.set_fill_style_str("#ffffff");
+                text(c, crate::content::EMOTES[e.min(crate::content::EMOTES.len() - 1)].1, pos.x, pos.y - 48.0);
+                continue;
+            }
+            let (label, icon, col) = pg.kind.def();
+            let bounce = (pg.t * 6.0).sin().abs() * 6.0;
+            c.set_global_alpha(d(fade));
+            c.set_stroke_style_str(col);
+            c.set_line_width(2.5);
+            c.begin_path();
+            let rr = 18.0 + (pg.t * 2.0).fract() * 30.0;
+            let _ = c.arc(d(pg.pos.x), d(pg.pos.y), d(rr), 0.0, TAU64);
+            c.stroke();
+            c.set_font("22px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif");
+            c.set_fill_style_str("#ffffff");
+            text(c, icon, pg.pos.x, pg.pos.y - 34.0 - bounce);
+            c.set_font("800 11px 'Inter','Segoe UI',system-ui,sans-serif");
+            c.set_fill_style_str(col);
+            c.set_stroke_style_str("rgba(0,0,0,0.85)");
+            outlined(c, label, pg.pos.x, pg.pos.y - 56.0 - bounce, 3.0);
+            c.set_global_alpha(1.0);
+        }
         if self.emote_t > 0.0 && !self.player.dead {
             let e = crate::content::EMOTES[self.emote.min(crate::content::EMOTES.len() - 1)].1;
             let pop = 1.0 + 0.3 * ((2.5 - self.emote_t) * 8.0).min(1.0).sin();
@@ -2836,6 +2866,12 @@ impl Game {
             c.fill();
         }
 
+        // pings
+        for pg in self.pings.iter().filter(|p| p.emote.is_none()) {
+            let m = to_map(pg.pos);
+            c.set_fill_style_str(pg.kind.def().2);
+            circle(c, m.x, m.y, 4.0);
+        }
         // pickups
         for p in self.pickups.iter() {
             let col = match p.kind {

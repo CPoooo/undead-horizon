@@ -15,6 +15,7 @@ mod modes;
 mod nav;
 mod net;
 mod outbreak_interact;
+mod ping;
 mod render;
 mod render_hub;
 mod render_light;

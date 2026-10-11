@@ -1,7 +1,7 @@
 // Gamepad support (standard mapping): twin-stick play and D-pad menu navigation.
 //   Left stick move · Right stick aim (fires while aiming) · RT fire · A dash/confirm
 //   B interact (hold to rebuild) · X reload · Y ability · LB swap/sell · RB ultimate
-//   Start pause · Back minimap · D-pad: level-up cards and menus
+//   LT ping · Start pause · Back minimap · D-pad: level-up cards and menus
 (() => {
   'use strict';
   const send = (c) => window.UHUI?.send(c);
@@ -59,6 +59,7 @@
       if (edge(3)) send('act|ability');
       if (edge(4)) send('act|swap');
       if (edge(5)) send('act|ult');
+      if (edge(6)) send('act|ping');
       if (edge(8)) send('act|minimap');
       if (edge(9)) send('act|pause');
       if (edge(12)) send('act|prev');

@@ -667,6 +667,10 @@ impl Game {
                 }
             }
             MSG_READY if host => self.mark_ready(from),
+            MSG_PING if host => {
+                let (Some(k), Some(p)) = (r.u8(), r.v2()) else { return };
+                self.relay_ping(from, k, p);
+            }
             MSG_BUILD if host => {
                 let (Some(k), Some(p)) = (r.u8(), r.v2()) else { return };
                 if let Some(kind) = crate::modes::siege::DefKind::from_u8(k) {
@@ -1107,6 +1111,12 @@ impl Game {
                         s.crystal_hp = hp;
                     }
                 }
+                E_PING => {
+                    let (Some(slot), Some(k), Some(p)) = (r.u8(), r.u8(), r.v2()) else { return };
+                    if slot != me {
+                        self.add_ping(slot, k, p);
+                    }
+                }
                 E_GAMEOVER => self.enter_dying(),
                 E_BLAST => {
                     let (Some(p), Some(rad)) = (r.v2(), r.f32()) else {
@@ -1335,5 +1345,21 @@ mod tests {
         host.apply_powerup(PickKind::DoublePoints, true);
         pump(&mut host, &mut client, &mut t, 10, |_, _, _| {});
         assert!(client.ob.as_ref().unwrap().double_t > 0.0);
+    }
+
+    #[test]
+    fn pings_reach_the_squad() {
+        let (mut host, mut client) = pair();
+        let mut t = 0.0;
+        pump(&mut host, &mut client, &mut t, 5, |_, _, _| {});
+        client.input.mouse_seen = false;
+        client.player.aim = 0.0;
+        assert!(client.try_ping());
+        pump(&mut host, &mut client, &mut t, 5, |_, _, _| {});
+        assert!(host.pings.iter().any(|p| p.slot == 1), "host sees the client's ping");
+        host.input.mouse_seen = false;
+        host.try_ping();
+        pump(&mut host, &mut client, &mut t, 5, |_, _, _| {});
+        assert!(client.pings.iter().any(|p| p.slot == 0), "client sees the host's ping");
     }
 }

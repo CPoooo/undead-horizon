@@ -261,7 +261,7 @@ Original design notes:
   - M3a (M) periodic compact world checkpoint from host to clients
   - M3b (M) on host loss, the lowest slot promotes itself, rebuilds from the checkpoint, and re-signals peers
 - [ ] M4 (S) **4 players.** `MAX_PLAYERS=4`, party max 4, UI slots. Profile the snapshot size; quantize to i16 if needed.
-- [ ] M5 (S) **Ping and quick chat.**
+- [x] M5 (S) **Ping and quick chat.**
   - Ping wheel: "Here", "Enemy", "Need revive", "Box here".
   - World markers and minimap pings, plus quick-chat emotes.
 - [ ] M6 (S) **End-of-match scoreboard.** Kills, downs, revives, points, damage, MVP; per-player stats via events.

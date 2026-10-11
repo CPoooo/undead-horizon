@@ -462,6 +462,7 @@ pub struct Game {
     pub tutorial: Option<crate::tutorial::Tutorial>,
     pub weather: crate::weather::Weather,
     pub biome: Option<world::Biome>,
+    pub pings: Vec<crate::ping::Ping>,
     /// the touch USE button is visible
     pub use_shown: bool,
     /// render big hordes with cheap zombies
@@ -642,6 +643,7 @@ impl Game {
             tutorial: None,
             weather: crate::weather::Weather::new(),
             biome: None,
+            pings: Vec::new(),
             use_shown: false,
             lod: false,
             ready_shown: false,
@@ -912,6 +914,7 @@ impl Game {
         self.tutorial = None;
         self.weather = crate::weather::Weather::new();
         self.biome = None;
+        self.pings.clear();
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -1379,6 +1382,7 @@ impl Game {
         self.tick_boss_intro(real_dt);
         self.tick_tutorial(real_dt);
         self.tick_weather(real_dt);
+        self.tick_pings(real_dt);
         if self.world_has_sky() && self.phase == Phase::Playing {
             let b = world::biome_at(self.player.pos);
             if Some(b) != self.biome {
@@ -1535,7 +1539,10 @@ impl Game {
                 Action::Emote => {
                     self.emote_t = 2.5;
                     self.audio.play(Sfx::UiMove);
+                    let e = self.emote;
+                    self.share_emote(e);
                 }
+                Action::Ping => return self.try_ping(),
                 Action::Reload if self.ob.is_some() => self.start_reload(),
                 Action::Confirm if self.siege.is_some() => return self.ready_up(),
                 Action::Swap if self.siege.is_some() => return self.sell_defense(),
