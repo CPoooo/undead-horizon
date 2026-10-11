@@ -47,6 +47,15 @@ try {
   const remoteSeen = await B.evaluate(() => window.__cmds.length >= 0);
   check(remoteSeen, 'played for a few seconds');
   await A.screenshot({ path: `${OUT}/coop-game-A.png` });
+
+  // M1: the host restarts ICE mid-match (as on a network change); the client
+  // answers the re-offer and the data channels stay open
+  await A.evaluate(() => window.UHCoop.debug.restart(1));
+  await B.waitForFunction(() => window.UHCoop.debug.restarts >= 1, null, { timeout: 10000 });
+  await A.waitForFunction(() => window.UHCoop.debug.pcs[0]?.signalingState === 'stable', null, { timeout: 10000 });
+  await A.waitForTimeout(2500);
+  const afterRestart = await A.evaluate(() => [window.UHCoop.debug.peers, window.UHCoop.debug.pcs[0].connectionState]);
+  check(afterRestart[0][0]?.[1] === 'open' && afterRestart[0][0]?.[2] === 'open' && afterRestart[1] === 'connected', `ICE restart mid-match keeps the link ${JSON.stringify(afterRestart)}`);
   await B.screenshot({ path: `${OUT}/coop-game-B.png` });
 
   // host leaves the match -> both back to the party; B readies again

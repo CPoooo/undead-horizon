@@ -391,16 +391,57 @@
     pc.onicecandidate = (e) => { if (e.candidate) queueIce(uid, e.candidate.toJSON()); };
     pc.onconnectionstatechange = () => {
       if (S.peers.get(slot) !== peer) return;
-      if (pc.connectionState === 'failed') {
-        if (!S.inGame) onLinkFailed(slot);
-        else peerGone(slot);
-      } else if (pc.connectionState === 'closed') peerGone(slot);
+      const st = pc.connectionState;
+      if (st === 'connected') linkRecovered(peer);
+      else if (S.inGame && (st === 'disconnected' || st === 'failed')) linkTrouble(peer, st === 'failed');
+      else if (st === 'failed') onLinkFailed(slot);
+      else if (st === 'closed') peerGone(slot);
       setLinkStatus(slot);
     };
     peer.onChannel = onChannel;
     S.peers.set(slot, peer);
     return peer;
   }
+  // ------------------------------------------------------------------ ICE restart (mid-match)
+  // A phone switching Wi-Fi -> cellular or a NAT rebinding drops the ICE path
+  // while the data channels survive. The host (always the offerer, so there is
+  // no offer glare) restarts ICE and re-offers; a client that notices first
+  // asks the host to. The player only leaves the match after RESTART_GRACE.
+  const RESTART_GRACE = 15000;
+  function linkTrouble(peer, failed) {
+    if (!peer.troubleAt) {
+      peer.troubleAt = Date.now();
+      const name = S.roster?.find((m) => m.slot === peer.slot)?.name || 'a teammate';
+      UI().toast(S.mySlot === 0 || peer.slot !== 0 ? `Connection to ${name} dropped, reconnecting…` : 'Connection to the host dropped, reconnecting…');
+      clearTimeout(peer.giveUp);
+      peer.giveUp = setTimeout(() => {
+        if (S.peers.get(peer.slot) === peer && peer.troubleAt) { try { peer.pc.close(); } catch {} peerGone(peer.slot); }
+      }, RESTART_GRACE);
+    }
+    // 'disconnected' often heals by itself: give it a moment before restarting
+    clearTimeout(peer.restartT);
+    peer.restartT = setTimeout(() => restartIce(peer), failed ? 0 : 2500);
+  }
+  function linkRecovered(peer) {
+    clearTimeout(peer.restartT);
+    clearTimeout(peer.giveUp);
+    if (peer.troubleAt && S.inGame) UI().toast('Reconnected ✔');
+    peer.troubleAt = 0;
+    peer.restarts = 0;
+  }
+  async function restartIce(peer) {
+    if (S.peers.get(peer.slot) !== peer || !peer.troubleAt || !S.inGame) return;
+    if ((peer.restarts = (peer.restarts || 0) + 1) > 3) return;
+    S.restarts = (S.restarts || 0) + 1;
+    if (S.mySlot !== 0) { wsSend({ t: 'signal', to: peer.uid, data: { kind: 'restart', sid: peer.sid } }); return; }
+    const pc = peer.pc;
+    if (pc.signalingState !== 'stable') return;
+    try {
+      await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
+      wsSend({ t: 'signal', to: peer.uid, data: { kind: 'reoffer', sid: peer.sid, sdp: pc.localDescription.sdp } });
+    } catch (e) { console.warn('[coop] ice restart', e); }
+  }
+
   const linkOpen = (p) => p && p.u?.readyState === 'open' && p.r?.readyState === 'open';
 
   async function applyIce(peer, list) {
@@ -492,6 +533,25 @@
         S.linkStatus = S.linkStatus || {};
         S.linkStatus[0] = 'connecting';
         renderLoading();
+        break;
+      }
+      case 'reoffer': {
+        // the host restarted ICE mid-match: answer on the existing connection
+        const peer = S.peers.get(0);
+        if (!peer || from !== peer.uid || data.sid !== peer.sid) return;
+        try {
+          await peer.pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+          await peer.pc.setLocalDescription(await peer.pc.createAnswer());
+          wsSend({ t: 'signal', to: from, data: { kind: 'answer', sid: data.sid, sdp: peer.pc.localDescription.sdp } });
+          S.restarts = (S.restarts || 0) + 1;
+        } catch (e) { console.warn('[coop] reoffer', e); }
+        break;
+      }
+      case 'restart': {
+        // a client lost us: restart ICE from our side
+        if (S.mySlot !== 0 || !S.inGame) return;
+        const peer = [...S.peers.values()].find((p) => p.uid === from && p.sid === data.sid);
+        if (peer) { peer.troubleAt ||= Date.now(); restartIce(peer); }
         break;
       }
       case 'answer': {
@@ -605,6 +665,9 @@
 
   function peerGone(slot) {
     if (!S.peers.has(slot)) return;
+    const p = S.peers.get(slot);
+    clearTimeout(p.restartT);
+    clearTimeout(p.giveUp);
     S.peers.delete(slot);
     if (S.inGame) send('peerleft|' + slot);
     else if (S.loading) { if (S.linkStatus) S.linkStatus[slot] = 'failed'; renderLoading(); }
@@ -717,7 +780,7 @@
     get me() { return S.me; },
     get social() { return S.social; },
     /** for tests/debugging */
-    get debug() { return { slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
+    get debug() { return { restarts: S.restarts || 0, restart: (slot) => { const p = S.peers.get(slot); if (p) { p.troubleAt = Date.now(); restartIce(p); } }, slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
     inviteLink,
     /** Home Base: share our position with the party, and read theirs */
     hubPos(x, y, aim) { if (S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },

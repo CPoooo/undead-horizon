@@ -253,7 +253,9 @@ Original design notes:
 - [x] L6 (S) **Welcome-back bonus.** Gentle, with no streak-loss punishment.
 
 ### M7 · Multiplayer & social hardening
-- [ ] M1 (S) **TURN relay.** Add a TURN server (Cloudflare Calls TURN, or a free tier) with credentials minted by the `api` function (`/turn`), plus ICE restart on failure. Known gap today.
+- [x] M1 (S) **TURN relay.** Add a TURN server (Cloudflare Calls TURN, or a free tier) with credentials minted by the `api` function (`/turn`), plus ICE restart on failure. Known gap today.
+  - Metered TURN via `/turn` (relay-only e2e passes). Mid-match, a `disconnected`/`failed` link triggers an ICE restart: the host re-offers (`reoffer` signal) and a client asks with `restart`. The player is kept for a 15s grace period with "reconnecting…" and "Reconnected ✔" toasts.
+  - Caveat: Metered's free plan caps live credentials at 10 (4h expiry). Set `METERED_API_KEY` (or reuse credentials) if `/turn` starts failing with "Maximum credential limit reached".
 - [ ] M2 (M) **Reconnect and join in progress.**
   - A dropped client rejoins: same slot, host resends a full snapshot.
   - A new friend joins mid-run as spectator, then spawns on wave clear.
