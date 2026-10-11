@@ -282,6 +282,28 @@ impl Game {
     /// Points, weapon + ammo, perks, power-up timers.
     pub fn draw_outbreak_hud(&self, c: &Ctx, w: f32, h: f32, t: f32) {
         let Some(ob) = self.ob.as_ref() else { return };
+        // red chalk tally marks for the first five rounds
+        let n = self.wave.n.max(1);
+        if n <= 5 {
+            let col = if ob.hound_round { "#ff7a1f" } else { "#c81e1e" };
+            c.set_stroke_style_str(col);
+            c.set_line_cap("round");
+            c.set_line_width(5.0);
+            let x0 = w - 24.0 - 5.0 * 14.0;
+            c.begin_path();
+            for k in 0..n.min(4) {
+                let x = x0 + k as f32 * 14.0;
+                let wob = ((k * 7 + 3) % 5) as f32 - 2.0;
+                c.move_to(d(x + wob), d(16.0));
+                c.line_to(d(x - wob * 0.5), d(50.0));
+            }
+            if n == 5 {
+                c.move_to(d(x0 - 8.0), d(44.0));
+                c.line_to(d(x0 + 52.0), d(20.0));
+            }
+            c.stroke();
+            c.set_line_cap("butt");
+        }
         let small = w < 640.0;
         let right = w - 18.0;
         // above the minimap (desktop) / the touch buttons (phones)

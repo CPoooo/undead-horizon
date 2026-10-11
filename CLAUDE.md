@@ -193,7 +193,7 @@ Not scheduled yet; design notes for when we pick it up.
 - [x] O6 (M) **Perk machines.** 4 perks, original names: *Iron Gut* (+HP), *Quickdraw Cola* (reload/fire), *Second Wind* (fast revive, or solo self-revive ×3), *Fleetfoot* (speed). Max 4 perks, all lost when downed. Jingles via synth.
 - [x] O7 (S) **Upgrade machine.** Power switch, then the upgrade machine ("Pack-a-Punch" homage): ×2 damage, bigger magazine, an element (from C4), a renamed weapon and a camo tint.
 - [x] O8 (S) **Power-ups.** Max Ammo, Insta-Kill, Double Points, Nuke, Carpenter, each with a timer HUD and an announcer line.
-- [ ] O9 (S) **Rounds feel.** Tally-mark round counter, round-transition sting, and special "hound rounds" (fast pack) every 5–6 rounds.
+- [x] O9 (S) **Rounds feel.** Tally-mark round counter, round-transition sting, and special "hound rounds" (fast pack) every 5–6 rounds.
 - [ ] O10 (M) **Secrets.** Buildables (collect 3 parts to build a shield or trap) and a multi-step easter-egg quest with a reward; secrets are server-tracked achievements.
 - [ ] O11 (S) **Traps.** Buyable electric and fire traps (shared code with Siege S4).
 - [ ] O12 (M) **Co-op replication.** Host-authoritative door, box, power and perk-machine state through snapshot fields and events. Per-player points via events. Revive costs nothing; Second Wind changes the revive time.

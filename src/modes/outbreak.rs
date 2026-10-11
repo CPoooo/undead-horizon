@@ -125,6 +125,9 @@ pub struct ObState {
     pub repair_points_round: u32,
     /// interact held this frame (repairs boards while held)
     pub use_held: f32,
+    /// this round is a hound round; the next one comes at this round number
+    pub hound_round: bool,
+    pub next_hounds: u32,
 }
 
 pub const SPIN_T: f32 = 3.0;
@@ -195,6 +198,8 @@ impl Game {
             repair_t: 0.0,
             repair_points_round: 0,
             use_held: 0.0,
+            hound_round: false,
+            next_hounds: 5 + self.rng.below(2) as u32,
         }));
         self.wave.intermission = 3.0;
     }
@@ -665,7 +670,19 @@ impl Game {
 
     fn start_round(&mut self, n: u32) {
         self.wave.n = n;
-        self.wave.total = self.round_size(n);
+        let hounds = self.ob.as_ref().map(|o| n == o.next_hounds).unwrap_or(false);
+        if let Some(ob) = self.ob.as_mut() {
+            ob.hound_round = hounds;
+            if hounds {
+                ob.next_hounds = n + 4 + self.rng.below(3) as u32;
+            }
+        }
+        self.wave.total = if hounds {
+            let players = self.net.as_ref().map(|n| n.players()).unwrap_or(1) as u32;
+            (6 + 2 * n).min(48) * players.max(1)
+        } else {
+            self.round_size(n)
+        };
         self.wave.spawned = 0;
         self.wave.timer = 1.0;
         self.wave.boss_pending = n % 10 == 0;
@@ -675,18 +692,25 @@ impl Game {
             ob.repair_points_round = 0;
         }
         self.banner = Some(Banner {
-            title: format!("ROUND {}", n),
-            sub: if n == 1 {
+            title: if hounds { "HOUND ROUND".into() } else { format!("ROUND {}", n) },
+            sub: if hounds {
+                "Something is hunting you. Watch for the lightning.".into()
+            } else if n == 1 {
                 "Hold the courtyard. Buy doors, guns and perks with points.".into()
             } else {
                 format!("{} undead", self.wave.total)
             },
             t: 0.0,
             dur: 3.0,
-            color: "#ff4040",
+            color: if hounds { "#ff7a1f" } else { "#ff4040" },
         });
         self.sfx(Sfx::WaveStart, self.player.pos);
-        self.say(&format!("round {}", n));
+        self.sfx(Sfx::BossRoar, self.player.pos);
+        if hounds {
+            self.say("fetch me their souls");
+        } else {
+            self.say(&format!("round {}", n));
+        }
         if let Some(net) = &mut self.net {
             let total = self.wave.total;
             net.event(|w| {
@@ -700,6 +724,12 @@ impl Game {
 
     fn round_cleared(&mut self) {
         self.wave.intermission = 9.0;
+        let hounds = self.ob.as_ref().map(|o| o.hound_round).unwrap_or(false);
+        if hounds {
+            // the last hound always leaves a gift
+            let p = self.player.pos + v2(0.0, -60.0);
+            self.pickups.push(Pickup { pos: p, kind: PickKind::MaxAmmo, t: 0.0, dead: false });
+        }
         let earned = ((10 + 5 * self.wave.n) as f32 * self.difficulty().coins) as u32;
         self.coins += earned;
         self.score += 100 * self.wave.n as u64;
@@ -754,6 +784,11 @@ impl Game {
         None
     }
 
+    #[cfg(test)]
+    pub fn outbreak_waves_pub(&mut self) {
+        self.outbreak_waves();
+    }
+
     fn outbreak_waves(&mut self) {
         if self.wave.intermission > 0.0 {
             self.wave.intermission -= DT;
@@ -770,7 +805,23 @@ impl Game {
         self.wave.timer -= DT;
         if self.wave.spawned < self.wave.total && self.wave.timer <= 0.0 && alive < max_alive {
             self.wave.timer = (2.2 - n as f32 * 0.09).max(0.35) * self.rng.range(0.7, 1.3);
-            if let Some(wi) = self.spawn_window() {
+            let hounds = self.ob.as_ref().map(|o| o.hound_round).unwrap_or(false);
+            if hounds {
+                let targets = self.targets();
+                let alive_t: Vec<V2> = targets.iter().filter(|t| t.0 != 255).map(|t| t.1).collect();
+                if let Some(&tp) = alive_t.get(self.rng.below(alive_t.len().max(1)).min(alive_t.len().saturating_sub(1))) {
+                    let a = self.rng.angle();
+                    let at = tp + V2::from_angle(a) * self.rng.range(260.0, 420.0);
+                    let (at, _) = world::resolve(at, 14.0);
+                    self.spawn_zombie(ZKind::Hound, at);
+                    self.bolts.push(crate::game::Bolt { pts: vec![at + v2(0.0, -500.0), at + v2(18.0, -250.0), at], life: 0.25 });
+                    self.light(at, 260.0, 0.4, "#ffb060");
+                    self.ring(at, 60.0, 0.3, "#ff7a1f", 5.0);
+                    self.sfx(Sfx::Lightning, at);
+                    self.wave.spawned += 1;
+                    self.wave.timer *= 0.6;
+                }
+            } else if let Some(wi) = self.spawn_window() {
                 let (pos, _) = {
                     let w = &self.ob.as_ref().unwrap().windows[wi];
                     (w.pos, w.dir)
@@ -855,7 +906,12 @@ impl ModeHooks for Outbreak {
     }
 
     fn hud(&self, g: &Game) -> String {
-        format!("ROUND {}", g.wave.n.max(1))
+        // rounds 1-5 are drawn as chalk tally marks (render_outbreak.rs)
+        if g.wave.n <= 5 {
+            String::new()
+        } else {
+            format!("ROUND {}", g.wave.n)
+        }
     }
 
     fn is_over(&self, _g: &Game) -> bool {

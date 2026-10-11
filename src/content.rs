@@ -86,7 +86,7 @@ pub struct EnemyDef {
     pub hp_bar: bool,
 }
 
-pub const ENEMIES: [EnemyDef; 11] = [
+pub const ENEMIES: [EnemyDef; 12] = [
     EnemyDef {
         name: "Walker",
         hp: 20.0,
@@ -284,6 +284,24 @@ pub const ENEMIES: [EnemyDef; 11] = [
         decal: "#3a2a10",
         big: false,
         hp_bar: true,
+    },
+    EnemyDef {
+        name: "Hellhound",
+        hp: 16.0,
+        speed: 210.0,
+        r: 13.0,
+        dmg: 9.0,
+        xp: 2,
+        knock: 1.3,
+        min_wave: 0,
+        weight: (0.0, 0.0, 0.0),
+        cloth: &["#2a1410"],
+        skin: "#5a2a1a",
+        dark: "#140806",
+        gore: "#ff6a2a",
+        decal: "#3a1408",
+        big: false,
+        hp_bar: false,
     },
 ];
 

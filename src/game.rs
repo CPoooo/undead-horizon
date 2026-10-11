@@ -38,10 +38,11 @@ pub enum ZKind {
     Armored,
     Bat,
     Burrower,
+    Hound,
 }
 
 impl ZKind {
-    pub const ALL: [ZKind; 11] = [
+    pub const ALL: [ZKind; 12] = [
         ZKind::Walker,
         ZKind::Runner,
         ZKind::Brute,
@@ -53,6 +54,7 @@ impl ZKind {
         ZKind::Armored,
         ZKind::Bat,
         ZKind::Burrower,
+        ZKind::Hound,
     ];
 
     pub fn def(self) -> &'static content::EnemyDef {
@@ -3710,11 +3712,13 @@ mod tests {
             seen[g.pick_kind() as usize] = true;
         }
         for k in ZKind::ALL {
-            if k != ZKind::Boss {
+            // bosses and hounds only come from their own events
+            if k.def().min_wave > 0 {
                 assert!(seen[k as usize], "{:?} spawns by wave 12", k);
+            } else {
+                assert!(!seen[k as usize], "{:?} never comes from the pool", k);
             }
         }
-        assert!(!seen[ZKind::Boss as usize], "bosses never come from the pool");
         // stats come from the table
         for k in ZKind::ALL {
             g.zombies.clear();
@@ -4179,5 +4183,19 @@ mod tests {
         // power-ups apply
         g.apply_powerup(PickKind::InstaKill, false);
         assert!(g.insta_kill());
+    }
+
+    #[test]
+    fn hound_rounds() {
+        let mut g = Game::new(28);
+        g.start("mode=outbreak;diff=rookie");
+        let n = g.ob.as_ref().unwrap().next_hounds;
+        g.wave.n = n - 1;
+        g.wave.intermission = DT * 0.5;
+        g.outbreak_waves_pub();
+        assert!(g.ob.as_ref().unwrap().hound_round);
+        g.wave.timer = 0.0;
+        g.outbreak_waves_pub();
+        assert!(g.zombies.iter().any(|z| z.kind == ZKind::Hound && z.win < 0), "hounds strike in from lightning");
     }
 }

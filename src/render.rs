@@ -1113,6 +1113,50 @@ impl Game {
             }
             return;
         }
+        if z.kind == ZKind::Hound {
+            // a lean four-legged shape wreathed in flame
+            let body = p + v2(0.0, -6.0);
+            let stride = (z.anim * 3.5).sin();
+            c.set_stroke_style_str(def.skin);
+            c.set_line_width(4.0);
+            c.begin_path();
+            for (k, s2) in [(0.6f32, 1.0f32), (0.6, -1.0), (-0.6, 1.0), (-0.6, -1.0)] {
+                let hip = body + fwd * (r * k) + side * (r * 0.4 * s2);
+                let foot = hip + side * (r * 0.5 * s2) + fwd * (r * 0.5 * stride * s2 * k.signum());
+                c.move_to(d(hip.x), d(hip.y));
+                c.line_to(d(foot.x), d(foot.y));
+            }
+            c.stroke();
+            c.set_fill_style_str(def.dark);
+            c.begin_path();
+            let _ = c.ellipse(d(body.x), d(body.y), d(r * 1.2), d(r * 0.7), d(face), 0.0, TAU64);
+            c.fill();
+            let head = body + fwd * (r * 1.1);
+            c.set_fill_style_str(def.skin);
+            circle(c, head.x, head.y, r * 0.55);
+            let _ = c.set_global_composite_operation("lighter");
+            c.set_fill_style_str("#ff3020");
+            for s2 in [-1.0f32, 1.0] {
+                let e = head + fwd * (r * 0.3) + side * (r * 0.22 * s2);
+                circle(c, e.x, e.y, 2.0);
+            }
+            for k in 0..3 {
+                let ph = t * 8.0 + k as f32 * 2.0 + z.tint * 6.0;
+                let fp = body + side * ((ph * 1.3).sin() * r * 0.5) + v2(0.0, -(ph.fract()) * r * 1.4);
+                c.set_global_alpha(d(0.6 * (1.0 - ph.fract())));
+                c.set_fill_style_str(if k % 2 == 0 { "#ff7a1f" } else { "#ffd23a" });
+                circle(c, fp.x, fp.y, r * 0.3);
+            }
+            c.set_global_alpha(1.0);
+            let _ = c.set_global_composite_operation("source-over");
+            if z.flash > 0.0 {
+                c.set_global_alpha(d(z.flash * 0.85));
+                c.set_fill_style_str("#ffffff");
+                circle(c, body.x, body.y, r);
+                c.set_global_alpha(1.0);
+            }
+            return;
+        }
         if z.kind == ZKind::Bat {
             let flap = (z.anim * 4.0).sin();
             let lifted = p + v2(0.0, -26.0);
