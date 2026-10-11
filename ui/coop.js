@@ -45,13 +45,24 @@
     if (!signedIn() || (S.ws && S.ws.readyState <= 1)) return;
     S.closed = false;
     let token;
-    try { token = await window.UHCloud.token(); } catch { return; }
+    try {
+      token = await window.UHCloud.token();
+    } catch (e) {
+      console.warn('[coop] could not get a lobby token', e);
+      S.status = 'error';
+      render();
+      setTimeout(connect, 5000);
+      return;
+    }
+    S.status = 'connecting';
     const ws = new WebSocket(window.UHCloud.wsUrl + '?token=' + encodeURIComponent(token));
     S.ws = ws;
-    ws.onopen = () => { S.retry = 0; };
+    ws.onopen = () => { S.retry = 0; S.status = 'online'; render(); };
     ws.onmessage = (e) => { try { onMsg(JSON.parse(e.data)); } catch (err) { console.warn(err); } };
     ws.onclose = () => {
       S.ws = null;
+      S.status = 'offline';
+      render();
       if (!S.closed) setTimeout(connect, Math.min(1000 * 2 ** S.retry++, 15000));
     };
     ws.onerror = () => ws.close();
@@ -151,6 +162,10 @@
         <button class="btn small secondary" data-signin>Sign in</button></div>`;
       return;
     }
+    if (S.status !== 'online' || !S.me) {
+      box.innerHTML = `<div class="party empty-party"><b>👥 Co-op</b><span>${S.status === 'error' ? '⚠ Could not reach the lobby server, retrying…' : '⏳ Connecting to the lobby server…'}</span></div>`;
+      return;
+    }
     if (!S.party) {
       box.innerHTML = `<div class="party empty-party"><b>👥 Co-op</b><span>Play Infinite with up to 2 friends.</span>
         <button class="btn small blue" id="party-create">Create party</button></div>`;
@@ -199,6 +214,7 @@
     if (!el) return;
     if (!window.UHCloud) { el.innerHTML = '<div class="empty">Friends need the online backend.</div>'; return; }
     if (!signedIn()) { el.innerHTML = '<div class="empty">Sign in to add friends and play co-op.<br><br><button class="btn small blue" data-signin>Sign in</button></div>'; return; }
+    if (S.status !== 'online' || !S.me) { el.innerHTML = '<div class="empty">⏳ Connecting to the lobby server…</div>'; return; }
     const s = S.social;
     const inParty = !!S.party;
     const partyIds = new Set((S.party?.members || []).map((m) => m.id));
