@@ -32,7 +32,8 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
 - [x] 1. **Co-op mode**: real-time online co-op for up to 3 players (Infinite mode).
   - Gameplay is WebRTC peer-to-peer with the host as the hub. `src/net.rs` defines the wire format and authority model; `src/coop.rs` holds snapshots, replicas, hit reporting, kill credit, shared XP and revive; `ui/coop.js` holds the transport.
   - Downed players can crawl. A teammate standing within 75 units for 3s revives them. Bleed-out after 30s leads to spectating, and a team wipe ends the game for everyone.
-  - Known gap: no TURN relay yet, so players behind strict NATs or firewalls may fail to connect.
+  - Connecting: the host sends an offer per client over the social socket; ICE candidates are trickled in batches. `GET /turn` (API) returns STUN plus short-lived Metered TURN credentials (`METERED_APP` + `METERED_SECRET_KEY` or `METERED_API_KEY` in `.env.local`); without them it falls back to STUN only. Signals carry a session id (`party.seed`) so stale offers/candidates are ignored.
+  - Match start: everyone sees the loading screen (`#coop-load`) with per-player link status; the host gets "Start without them / Retry / Cancel" after 20s, a client gives up after 40s. Sounds: `sfx|ready` (everyone ready), `sfx|start` (launch sting), `sfx|click`.
 - [x] 2. **Persistence in Neon DB**: profiles (coins, owned items, equipped loadout and cosmetics, campaign progress, stats), save states and every run are stored in Neon Postgres. The leaderboard is global (each player's best infinite run) and auto-refreshes every 5s while visible.
 - [x] 3. **Login / accounts**: Neon Managed Auth (Better Auth), with email and password sign-up/sign-in and Google sign-in. Sessions persist across reloads and devices. On the first sign-in, offline progress is imported once (coins capped at 5000). Guests can still play offline with browser storage.
 - [x] 4. **Shop & customizations**: coins are earned by clearing waves (scaled by difficulty) plus boss and chapter bonuses. They buy guns, perks, skins, hats and bullet tracers in the 🛒 Shop.
@@ -70,6 +71,21 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
 - UI to game commands: `start|k=v;...`, `equip|k=v;...`, `save`, `load|<save string>`, `pause`, `resume`, `menu`, `vol|`, `music|`, `autoaim|`.
 - Game to UI events: `ready`, `pause` (run JSON), `resume`, `saved` (save string), `gameover` and `victory` (stats JSON), `autoaim`, `wave`.
 - Player profile, leaderboard and saves go through `Data` in `ui/app.js`: localStorage when signed out, and the cloud API when signed in (`window.UHCloud`, from `ui/cloud-src.js`).
+
+## Future plan: Home Base (free-roam social hub, à la Destiny's Tower)
+
+Not scheduled yet; design notes for when we pick it up.
+
+- **What:** a walkable, persistent hub world that replaces (or sits behind) the menu lobby. You spawn in as your equipped character and can see and walk around with other players who are in the Home Base at the same time, not only party members.
+- **Vendors replace menu screens:** everything bought in the main menu today (guns, perks, skins, hats, tracers, later relics/permanent upgrades/season pass) is sold by in-world vendor NPCs at stalls. Walk up, press Interact, and a shop panel opens anchored to that vendor; the menu Shop stays as a fallback on mobile/accessibility.
+- **AI vendors with personality:** each vendor has a name, look, voice and attitude (e.g. a paranoid gunsmith, a theatrical tailor, a deadpan quartermaster). They greet you, react to what you browse and buy ("Ooh, the Thunder Coat. Bold. Zombies hate bold."), complain when you're broke, and drop random funny one-liners. Lines come from an LLM (Claude via the `api` function, with a persona prompt, the item catalog and the player's purchase context; short, PG-13, cached and rate-limited, with a canned-line fallback offline). They make noises: synthesized voice barks/grunts in `audio.rs`, optionally Web Speech for full lines (toggle).
+- **Social:** proximity text bubbles and the existing voice chat (proximity volume), emotes, party up by walking to someone and inviting, a mission terminal/board that starts Infinite, Campaign, Outbreak or Siege with your party, the leaderboard as an in-world monument, and a firing range to try guns before buying.
+- **Tech sketch:**
+  - Instanced hubs of ~16–24 players, assigned by the social server.
+  - Movement-only replication (position, facing, look, emote) at about 10 Hz.
+  - Relay over the social WebSocket, or a dedicated realtime relay, rather than mesh WebRTC.
+  - An authored hub map (needs F2), reused NPC rendering, and server-authoritative purchases exactly as today.
+- **Free roam:** the hub opens out into a small free-roam zone with ambient zombies, public events and loot caches. Pick-up/drop-out with anyone in the instance.
 
 ## Roadmap v2 (research-backed; no real-money purchases)
 

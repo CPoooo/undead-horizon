@@ -20,7 +20,10 @@
     party: null,
     pendingLink: null, // { partyId, token } from a ?party= URL
     // game transport
-    peers: new Map(), // slot -> { pc, u, r, uid }
+    peers: new Map(), // slot -> { pc, u, r, uid, sid }
+    sid: null, // current match session id
+    loading: false,
+    linkStatus: null, // slot -> connecting|retrying|connected|failed
     inbox: [],
     inGame: false,
     mySlot: 0,
@@ -104,20 +107,30 @@
       case 'party': {
         const was = S.party;
         S.party = m.party;
+        const p = S.party;
+        const allReady = !!p && p.status === 'open' && p.members.length > 1 && p.members.every((x) => x.ready);
+        if (allReady && !S.allReady) send('sfx|ready');
+        S.allReady = allReady;
+        // host cancelled (or the match ended) while we were still connecting
+        if (S.loading && !S.inGame && (!p || p.status === 'open')) {
+          abortLoading();
+          UI().toast('The host cancelled the match.');
+        }
         if (S.party && S.party.members.some((x) => x.id === S.me?.id)) {
           // keep our look current for everyone in the lobby
           const mine = S.party.members.find((x) => x.id === S.me.id);
           const l = look();
           if (mine && (mine.look?.skin !== l.skin || mine.look?.hat !== l.hat || mine.look?.gun !== l.gun)) wsSend({ t: 'party.look', look: l });
         }
-        if (!was && S.party) UI().toast('You\'re in a party. Invite friends or share the link!');
+        if (!was && S.party) { UI().toast('You\'re in a party. Invite friends or share the link!'); iceServers(); }
         if (S.party && S.party.diff) UI().setDiff?.(S.party.diff, S.party.hostId !== S.me?.id);
         if (!S.party) UI().setDiff?.(null, false);
         break;
       }
       case 'party.start':
         S.party = m.party;
-        beginNetGame();
+        S.allReady = false;
+        if (S.party?.status === 'in_game') beginNetGame().catch((e) => { console.error('[coop] start', e); abortLoading(); UI().toast('Couldn\'t start the match.'); });
         break;
       case 'invite':
         showInvite(m.partyId, m.fromName);
@@ -193,8 +206,9 @@
         <button class="btn small secondary" id="party-link" title="Anyone signed in with this link joins your party and becomes your friend">🔗 Copy invite link</button>
         <button class="btn small secondary" id="party-leave">Leave</button>
       </div>
+      ${p.status === 'in_game' && !S.inGame && !S.loading ? `<div class="hint" style="margin-top:8px">⚔ A match is in progress. You'll be back here when it ends.</div>` : ''}
       ${amHost
-        ? `<span class="tip-wrap"><button class="btn gold" id="party-start" style="margin-top:10px" ${allReady && p.members.length > 1 ? '' : 'disabled'}>▶ START CO-OP</button>
+        ? `<span class="tip-wrap"><button class="btn gold" id="party-start" style="margin-top:10px" ${allReady && p.members.length > 1 && p.status === 'open' && !S.loading ? '' : 'disabled'}>▶ START CO-OP</button>
            <span class="tip">${p.members.length < 2 ? 'Invite at least one friend first' : allReady ? 'Everyone is ready!' : 'Waiting for everyone to ready up'}</span></span>`
         : `<button class="btn ${me?.ready ? 'secondary' : ''}" id="party-ready" style="margin-top:10px">${me?.ready ? 'Not ready' : '✔ Ready up'}</button>`}
     </div>`;
@@ -204,7 +218,7 @@
       catch { prompt('Copy this invite link:', link); }
     };
     $('party-leave').onclick = () => wsSend({ t: 'party.leave' });
-    if ($('party-ready')) $('party-ready').onclick = () => wsSend({ t: 'party.ready', ready: !me?.ready });
+    if ($('party-ready')) $('party-ready').onclick = () => { send('sfx|click'); wsSend({ t: 'party.ready', ready: !me?.ready }); };
     if ($('party-start')) $('party-start').onclick = () => wsSend({ t: 'party.start' });
     box.querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => wsSend({ t: 'party.kick', id: b.dataset.kick })));
   }
@@ -254,6 +268,32 @@
   }
 
   // ------------------------------------------------------------------ WebRTC
+  // Each match has a session id (the party seed from the server). Signals carry
+  // it so a late offer/candidate from an older attempt is never applied, and an
+  // offer that beats `party.start` to the client still works.
+  // ICE is trickled: candidates are sent in small batches as they're found, so
+  // slow networks (phones on cellular) don't lose their relay candidates.
+  const HOST_WAIT = 20000; // ms before the host is offered "start without them"
+  const CLIENT_WAIT = 40000; // ms before a client gives up on the host
+
+  let iceCache = null;
+  async function iceServers() {
+    if (iceCache && Date.now() - iceCache.at < 30 * 60_000) return iceCache.servers;
+    try {
+      const r = await Promise.race([
+        window.UHCloud.api('/turn'),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('turn timeout')), 4000)),
+      ]);
+      if (Array.isArray(r?.iceServers) && r.iceServers.length) {
+        iceCache = { at: Date.now(), servers: r.iceServers };
+        return iceCache.servers;
+      }
+    } catch (e) {
+      console.warn('[coop] no TURN servers, direct connections only', e);
+    }
+    return ICE;
+  }
+
   function slotsFor(party) {
     // host = slot 0, everyone else in join order
     const others = party.members.filter((m) => m.id !== party.hostId);
@@ -261,8 +301,21 @@
     return list.map((m, i) => ({ ...m, slot: i }));
   }
 
-  function wire(slot, pc) {
-    const peer = { pc, u: null, r: null, slot };
+  // batched trickle-ICE candidates per remote user
+  const iceOut = new Map(); // uid -> { list, timer }
+  function queueIce(uid, cand) {
+    let q = iceOut.get(uid);
+    if (!q) iceOut.set(uid, (q = { list: [], timer: 0 }));
+    q.list.push(cand);
+    if (!q.timer) q.timer = setTimeout(() => {
+      iceOut.delete(uid);
+      wsSend({ t: 'signal', to: uid, data: { kind: 'ice', sid: S.sid, c: q.list } });
+    }, 120);
+  }
+  const pendingIce = []; // { sid, from, c } that arrived before their peer/description
+
+  function wire(slot, pc, uid) {
+    const peer = { pc, u: null, r: null, slot, uid, sid: S.sid, ready: false };
     const onChannel = (ch) => {
       ch.binaryType = 'arraybuffer';
       if (ch.label === 'u') peer.u = ch; else peer.r = ch;
@@ -272,72 +325,160 @@
         if (S.inbox.length > 2000) S.inbox.splice(0, 500);
       };
       ch.onopen = () => checkAllOpen();
-      ch.onclose = () => peerGone(slot);
+      ch.onclose = () => { if (S.peers.get(slot) === peer) peerGone(slot); };
     };
     pc.ondatachannel = (e) => onChannel(e.channel);
+    pc.onicecandidate = (e) => { if (e.candidate) queueIce(uid, e.candidate.toJSON()); };
     pc.onconnectionstatechange = () => {
-      if (['failed', 'closed'].includes(pc.connectionState)) peerGone(slot);
+      if (S.peers.get(slot) !== peer) return;
+      if (pc.connectionState === 'failed') {
+        if (!S.inGame) onLinkFailed(slot);
+        else peerGone(slot);
+      } else if (pc.connectionState === 'closed') peerGone(slot);
+      setLinkStatus(slot);
     };
     peer.onChannel = onChannel;
     S.peers.set(slot, peer);
     return peer;
   }
+  const linkOpen = (p) => p && p.u?.readyState === 'open' && p.r?.readyState === 'open';
 
-  async function gathered(pc) {
-    if (pc.iceGatheringState === 'complete') return;
-    await new Promise((res) => {
-      const t = setTimeout(res, 2500);
-      pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } });
-    });
+  async function applyIce(peer, list) {
+    for (const c of list) {
+      try { await peer.pc.addIceCandidate(c); } catch (e) { console.warn('[coop] bad candidate', e); }
+    }
+  }
+  async function flushPendingIce(peer) {
+    for (let i = pendingIce.length - 1; i >= 0; i--) {
+      const q = pendingIce[i];
+      if (q.sid === peer.sid && q.from === peer.uid) { pendingIce.splice(i, 1); await applyIce(peer, q.c); }
+    }
   }
 
-  let startTimer = 0;
+  /** Called on `party.start` for everyone in the party. */
   async function beginNetGame() {
-    closePeers();
+    const sid = String(S.party.seed || S.party.id);
+    if (S.inGame) return;
+    if (S.sid !== sid) { closePeers(); S.sid = sid; pendingIce.length = 0; }
+    else if (S.loading) return; // duplicate start event
     const roster = slotsFor(S.party);
     S.roster = roster;
     const mine = roster.find((m) => m.id === S.me.id);
     if (!mine) return;
     S.mySlot = mine.slot;
-    UI().toast('Connecting to your party…');
+    S.linkStatus = {};
+    send('sfx|start');
+    showLoading();
+    clearTimeout(startTimer);
     if (S.mySlot === 0) {
-      // host: offer to every client (non-trickle: candidates are inside the SDP)
-      for (const m of roster.slice(1)) {
-        const pc = new RTCPeerConnection({ iceServers: ICE });
-        const peer = wire(m.slot, pc);
-        peer.uid = m.id;
-        peer.onChannel(pc.createDataChannel('u', { ordered: false, maxRetransmits: 0 }));
-        peer.onChannel(pc.createDataChannel('r', { ordered: true }));
-        await pc.setLocalDescription(await pc.createOffer());
-        await gathered(pc);
-        wsSend({ t: 'signal', to: m.id, data: { kind: 'offer', sdp: pc.localDescription.sdp, slot: m.slot } });
-      }
-      clearTimeout(startTimer);
-      startTimer = setTimeout(() => hostGo(true), 15000);
+      if (roster.length === 1) return hostGo(false);
+      await Promise.all(roster.slice(1).map((m) => connectTo(m, 0)));
+      startTimer = setTimeout(hostTimedOut, HOST_WAIT);
+    } else {
+      startTimer = setTimeout(clientTimedOut, CLIENT_WAIT);
+    }
+  }
+
+  async function connectTo(m, attempt) {
+    const sid = S.sid;
+    const old = S.peers.get(m.slot);
+    if (old) { S.peers.delete(m.slot); try { old.pc.close(); } catch {} }
+    const servers = await iceServers();
+    if (S.sid !== sid || S.inGame) return;
+    const pc = new RTCPeerConnection({ iceServers: servers });
+    const peer = wire(m.slot, pc, m.id);
+    peer.attempt = attempt;
+    peer.onChannel(pc.createDataChannel('u', { ordered: false, maxRetransmits: 0 }));
+    peer.onChannel(pc.createDataChannel('r', { ordered: true }));
+    await pc.setLocalDescription(await pc.createOffer());
+    wsSend({ t: 'signal', to: m.id, data: { kind: 'offer', sid, slot: m.slot, attempt, sdp: pc.localDescription.sdp } });
+    S.linkStatus[m.slot] = attempt ? 'retrying' : 'connecting';
+    renderLoading();
+  }
+
+  function onLinkFailed(slot) {
+    const m = S.roster?.find((x) => x.slot === slot);
+    if (S.mySlot === 0 && m) {
+      const p = S.peers.get(slot);
+      if ((p?.attempt || 0) < 2) { connectTo(m, (p?.attempt || 0) + 1); return; }
+      S.linkStatus[slot] = 'failed';
+      renderLoading();
+      checkAllOpen();
+    } else {
+      S.linkStatus[0] = 'retrying'; // the host re-offers; we just wait for it
+      renderLoading();
     }
   }
 
   async function onSignal(from, data) {
     if (!data || !S.party) return;
-    if (data.kind === 'offer' && S.mySlot !== 0) {
-      const pc = new RTCPeerConnection({ iceServers: ICE });
-      const peer = wire(0, pc);
-      peer.uid = from;
-      await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
-      await pc.setLocalDescription(await pc.createAnswer());
-      await gathered(pc);
-      wsSend({ t: 'signal', to: from, data: { kind: 'answer', sdp: pc.localDescription.sdp } });
-    } else if (data.kind === 'answer' && S.mySlot === 0) {
-      const peer = [...S.peers.values()].find((p) => p.uid === from);
-      if (peer && peer.pc.signalingState === 'have-local-offer') await peer.pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+    if (data.sid && S.sid && data.sid !== S.sid && data.kind !== 'offer') return; // older match
+    switch (data.kind) {
+      case 'offer': {
+        if (S.inGame || from !== S.party.hostId) return;
+        if (S.sid !== data.sid) { closePeers(); S.sid = data.sid; }
+        S.mySlot = data.slot;
+        const servers = await iceServers();
+        if (S.sid !== data.sid) return;
+        const old = S.peers.get(0);
+        if (old) { S.peers.delete(0); try { old.pc.close(); } catch {} }
+        const pc = new RTCPeerConnection({ iceServers: servers });
+        const peer = wire(0, pc, from);
+        await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+        await pc.setLocalDescription(await pc.createAnswer());
+        wsSend({ t: 'signal', to: from, data: { kind: 'answer', sid: data.sid, sdp: pc.localDescription.sdp } });
+        peer.described = true;
+        await flushPendingIce(peer);
+        S.linkStatus = S.linkStatus || {};
+        S.linkStatus[0] = 'connecting';
+        renderLoading();
+        break;
+      }
+      case 'answer': {
+        if (S.mySlot !== 0) return;
+        const peer = [...S.peers.values()].find((p) => p.uid === from);
+        if (peer && peer.pc.signalingState === 'have-local-offer') {
+          await peer.pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+          peer.described = true;
+          await flushPendingIce(peer);
+        }
+        break;
+      }
+      case 'ice': {
+        const peer = [...S.peers.values()].find((p) => p.uid === from && p.sid === data.sid);
+        if (peer && peer.described) await applyIce(peer, data.c || []);
+        else { pendingIce.push({ sid: data.sid, from, c: data.c || [] }); if (pendingIce.length > 50) pendingIce.shift(); }
+        break;
+      }
+      case 'nogo':
+        if (!S.inGame && S.loading) {
+          abortLoading();
+          UI().toast('Couldn\'t connect to the host, so they started without you. Check your connection and try the next match.');
+        }
+        break;
     }
   }
 
+  function setLinkStatus(slot) {
+    const p = S.peers.get(slot);
+    if (!S.linkStatus || !p) return;
+    if (linkOpen(p)) S.linkStatus[slot] = 'connected';
+    renderLoading();
+  }
+
   function checkAllOpen() {
-    if (S.mySlot !== 0 || S.inGame) return;
-    const want = (S.roster || []).length - 1;
-    const open = [...S.peers.values()].filter((p) => p.u?.readyState === 'open' && p.r?.readyState === 'open').length;
-    if (open >= want) hostGo(false);
+    for (const slot of S.peers.keys()) setLinkStatus(slot);
+    if (S.mySlot !== 0 || S.inGame || !S.loading) return;
+    broadcastLoading();
+    const want = (S.roster || []).slice(1);
+    if (want.every((m) => linkOpen(S.peers.get(m.slot)))) hostGo(false);
+    else if (want.every((m) => linkOpen(S.peers.get(m.slot)) || S.linkStatus[m.slot] === 'failed')) hostTimedOut();
+  }
+
+  // host -> clients: who's connected so far, for their loading screens
+  function broadcastLoading() {
+    const msg = JSON.stringify({ t: 'load', status: S.linkStatus });
+    for (const p of S.peers.values()) if (linkOpen(p)) { try { p.r.send(msg); } catch {} }
   }
 
   function opts(role, present) {
@@ -345,42 +486,150 @@
     return `role=${role};me=${S.mySlot};names=${names.join(',')};present=${present.join(',')};mode=infinite;diff=${S.party.diff};name=${names[S.mySlot]};${UI().equipString()}`;
   }
 
-  function hostGo(timedOut) {
+  function hostTimedOut() {
+    if (S.inGame || S.mySlot !== 0 || !S.loading) return;
+    clearTimeout(startTimer);
+    S.hostStuck = true;
+    for (const m of S.roster.slice(1)) if (!linkOpen(S.peers.get(m.slot))) S.linkStatus[m.slot] = 'failed';
+    broadcastLoading();
+    renderLoading();
+  }
+
+  function hostGo() {
     if (S.inGame || S.mySlot !== 0) return;
     clearTimeout(startTimer);
-    const present = [0, 1, 2].map((i) => {
-      if (i === 0) return 1;
-      const p = S.peers.get(i);
-      return p && p.r?.readyState === 'open' && p.u?.readyState === 'open' ? 1 : 0;
-    });
-    if (timedOut) {
-      const missing = S.roster.filter((m) => m.slot > 0 && !present[m.slot]).map((m) => m.name);
-      if (missing.length) UI().toast(`Couldn't connect to ${missing.join(', ')} (network/firewall).`);
+    const present = [0, 1, 2].map((i) => (i === 0 ? 1 : linkOpen(S.peers.get(i)) ? 1 : 0));
+    for (const m of S.roster.slice(1)) {
+      const p = S.peers.get(m.slot);
+      if (present[m.slot]) p.r.send(JSON.stringify({ t: 'go', present }));
+      else {
+        wsSend({ t: 'signal', to: m.id, data: { kind: 'nogo', sid: S.sid } });
+        if (p) { S.peers.delete(m.slot); try { p.pc.close(); } catch {} }
+      }
     }
-    for (const [slot, p] of S.peers) if (present[slot]) p.r.send(JSON.stringify({ t: 'go', present }));
     startGame(opts('host', present));
   }
 
   function onControl(from, m) {
     if (m.t === 'go' && S.mySlot !== 0 && !S.inGame) startGame(opts('client', m.present));
+    else if (m.t === 'load' && S.mySlot !== 0 && !S.inGame) { S.hostView = m.status; renderLoading(); }
   }
 
+  let startTimer = 0;
   function startGame(o) {
+    clearTimeout(startTimer);
     S.inGame = true;
+    S.hostStuck = false;
     S.inbox.length = 0;
     UI().startCoop(o);
+    renderLoading('go');
+    // keep the loading screen up long enough for the launch sting, then fade it
+    const left = Math.max(350, 1700 - (Date.now() - S.loadT0));
+    setTimeout(hideLoading, left);
+  }
+
+  function clientTimedOut() {
+    if (S.inGame || S.mySlot === 0 || !S.loading) return;
+    abortLoading();
+    UI().toast('Couldn\'t connect to the host. Check your connection and try again.');
+  }
+
+  /** Leave the loading screen without starting (cancel, failure, host cancelled). */
+  function abortLoading() {
+    clearTimeout(startTimer);
+    closePeers();
+    S.sid = null;
+    S.hostStuck = false;
+    hideLoading();
   }
 
   function peerGone(slot) {
     if (!S.peers.has(slot)) return;
     S.peers.delete(slot);
     if (S.inGame) send('peerleft|' + slot);
+    else if (S.loading) { if (S.linkStatus) S.linkStatus[slot] = 'failed'; renderLoading(); }
   }
 
   function closePeers() {
     for (const p of S.peers.values()) { try { p.pc.close(); } catch {} }
     S.peers.clear();
     S.inbox.length = 0;
+    for (const q of iceOut.values()) clearTimeout(q.timer);
+    iceOut.clear();
+  }
+
+  // ------------------------------------------------------------------ loading screen
+  const TIPS = [
+    'Downed teammates can crawl. Stand next to them for 3 seconds to revive.',
+    'Everyone shares XP: stick together and level up as a squad.',
+    'Bosses rotate every 5 waves. Save your ultimate for them.',
+    'Dash through gaps in the horde. You\'re briefly untouchable.',
+    'A team wipe ends the run for everyone. Don\'t stray too far.',
+    'Pick powers that complement your squad: crowd control pairs well with burst damage.',
+  ];
+  function showLoading() {
+    S.loading = true;
+    S.loadT0 = Date.now();
+    S.hostView = null;
+    S.hostStuck = false;
+    const el = $('coop-load');
+    el.classList.add('show');
+    $('cl-tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
+    clearInterval(S.tipTimer);
+    S.tipTimer = setInterval(() => { $('cl-tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)]; }, 5000);
+    renderLoading();
+  }
+  function hideLoading() {
+    S.loading = false;
+    clearInterval(S.tipTimer);
+    $('coop-load')?.classList.remove('show');
+  }
+  function renderLoading(phase) {
+    if (!S.loading || !S.roster) return;
+    const host = S.mySlot === 0;
+    const label = { connecting: 'Connecting…', retrying: 'Retrying…', connected: 'Connected', failed: 'Can\'t connect' };
+    const total = S.roster.length;
+    let done = 0;
+    $('cl-diff').textContent = `Infinite · ${window.UHDiffName?.(S.party?.diff) || ''} · ${total} survivors`;
+    $('cl-players').innerHTML = S.roster.map((m) => {
+      let st;
+      if (phase === 'go') st = 'connected';
+      else if (m.slot === S.mySlot) st = 'connected';
+      else if (host) st = S.linkStatus?.[m.slot] || 'connecting';
+      else if (m.slot === 0) st = S.linkStatus?.[0] || 'connecting';
+      else st = S.hostView?.[m.slot] || 'connecting';
+      if (st === 'connected') done++;
+      return `<div class="cl-p ${st}"><span class="cl-dot"></span><b>${esc(m.name)}${m.slot === 0 ? ' 👑' : ''}${m.slot === S.mySlot ? ' (you)' : ''}</b><span>${m.slot === S.mySlot ? 'Ready' : label[st] || st}</span></div>`;
+    }).join('');
+    $('cl-bar').style.width = (phase === 'go' ? 100 : 15 + 75 * (done / total)) + '%';
+    $('cl-status').textContent = phase === 'go' ? 'Dropping in!'
+      : host ? (S.hostStuck ? 'Some players couldn\'t connect.' : 'Connecting to your squad…')
+      : (S.linkStatus?.[0] === 'connected' ? 'Connected! Waiting for the squad…' : 'Connecting to the host…');
+    const acts = $('cl-actions');
+    if (phase === 'go') acts.innerHTML = '';
+    else if (host && S.hostStuck) {
+      acts.innerHTML = `<button class="btn gold" id="cl-anyway">▶ Start without them</button>
+        <button class="btn secondary" id="cl-retry">↻ Retry</button>
+        <button class="btn secondary" id="cl-cancel">Cancel</button>`;
+      $('cl-anyway').onclick = () => hostGo();
+      $('cl-retry').onclick = () => {
+        S.hostStuck = false;
+        for (const m of S.roster.slice(1)) if (!linkOpen(S.peers.get(m.slot))) connectTo(m, 0);
+        clearTimeout(startTimer);
+        startTimer = setTimeout(hostTimedOut, HOST_WAIT);
+        renderLoading();
+      };
+      $('cl-cancel').onclick = cancelMatch;
+    } else {
+      acts.innerHTML = `<button class="btn secondary" id="cl-cancel">Cancel</button>`;
+      $('cl-cancel').onclick = cancelMatch;
+    }
+  }
+  function cancelMatch() {
+    const host = S.mySlot === 0;
+    abortLoading();
+    if (host) wsSend({ t: 'party.end' });
+    else UI().toast('Left the match. You\'re still in the party.');
   }
 
   // ------------------------------------------------------------------ public
@@ -401,7 +650,7 @@
     lookChanged() { if (S.party) wsSend({ t: 'party.look', look: look() }); },
     render,
     /** for tests/debugging */
-    get debug() { return { slot: S.mySlot, inGame: S.inGame, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), party: S.party, me: S.me }; },
+    get debug() { return { slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), party: S.party, me: S.me }; },
     inviteLink,
   };
 

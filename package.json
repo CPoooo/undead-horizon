@@ -11,12 +11,14 @@
     "@neondatabase/auth": "^0.5.0-beta",
     "@types/pg": "^8.23.1",
     "esbuild": "^0.28.2",
+    "playwright": "^1.64.0",
     "typescript": "^7.0.2"
   },
   "private": true,
   "scripts": {
     "build:cloud": "esbuild ui/cloud-src.js --bundle --format=iife --minify --target=es2020 --outfile=ui/cloud.js",
     "db:schema": "neon psql production -- -v ON_ERROR_STOP=1 -f server/schema.sql",
-    "deploy:api": "neon deploy --env .env.local"
+    "deploy:api": "neon deploy --env .env.local",
+    "e2e": "node tests/e2e/coop.mjs"
   }
 }

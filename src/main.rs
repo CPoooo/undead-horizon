@@ -438,6 +438,16 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
         "dash" => g.input.dash_req = true,
         "ult" => g.input.ult_req = true,
         "touch" => g.input.is_touch = a == "1",
+        // one-shot UI sounds from the HTML layer (party lobby)
+        "sfx" => {
+            g.audio.unlock();
+            match a {
+                "ready" => g.audio.play(audio::Sfx::ReadyUp),
+                "start" => g.audio.play(audio::Sfx::MatchStart),
+                "click" => g.audio.play(audio::Sfx::UiSelect),
+                _ => {}
+            }
+        }
         _ => {}
     }
 }

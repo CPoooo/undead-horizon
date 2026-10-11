@@ -11,6 +11,7 @@
 //           POST /save/consume           { slot } returns that save and deletes it (resume once)
 //           DELETE /save?slot=           discard a slot (a new run of that mode overwrites it)
 //           POST /runs                   finished/abandoned run -> coins, progress, leaderboard
+//           GET  /turn                   WebRTC ICE servers (STUN + short-lived Metered TURN relay)
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { PRICES, CHAPTERS, DIFFS, CATEGORIES, waveCoins } from "./catalog";
@@ -87,6 +88,7 @@ app.use("/equip", auth);
 app.use("/save", auth);
 app.use("/save/*", auth);
 app.use("/runs", auth);
+app.use("/turn", auth);
 
 async function auth(c: any, next: () => Promise<void>) {
   const h = c.req.header("authorization");
@@ -115,6 +117,48 @@ async function profileJson(userId: string) {
 }
 
 app.get("/me", async (c) => c.json(await profileJson(c.get("userId"))));
+
+// ---------------------------------------------------------------- TURN relay
+// Players whose networks block direct WebRTC (cellular CGNAT, Wi-Fi client
+// isolation) fall back to Metered's relay. The secret key never leaves the
+// server: we mint one shared credential per isolate and refresh it hourly.
+const STUN_ONLY = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
+const meteredHost = () => {
+  const a = (process.env.METERED_APP ?? "").replace(/^https?:\/\//, "").split("/")[0].trim();
+  return !a ? "" : a.endsWith(".metered.live") ? a : `${a}.metered.live`;
+};
+let turnCache: { at: number; servers: unknown[] } | null = null;
+async function turnServers(): Promise<unknown[]> {
+  if (turnCache && Date.now() - turnCache.at < 55 * 60_000) return turnCache.servers;
+  const host = meteredHost();
+  if (!host) return STUN_ONLY;
+  let apiKey = process.env.METERED_API_KEY;
+  if (!apiKey && process.env.METERED_SECRET_KEY) {
+    const r = await fetch(`https://${host}/api/v1/turn/credential?secretKey=${encodeURIComponent(process.env.METERED_SECRET_KEY)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expiryInSeconds: 4 * 3600, label: "undead-horizon" }),
+    });
+    if (!r.ok) throw new Error(`metered credential ${r.status}`);
+    apiKey = (await r.json()).apiKey;
+  }
+  if (!apiKey) return STUN_ONLY;
+  const r = await fetch(`https://${host}/api/v1/turn/credentials?apiKey=${encodeURIComponent(apiKey)}`);
+  if (!r.ok) throw new Error(`metered ice ${r.status}`);
+  const servers = await r.json();
+  if (!Array.isArray(servers) || !servers.length) return STUN_ONLY;
+  turnCache = { at: Date.now(), servers: [...STUN_ONLY, ...servers] };
+  return turnCache.servers;
+}
+
+app.get("/turn", async (c) => {
+  try {
+    return c.json({ iceServers: await turnServers() });
+  } catch (e) {
+    console.error("[turn]", e);
+    return c.json({ iceServers: STUN_ONLY });
+  }
+});
 
 app.post("/me/name", async (c) => {
   const { name } = await c.req.json();

@@ -41,6 +41,7 @@ async function notify(userIds: string[], payload: Record<string, unknown>) {
 }
 
 let cursor = -1n;
+let floor = 0n; // never replay events from before this isolate started polling
 let polling = false;
 const delivered = new Set<string>(); // recent ids: re-scan a window so late commits aren't skipped
 let lastCleanup = 0;
@@ -52,8 +53,10 @@ async function poll() {
     if (cursor < 0n) {
       const r = await pool.query("select coalesce(max(id), 0)::text as id from events");
       cursor = BigInt(r.rows[0].id);
+      floor = cursor;
     }
-    const from = cursor > 200n ? cursor - 200n : 0n;
+    const back = cursor > 200n ? cursor - 200n : 0n;
+    const from = back > floor ? back : floor;
     const { rows } = await pool.query(
       "select id::text as id, user_id, payload from events where id > $1 order by id limit 2000",
       [from.toString()],

@@ -33,9 +33,13 @@ pub enum Sfx {
     Heal,
     UltReady,
     ShootHeavy,
+    /// party lobby: everyone readied up
+    ReadyUp,
+    /// co-op match launch sting (host pressed start)
+    MatchStart,
 }
 
-const SFX_COUNT: usize = 25;
+const SFX_COUNT: usize = 27;
 
 impl Sfx {
     fn idx(self) -> usize {
@@ -218,6 +222,8 @@ impl Audio {
                 | Sfx::UiSelect
                 | Sfx::UiMove
                 | Sfx::UltReady
+                | Sfx::ReadyUp
+                | Sfx::MatchStart
         );
         if !important && self.voices_this_frame > 10 {
             return;
@@ -495,6 +501,29 @@ impl Audio {
             Sfx::UltReady => {
                 self.tone(&d, O::Triangle, t, 880.0, 880.0, 0.12, 0.09, 0.003)?;
                 self.tone(&d, O::Triangle, t + 0.1, 1318.5, 1318.5, 0.25, 0.09, 0.003)?;
+            }
+            Sfx::ReadyUp => {
+                // bright rising major arpeggio with a sparkle on top
+                for (k, f) in [523.25f32, 659.25, 783.99, 1046.5].iter().enumerate() {
+                    let tt = t + k as f64 * 0.075;
+                    self.tone(&d, O::Triangle, tt, *f, *f, 0.32, 0.12, 0.004)?;
+                    self.tone(&d, O::Square, tt, *f * 2.0, *f * 2.0, 0.08, 0.025, 0.002)?;
+                }
+                self.noise(&d, t + 0.3, F::Highpass, 6000.0, 9000.0, 0.7, 0.35, 0.05)?;
+            }
+            Sfx::MatchStart => {
+                // whoosh into a heavy power chord stab, then a rising call
+                self.noise(&d, t, F::Bandpass, 300.0, 4000.0, 1.2, 0.45, 0.22)?;
+                let hit = t + 0.38;
+                for f in [73.42f32, 110.0, 146.83, 220.0] {
+                    self.tone(&d, O::Sawtooth, hit, f, f * 0.97, 0.9, 0.11, 0.006)?;
+                }
+                self.tone(&d, O::Sine, hit, 90.0, 40.0, 0.5, 0.6, 0.003)?;
+                self.noise(&d, hit, F::Lowpass, 1800.0, 120.0, 0.8, 0.5, 0.35)?;
+                for (k, f) in [293.66f32, 369.99, 440.0, 587.33].iter().enumerate() {
+                    let tt = hit + 0.12 + k as f64 * 0.09;
+                    self.tone(&d, O::Square, tt, *f, *f, 0.22, 0.05, 0.003)?;
+                }
             }
         }
         Some(())

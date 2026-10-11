@@ -225,6 +225,19 @@
     <button data-m="settings"><i>⚙️</i>More</button>
   </nav>
   <div id="invite-pop"></div>
+  <!-- co-op match loading screen (driven by ui/coop.js) -->
+  <div id="coop-load" role="status" aria-live="polite">
+    <div class="cl-card">
+      <div class="cl-kicker">CO-OP · INFINITE</div>
+      <h1 class="cl-title">Deploying squad</h1>
+      <div class="cl-diff" id="cl-diff"></div>
+      <div class="cl-players" id="cl-players"></div>
+      <div class="cl-track"><div class="cl-bar" id="cl-bar"></div></div>
+      <div class="cl-status" id="cl-status"></div>
+      <div class="cl-actions" id="cl-actions"></div>
+      <div class="cl-tip"><b>TIP</b> <span id="cl-tip"></span></div>
+    </div>
+  </div>
   <button id="pause-btn" aria-label="Pause">II</button>
   <div id="touch-ui">
     <button class="tbtn ult" id="t-ult">☢️</button>

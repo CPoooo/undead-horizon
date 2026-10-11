@@ -3,3 +3,4 @@
 .neon
 .env.local
 node_modules/
+tests/e2e/out/
