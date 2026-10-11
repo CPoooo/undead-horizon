@@ -48,3 +48,59 @@ create index if not exists runs_leaderboard_diff_idx
   on runs (diff, wave desc, level desc, kills desc, time asc)
   where mode = 'infinite' and not abandoned;
 create index if not exists runs_user_idx on runs (user_id, created_at desc);
+
+-- ---------------------------------------------------------------- social / co-op
+-- Short shareable code used to add friends (profiles.display_name is not unique).
+alter table profiles add column if not exists friend_code text unique;
+update profiles set friend_code = upper(substr(md5(user_id || random()::text), 1, 6)) where friend_code is null;
+
+create table if not exists friends (
+  user_id    text not null references profiles(user_id) on delete cascade,
+  friend_id  text not null references profiles(user_id) on delete cascade,
+  status     text not null check (status in ('pending','accepted')),
+  created_at timestamptz not null default now(),
+  primary key (user_id, friend_id)
+);
+
+-- Updated by the WebSocket heartbeat; "online" = seen in the last minute.
+create table if not exists presence (
+  user_id   text primary key references profiles(user_id) on delete cascade,
+  last_seen timestamptz not null default now()
+);
+
+create table if not exists parties (
+  id         bigserial primary key,
+  host_id    text not null references profiles(user_id) on delete cascade,
+  diff       text not null default 'survivor' check (diff in ('rookie','survivor','veteran','nightmare')),
+  status     text not null default 'open' check (status in ('open','starting','in_game')),
+  seed       bigint,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists party_members (
+  party_id  bigint not null references parties(id) on delete cascade,
+  user_id   text not null references profiles(user_id) on delete cascade,
+  ready     boolean not null default false,
+  joined_at timestamptz not null default now(),
+  primary key (party_id, user_id)
+);
+create unique index if not exists party_members_one_party on party_members (user_id);
+
+create table if not exists party_invites (
+  party_id   bigint not null references parties(id) on delete cascade,
+  from_id    text not null references profiles(user_id) on delete cascade,
+  to_id      text not null references profiles(user_id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (party_id, to_id)
+);
+
+-- Cross-isolate fan-out: every WebSocket isolate polls this for its connected users.
+create table if not exists events (
+  id         bigserial primary key,
+  user_id    text not null,
+  payload    jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists events_user_idx on events (user_id, id);
+
+alter table runs add column if not exists players integer not null default 1;

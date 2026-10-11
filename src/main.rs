@@ -40,6 +40,16 @@ fn listen<E: wasm_bindgen::convert::FromWasmAbi + 'static>(
     cb.forget();
 }
 
+/// `KeyboardEvent.code`, or None for synthetic key events (e.g. Chrome autofill
+/// dispatches plain `Event`s named keydown/keyup that have no `code`; calling
+/// the typed getter on those throws inside Rust and wedges the game state).
+fn key_code(e: &KeyboardEvent) -> Option<String> {
+    js_sys::Reflect::get(e, &"code".into())
+        .ok()
+        .and_then(|v| v.as_string())
+        .filter(|c| !c.is_empty())
+}
+
 fn is_text_input(e: &Event) -> bool {
     e.target()
         .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
@@ -89,7 +99,7 @@ fn run() -> Result<(), JsValue> {
             if is_text_input(&e) {
                 return;
             }
-            let code = e.code();
+            let Some(code) = key_code(&e) else { return };
             let Ok(mut g) = g.try_borrow_mut() else {
                 return;
             };
@@ -104,7 +114,11 @@ fn run() -> Result<(), JsValue> {
                 e.prevent_default();
             }
             set_key(&mut g, &code, true);
-            if !e.repeat() {
+            let repeat = js_sys::Reflect::get(&e, &"repeat".into())
+                .ok()
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !repeat {
                 g.input.pressed.push(code);
             }
         });
@@ -112,8 +126,9 @@ fn run() -> Result<(), JsValue> {
     {
         let g = game.clone();
         listen(&win_t, "keyup", move |e: KeyboardEvent| {
+            let Some(code) = key_code(&e) else { return };
             if let Ok(mut g) = g.try_borrow_mut() {
-                set_key(&mut g, &e.code(), false);
+                set_key(&mut g, &code, false);
             }
         });
     }
@@ -122,24 +137,29 @@ fn run() -> Result<(), JsValue> {
     {
         let g = game.clone();
         listen(&win_t, "mousemove", move |e: MouseEvent| {
+            // read event fields before borrowing: a throwing getter must never
+            // leave the game borrowed
+            let m = v2(e.client_x() as f32, e.client_y() as f32);
             let Ok(mut g) = g.try_borrow_mut() else {
                 return;
             };
-            g.input.mouse = v2(e.client_x() as f32, e.client_y() as f32);
+            g.input.mouse = m;
             g.input.mouse_seen = true;
         });
     }
     {
         let g = game.clone();
         listen(&canvas_t, "mousedown", move |e: MouseEvent| {
+            let m = v2(e.client_x() as f32, e.client_y() as f32);
+            let button = e.button();
             let Ok(mut g) = g.try_borrow_mut() else {
                 return;
             };
             g.audio.unlock();
-            g.input.mouse = v2(e.client_x() as f32, e.client_y() as f32);
+            g.input.mouse = m;
             g.input.mouse_seen = true;
             g.input.is_touch = false;
-            match e.button() {
+            match button {
                 0 => {
                     g.input.mouse_down = true;
                     let m = g.input.mouse;
