@@ -219,7 +219,10 @@ impl Game {
         let map = world::map();
         match &map {
             Some(m) => self.draw_map_ground(c, m, vmin, vmax),
-            None => self.draw_ground(c, vmin, vmax),
+            None => {
+                self.draw_ground(c, vmin, vmax);
+                self.draw_hazards(c, vmin, vmax);
+            }
         }
         self.draw_decals(c, vmin, vmax);
         self.draw_corpses(c);
@@ -611,6 +614,83 @@ impl Game {
     }
 
     // ------------------------------------------------------------- ground
+    /// Quicksand and ice patches (see `hazards.rs`), drawn on the ground.
+    fn draw_hazards(&self, c: &Ctx, vmin: V2, vmax: V2) {
+        use crate::hazards::Hazard;
+        let t = self.real_time as f32;
+        crate::hazards::for_patches_in(vmin, vmax, self.hazard_density(), |p| {
+            let (x, y, r) = (p.pos.x, p.pos.y, p.r);
+            let rot = (p.seed % 628) as f32 / 100.0;
+            let sx = r;
+            let sy = r * 0.75;
+            let blob = |k: f32| {
+                c.begin_path();
+                let _ = c.ellipse(d(x), d(y), d(sx * k), d(sy * k), d(rot * 0.15), 0.0, TAU64);
+            };
+            match p.kind {
+                Hazard::Quicksand => {
+                    // dark rim, sandy body, slow swirl rings sinking toward the middle
+                    c.set_global_alpha(0.55);
+                    blob(1.08);
+                    c.set_fill_style_str("#3a2a14");
+                    c.fill();
+                    c.set_global_alpha(0.95);
+                    blob(0.96);
+                    c.set_fill_style_str("#8a6a3a");
+                    c.fill();
+                    blob(0.7);
+                    c.set_fill_style_str("#76582e");
+                    c.fill();
+                    c.set_stroke_style_str("rgba(40,26,10,0.55)");
+                    c.set_line_width(2.5);
+                    for k in 0..3 {
+                        let f = ((t * 0.25 + k as f32 / 3.0) % 1.0) * 0.8 + 0.12;
+                        c.set_global_alpha(d(0.25 + 0.6 * (1.0 - f)));
+                        blob(1.0 - f);
+                        c.stroke();
+                    }
+                }
+                Hazard::Ice => {
+                    c.set_global_alpha(0.5);
+                    blob(1.06);
+                    c.set_fill_style_str("#e8f8ff");
+                    c.fill();
+                    c.set_global_alpha(0.85);
+                    blob(0.97);
+                    c.set_fill_style_str("#9fd6ee");
+                    c.fill();
+                    blob(0.62);
+                    c.set_fill_style_str("#b9e6f8");
+                    c.fill();
+                    // glints and cracks
+                    c.save();
+                    blob(0.97);
+                    c.clip();
+                    c.set_stroke_style_str("rgba(255,255,255,0.7)");
+                    c.set_line_width(2.0);
+                    c.begin_path();
+                    for k in 0..4 {
+                        let o = (k as f32 - 1.5) * r * 0.42 + ((t * 0.6 + rot).sin()) * 6.0;
+                        c.move_to(d(x + o - r * 0.5), d(y + r * 0.45));
+                        c.line_to(d(x + o + r * 0.1), d(y - r * 0.45));
+                    }
+                    c.stroke();
+                    c.set_stroke_style_str("rgba(60,110,140,0.45)");
+                    c.set_line_width(1.2);
+                    c.begin_path();
+                    c.move_to(d(x - r * 0.6), d(y + r * 0.1));
+                    c.line_to(d(x - r * 0.1), d(y - r * 0.05));
+                    c.line_to(d(x + r * 0.2), d(y + r * 0.3));
+                    c.move_to(d(x - r * 0.1), d(y - r * 0.05));
+                    c.line_to(d(x + r * 0.05), d(y - r * 0.4));
+                    c.stroke();
+                    c.restore();
+                }
+            }
+            c.set_global_alpha(1.0);
+        });
+    }
+
     fn draw_ground(&self, c: &Ctx, vmin: V2, vmax: V2) {
         c.set_fill_style_str("#1f2b1b");
         c.fill_rect(d(vmin.x), d(vmin.y), d(vmax.x - vmin.x), d(vmax.y - vmin.y));
@@ -2135,6 +2215,24 @@ impl Game {
                 path_circle(c, p.x, p.y, b.r * 0.75);
             }
             c.fill();
+        }
+        // volley shots that haven't launched yet: a tightening warning ring
+        // and a short tick pointing where they'll fly
+        if self.eshots.iter().any(|s| s.delay > 0.0) {
+            let pulse = 0.5 + 0.5 * (self.real_time as f32 * 18.0).sin().abs();
+            c.set_stroke_style_str(self.access.color("#ff4a5a"));
+            c.set_line_width(2.0);
+            c.set_global_alpha(d(0.5 + 0.5 * pulse));
+            c.begin_path();
+            for s in self.eshots.iter().filter(|s| s.delay > 0.0) {
+                let k = (s.delay / crate::volley::VOLLEY_WARN).clamp(0.0, 1.0);
+                path_circle_stroke(c, s.pos.x, s.pos.y, s.r + 4.0 + 14.0 * k);
+                let dir = s.vel.norm();
+                c.move_to(d(s.pos.x + dir.x * (s.r + 6.0)), d(s.pos.y + dir.y * (s.r + 6.0)));
+                c.line_to(d(s.pos.x + dir.x * (s.r + 22.0)), d(s.pos.y + dir.y * (s.r + 22.0)));
+            }
+            c.stroke();
+            c.set_global_alpha(1.0);
         }
         // enemy acid (rocks are drawn solid below)
         c.set_fill_style_str(self.access.color("#7dff3a"));

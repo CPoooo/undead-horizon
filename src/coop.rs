@@ -1233,6 +1233,7 @@ impl Game {
                 turn: 0.0,
                 r: rad,
                 grazed: false,
+                delay: 0.0,
             })
             .collect();
         self.pickups = pks
@@ -1736,7 +1737,9 @@ mod tests {
         let before: Vec<(u32, V2)> = ann.zombies.iter().map(|z| (z.uid, z.pos)).collect();
         pump_star(&mut ann, &mut [&mut ben], &mut t, 120);
         let moved = ann.zombies.iter().any(|z| before.iter().any(|b| b.0 == z.uid && b.1.dist(z.pos) > 5.0));
-        assert!(moved || ann.zombies.is_empty(), "the new host simulates the horde");
+        // zombies walk, die or spawn: any of those means the new host runs the horde
+        let changed = ann.zombies.iter().any(|z| !before.iter().any(|b| b.0 == z.uid)) || ann.zombies.len() != before.len();
+        assert!(moved || changed || ann.zombies.is_empty(), "the new host simulates the horde");
         let bn = ben.net.as_ref().unwrap();
         assert!(bn.remotes[1].present && !bn.remotes[0].present, "Ben sees Ann as the host");
         assert!(bn.last_snap_at > 0.0, "Ben gets snapshots from the new host");

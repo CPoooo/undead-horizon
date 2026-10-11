@@ -185,6 +185,8 @@ pub struct EShot {
     pub r: f32,
     /// already counted as a near miss
     pub grazed: bool,
+    /// seconds a telegraphed volley shot hangs before launching (0 = flying)
+    pub delay: f32,
 }
 
 pub struct Gem {
@@ -436,6 +438,11 @@ pub struct Game {
     pub levelup_t: f32,
     /// last level-up state sent to the UI (it hides the thumb cluster meanwhile)
     pub levelup_ui: bool,
+    /// hazard kinds already announced this run (bit per kind)
+    pub hazard_seen: u8,
+    /// seconds to the next volley (see `volley.rs`), and whether it was announced
+    pub volley_t: f32,
+    pub volley_seen: bool,
     pub pending_levels: u32,
     /// level-up charges for this run
     pub rerolls: u32,
@@ -596,7 +603,7 @@ pub struct Game {
 
 fn xp_for(level: u32) -> f32 {
     let l = (level - 1) as f32;
-    6.0 + l * 5.0 + l.powf(1.55) * 1.4
+    7.0 + l * 6.0 + l.powf(1.6) * 1.6
 }
 
 fn hp_mult(n: u32) -> f32 {
@@ -642,6 +649,9 @@ impl Game {
             sel: 0,
             levelup_t: 0.0,
             levelup_ui: false,
+            hazard_seen: 0,
+            volley_t: 0.0,
+            volley_seen: false,
             pending_levels: 0,
             rerolls: 0,
             banishes: 0,
@@ -865,6 +875,11 @@ impl Game {
         &DIFFICULTIES[self.diff]
     }
 
+    /// XP for the next level; harder difficulties level up more slowly.
+    pub fn xp_need(&self, level: u32) -> f32 {
+        xp_for(level) * self.difficulty().xp
+    }
+
     pub fn is_campaign(&self) -> bool {
         matches!(self.mode, Mode::Campaign(_))
     }
@@ -905,6 +920,10 @@ impl Game {
         self.candy = 0;
         self.apply_opts(opts);
         self.player = Game::fresh_player();
+        self.player.xp_next = self.xp_need(1);
+        self.hazard_seen = 0;
+        self.volley_t = 0.0;
+        self.volley_seen = false;
         let map = world::load_builtin(&self.map_id);
         if let Some(m) = &map {
             self.player.pos = m.spawn;
@@ -1111,7 +1130,7 @@ impl Game {
         }
     }
     pub(crate) fn move_speed(&self) -> f32 {
-        255.0 * (1.0 + 0.09 * self.ups.f(Up::Speed)) * GUNS[self.gun].move_mult * self.ob_speed_mult()
+        240.0 * self.difficulty().player_speed * (1.0 + 0.09 * self.ups.f(Up::Speed)) * GUNS[self.gun].move_mult * self.ob_speed_mult()
             * (1.0 + 0.02 * self.meta.spd as f32 + self.relics.speed / 100.0)
     }
     pub fn magnet_r(&self) -> f32 {
@@ -1123,7 +1142,7 @@ impl Game {
         0.05 + 0.10 * self.ups.f(Up::Crit) + self.relics.crit / 100.0
     }
     pub fn dash_cooldown(&self) -> f32 {
-        1.1 * 0.8f32.powi(self.ups.get(Up::DashMaster) as i32)
+        1.6 * self.difficulty().dash_cd * 0.82f32.powi(self.ups.get(Up::DashMaster) as i32)
     }
     pub fn blade_count(&self) -> u32 {
         let l = self.ups.get(Up::Blades) as u32;
@@ -1155,6 +1174,26 @@ impl Game {
     pub fn push_sfx(&mut self, s: Sfx, at: V2) {
         self.sfx(s, at);
     }
+    /// The first time you step on each hazard kind in a run, say what it is.
+    fn hazard_notice(&mut self, h: Option<crate::hazards::Hazard>) {
+        use crate::hazards::Hazard;
+        let Some(h) = h else { return };
+        let bit = match h {
+            Hazard::Quicksand => 1,
+            Hazard::Ice => 2,
+        };
+        if self.hazard_seen & bit != 0 {
+            return;
+        }
+        self.hazard_seen |= bit;
+        let (t, col) = match h {
+            Hazard::Quicksand => ("QUICKSAND! Dash out", "#e0b060"),
+            Hazard::Ice => ("ICE! You'll slide", "#a8e4ff"),
+        };
+        let p = self.player.pos + v2(0.0, -46.0);
+        self.push_text(p, t.into(), col, 20.0);
+    }
+
     pub fn push_text(&mut self, pos: V2, s: String, color: &'static str, size: f32) {
         self.text(pos, s, color, size);
     }
@@ -2233,7 +2272,7 @@ impl Game {
         if self.is_campaign() {
             wave = wave.min(CHAPTERS[self.chapter()].waves);
         }
-        self.player.xp_next = xp_for(self.player.level);
+        self.player.xp_next = self.xp_need(self.player.level);
         self.player.hp = self.player.hp.clamp(1.0, self.player.max_hp);
         self.player.hp_ghost = self.player.hp;
         self.ult_ready_played = self.player.ult >= 1.0;
@@ -2341,7 +2380,7 @@ impl Game {
             while self.player.xp >= self.player.xp_next {
                 self.player.xp -= self.player.xp_next;
                 self.player.level += 1;
-                self.player.xp_next = xp_for(self.player.level);
+                self.player.xp_next = self.xp_need(self.player.level);
                 self.pending_levels += 1;
             }
             if self.pending_chests > 0 && self.chest.is_none() && self.phase == Phase::Playing && self.player_alive() {
@@ -2380,8 +2419,13 @@ impl Game {
     }
 
     pub(crate) fn update_player(&mut self) {
+        use crate::hazards::Hazard;
         let mdir = self.move_dir();
         let speed = self.move_speed() * if self.player.downed { 0.25 } else { 1.0 };
+        let hazard = crate::hazards::hazard_at(self.player.pos, self.hazard_density());
+        self.hazard_notice(hazard);
+        // quicksand bogs you down (a dash still gets you out); ice keeps your momentum
+        let walk = if hazard == Some(Hazard::Quicksand) { speed * 0.5 } else { speed };
         if self.player.downed {
             self.player.dash_buf = 0.0;
         }
@@ -2431,9 +2475,12 @@ impl Game {
                 p.vel = p.dash_dir * speed;
             }
         } else {
-            let target = mdir * speed;
+            let target = mdir * walk;
             // fast accel, slightly slower decel => snappy yet weighty
-            let rate = if mdir.len2() > 0.0 { 18.0 } else { 14.0 };
+            let rate = match hazard {
+                Some(Hazard::Ice) => if mdir.len2() > 0.0 { 2.4 } else { 0.7 },
+                _ => if mdir.len2() > 0.0 { 18.0 } else { 14.0 },
+            };
             p.vel = p.vel.lerp(target, damp(rate, DT));
         }
         p.pos += p.vel * DT;
@@ -3158,6 +3205,8 @@ impl Game {
     pub(crate) fn update_zombies(&mut self) {
         let targets = self.targets();
         let wave_n = self.scale_n();
+        let shots = self.difficulty().shots;
+        let hz = self.hazard_density();
         let mut contacts: Vec<(usize, u8)> = Vec::new();
         let mut fuses: Vec<usize> = Vec::new();
         let mut boss_summons: Vec<(V2, ZKind, u32)> = Vec::new();
@@ -3205,6 +3254,9 @@ impl Game {
 
             z.rage_t -= DT;
             let mut spd = z.speed * z.st.speed_mult() * if z.rage_t > 0.0 { 1.35 } else { 1.0 };
+            if hz > 0.0 && crate::hazards::hazard_at(z.pos, hz) == Some(crate::hazards::Hazard::Quicksand) {
+                spd *= 0.8; // the dead wade through it better than you do
+            }
             let mut want = if playing {
                 dir
             } else {
@@ -3271,6 +3323,7 @@ impl Game {
                                 turn: 0.0,
                                 r: 13.0,
                                 grazed: false,
+                delay: 0.0,
                             });
                             self.pending_sfx.push((Sfx::Dash, z.pos));
                         }
@@ -3285,10 +3338,17 @@ impl Game {
                     }
                     z.timer -= DT;
                     if z.timer <= 0.0 && dist < 560.0 && playing {
-                        z.timer = 2.4 + self.rng.range(-0.3, 0.3);
+                        z.timer = 2.4 / (0.5 + 0.5 * shots) + self.rng.range(-0.3, 0.3);
                         let lead = ppos + pvel * (dist / 340.0) * 0.6;
                         let aim = (lead - z.pos).angle();
-                        let spread: &[f32] = if wave_n >= 15 { &[-0.22, 0.0, 0.22] } else { &[0.0] };
+                        let w = wave_n as f32 * shots;
+                        let spread: &[f32] = if w >= 30.0 {
+                            &[-0.4, -0.2, 0.0, 0.2, 0.4]
+                        } else if w >= 15.0 {
+                            &[-0.22, 0.0, 0.22]
+                        } else {
+                            &[0.0]
+                        };
                         for off in spread {
                             let sdir = V2::from_angle(aim + off);
                             self.eshots.push(EShot {
@@ -3301,6 +3361,7 @@ impl Game {
                                 turn: 0.0,
                                 r: 6.5,
                                 grazed: false,
+                delay: 0.0,
                             });
                         }
                         self.pending_sfx.push((Sfx::Spit, z.pos));
@@ -3393,6 +3454,7 @@ impl Game {
                                         turn: 0.0,
                                         r: 6.5,
                                         grazed: false,
+                delay: 0.0,
                                     });
                                 }
                             };
@@ -3799,6 +3861,7 @@ impl Game {
 
     pub(crate) fn update_eshots(&mut self) {
         let targets = self.targets();
+        let shot_speed = self.difficulty().shot_speed;
         let mut hits = Vec::new();
         for (i, s) in self.eshots.iter_mut().enumerate() {
             if s.turn > 0.0 {
@@ -3808,7 +3871,16 @@ impl Game {
                 s.vel = s.vel.lerp(want, damp(s.turn, DT)).norm() * sp;
             }
             s.prev = s.pos;
-            s.pos += s.vel * DT;
+            if s.delay > 0.0 {
+                // a telegraphed volley shot: hangs, then launches at the nearest player
+                s.delay -= DT;
+                if s.delay <= 0.0 {
+                    let (_, tp, _) = Game::nearest_target(&targets, s.pos);
+                    s.vel = (tp - s.pos).norm() * s.vel.len();
+                }
+                continue;
+            }
+            s.pos += s.vel * DT * shot_speed;
             s.life -= DT;
             if s.life <= 0.0 {
                 s.dead = true;
@@ -4580,9 +4652,9 @@ mod tests {
     #[test]
     fn rocks_spreads_and_grazes() {
         let mut g = Game::new(22);
-        g.start("diff=rookie");
+        g.start("diff=survivor");
         g.wave.n = 16;
-        // high-wave spitters fire a 3-way spread
+        // high-wave spitters fire a 3-way spread (later on Rookie, sooner on Nightmare)
         g.spawn_zombie(ZKind::Spitter, v2(450.0, 0.0));
         g.zombies[0].timer = 0.0;
         g.grid.build(g.player.pos, &g.zombies);
@@ -4591,7 +4663,7 @@ mod tests {
         // a near miss grazes once
         g.eshots.clear();
         g.player.iframes = 0.0;
-        g.eshots.push(EShot { pos: v2(30.0, 30.0), prev: v2(30.0, 30.0), vel: v2(0.0, 0.0), life: 1.0, dmg: 5.0, dead: false, turn: 0.0, r: 6.5, grazed: false });
+        g.eshots.push(EShot { pos: v2(30.0, 30.0), prev: v2(30.0, 30.0), vel: v2(0.0, 0.0), life: 1.0, dmg: 5.0, dead: false, turn: 0.0, r: 6.5, grazed: false, delay: 0.0 });
         let s0 = g.score;
         g.update_eshots();
         g.update_eshots();

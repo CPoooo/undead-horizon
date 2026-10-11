@@ -185,6 +185,7 @@ impl Game {
                 turn: 1.6,
                 r: 8.0,
                 grazed: false,
+                delay: 0.0,
             });
         }
         for at in swarms {

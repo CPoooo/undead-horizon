@@ -10,6 +10,7 @@ mod content;
 mod coop;
 mod corpses;
 mod game;
+mod hazards;
 mod hud_layout;
 mod input;
 mod math;
@@ -31,6 +32,7 @@ mod secrets;
 mod status;
 mod tutorial;
 mod upgrades;
+mod volley;
 mod weather;
 mod world;
 
@@ -526,6 +528,25 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
             }
             if a == "levelup" && g.phase == Phase::Playing {
                 g.player.xp = g.player.xp_next;
+            }
+            if a == "volley" && g.phase == Phase::Playing {
+                let (at, n) = (g.player.pos, g.wave.n.max(g.volley_first_wave()) + 6);
+                g.fire_volley(at, n);
+            }
+            if let Some(v) = a.strip_prefix("hazard=") {
+                // stand at the edge of the nearest patch of that kind
+                let want = if v == "ice" { hazards::Hazard::Ice } else { hazards::Hazard::Quicksand };
+                let p0 = g.player.pos;
+                let mut best: Option<hazards::Patch> = None;
+                hazards::for_patches_in(p0 - math::v2(6000.0, 6000.0), p0 + math::v2(6000.0, 6000.0), g.hazard_density(), |p| {
+                    if p.kind == want && best.map_or(true, |b| b.pos.dist2(p0) > p.pos.dist2(p0)) {
+                        best = Some(*p);
+                    }
+                });
+                if let Some(b) = best {
+                    g.player.pos = world::resolve(b.pos + math::v2(-b.r * 1.2, 0.0), 16.0).0;
+                    g.player.prev = g.player.pos;
+                }
             }
             if a == "kinds" && g.phase == Phase::Playing {
                 let p = g.player.pos;

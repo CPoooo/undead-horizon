@@ -10,40 +10,80 @@ pub struct Difficulty {
     pub count: f32,
     pub speed: f32,
     pub coins: f32,
+    /// player move speed multiplier
+    pub player_speed: f32,
+    /// dash cooldown multiplier
+    pub dash_cd: f32,
+    /// XP needed per level multiplier
+    pub xp: f32,
+    /// enemy fire rate / volley pressure multiplier
+    pub shots: f32,
+    /// enemy projectile speed multiplier
+    pub shot_speed: f32,
+    /// terrain hazard density (0 = none)
+    pub hazards: f32,
 }
 
+// Tuned so Survivor stays interesting, and wave 20 on Nightmare takes real
+// skill: faster zombies, a slightly slower player, longer dash cooldowns,
+// slower leveling, more enemy fire and terrain hazards. Nightmare is fast for
+// everyone.
 pub const DIFFICULTIES: [Difficulty; 4] = [
     Difficulty {
         name: "Rookie",
-        hp: 0.7,
-        dmg: 0.6,
-        count: 0.8,
-        speed: 0.95,
+        hp: 0.75,
+        dmg: 0.65,
+        count: 0.85,
+        speed: 1.0,
         coins: 0.75,
+        player_speed: 1.0,
+        dash_cd: 0.85,
+        xp: 1.0,
+        shots: 0.6,
+        shot_speed: 0.9,
+        hazards: 0.0,
     },
     Difficulty {
         name: "Survivor",
-        hp: 1.0,
-        dmg: 1.0,
-        count: 1.0,
-        speed: 1.0,
+        hp: 1.1,
+        dmg: 1.15,
+        count: 1.1,
+        speed: 1.1,
         coins: 1.0,
+        player_speed: 1.0,
+        dash_cd: 1.0,
+        xp: 1.25,
+        shots: 1.0,
+        shot_speed: 1.0,
+        hazards: 0.5,
     },
     Difficulty {
         name: "Veteran",
-        hp: 1.35,
-        dmg: 1.4,
-        count: 1.2,
-        speed: 1.07,
+        hp: 1.5,
+        dmg: 1.6,
+        count: 1.3,
+        speed: 1.24,
         coins: 1.5,
+        player_speed: 0.98,
+        dash_cd: 1.1,
+        xp: 1.45,
+        shots: 1.45,
+        shot_speed: 1.12,
+        hazards: 0.8,
     },
     Difficulty {
         name: "Nightmare",
-        hp: 1.8,
-        dmg: 1.9,
-        count: 1.4,
-        speed: 1.14,
+        hp: 2.0,
+        dmg: 2.2,
+        count: 1.5,
+        speed: 1.6,
         coins: 2.25,
+        player_speed: 1.22,
+        dash_cd: 1.1,
+        xp: 1.7,
+        shots: 2.0,
+        shot_speed: 1.3,
+        hazards: 1.0,
     },
 ];
 

@@ -68,7 +68,7 @@ _Written 2026-10-11 at commit `83f1dea` (plus this doc update). Read this sectio
 ```bash
 cd ~/undead-horizon && git pull && git log --oneline -5
 cargo build --target wasm32-unknown-unknown --release 2>&1 | grep -E "^(warning|error)"   # must print nothing
-cargo test --release                                     # 56 tests
+cargo test --release                                     # 58 tests
 for f in ui/*.js; do node --check "$f"; done
 trunk build --release                                    # writes dist/
 (cd dist && python3 -m http.server 8765 &)               # serve for e2e
@@ -90,7 +90,7 @@ node tests/e2e/<suite>.mjs                               # or: npm run e2e (all 
 - **The UI → game command queue runs before net messages each frame,** so a `coop|…late=1` start lands before the late-join sync.
 - **CLUSTER sizes:** `CLUSTER_W`/`CLUSTER_H` in `src/hud_layout.rs` must match the `#touch-ui` box in `ui/style.css`.
 - **Trunk is pinned to v0.21.14 in CI, and UI scripts are `data-no-minify`:** a newer trunk's JS minifier turned `get cloud()` into a plain method, so `Data.cloud` was always truthy and the account panel broke for signed-out players (it showed only "Your account"). Don't unpin it or drop the attribute without checking that `dist/app-*.js` still contains `get cloud(`.
-- **Bump `PROTOCOL` (net) / `SAVE_VERSION` (saves)** whenever their formats change. They are 14 and 3 now.
+- **Bump `PROTOCOL` (net) / `SAVE_VERSION` (saves)** whenever their formats change. They are 15 and 3 now.
 
 ## 1. Status at a glance
 
@@ -196,7 +196,7 @@ npm run build:cloud                                # after editing ui/cloud-src.
 - Occasional flake: a party join in `coop`/`chat-voice` can time out on a slow social-server round trip. Rerun before debugging.
 
 **Dev commands** (send from the console with `window.UHUI.send('dev|…')`):
-- `chest`, `levelup` (fills the XP bar), `elites`, `kinds`, `horde` (800 zombies)
+- `chest`, `levelup` (fills the XP bar), `volley`, `hazard=ice|sand` (teleport next to a patch), `elites`, `kinds`, `horde` (800 zombies)
 - `boss=N`, `tp=x,y`, `points=N`, `biome=snow|town|forest|graveyard`
 - `sky=rain|fog|clear,clock`
 - `tank` (10M HP)
@@ -215,6 +215,7 @@ npm run build:cloud                                # after editing ui/cloud-src.
 | `content.rs` | Data tables: `ENEMIES` (15 kinds), `GUNS`, `DIFFICULTIES`, `CHAPTERS`, bosses, skins/hats/tracers/packs/killfx/deathfx/emotes, mutators. Ids are shared with the UI catalog. |
 | `coop.rs` / `net.rs` | Co-op: authority model, wire format (`PROTOCOL` 14), snapshots, replicas, hit reporting, kill credit, shared XP, revive, events, late join sync, checkpoints, host migration. |
 | `director.rs` | AI Director pacing. |
+| `hazards.rs` / `volley.rs` | Terrain hazards (quicksand, ice) and telegraphed projectile volleys (Difficulty 2.0). |
 | `save_modes.rs` | Outbreak/Siege save + restore (one save per game type). |
 | `hud_layout.rs` | Where HUD pieces go (desktop vs compact phone layout). |
 | `nemesis.rs` | Nemesis system. |
@@ -282,7 +283,7 @@ npm run build:cloud                                # after editing ui/cloud-src.
 - Home Base: `hubopen`/`hubleave`/`hubmenu`, `hubpos`, `hubemote`, `hubreward`.
 - Nemesis: `nemesis` (`kind|again`), `nemesisslain` (rank).
 
-**Co-op wire format** (`src/net.rs`, `PROTOCOL` = 14; mismatched peers bail with a toast):
+**Co-op wire format** (`src/net.rs`, `PROTOCOL` = 15; mismatched peers bail with a toast):
 - **Authority model:**
   - The host owns zombies, waves, enemy shots, gems, pickups and kill credit.
   - Every player owns their own character and bullets. Clients report hits; the host applies them.
@@ -610,6 +611,14 @@ Files: `modes/hub.rs`, `render_hub.rs`, `assets/maps/hub.json`, the stall UI in 
   - 100 candy unlocks the free **Jack-o'-Lantern** hat (`hat:pumpkin`, not for sale).
   - The Career tab shows an event card.
   - **Next event:** change `EVENT` (id/dates/item). Old rewards can rotate into the shop later.
+
+- [x] **Difficulty 2.0** (2026-10-11; the owner found every mode too easy with auto-aim). Per-difficulty knobs in `content::DIFFICULTIES`: `speed` (zombies), `player_speed`, `dash_cd`, `xp`, `shots`, `shot_speed`, `hazards`.
+  - Player base speed 255 → 240; dash cooldown 1.1s → 1.6s × `dash_cd`; a steeper XP curve × `xp`; chests give 5 picks less often.
+  - Nightmare is fast for everyone: zombies ×1.6, player ×1.22. Goal: wave 20 on Nightmare is a real feat; Survivor stays interesting.
+  - **Projectiles:** spitters fire faster with `shots` and fan out earlier (3 shots at wave×shots ≥ 15, 5 at ≥ 30); enemy shots fly at × `shot_speed`.
+  - **Volleys** (`volley.rs`, host/solo, Infinite + Campaign): from wave `8 / shots` (Survivor 8, Nightmare 4, Rookie 13), a ring with a gap, an arc, or a spiral of shots appears 400 units out, hangs 0.9s with a warning ring (`EShot::delay`), then launches at the nearest player. More shots, more often, as waves climb.
+  - **Terrain hazards** (`hazards.rs`, procedural world only): quicksand (player ×0.5, zombies ×0.8; dashing still works) and ice (low traction). One candidate per 640-unit cell, chance `0.3 × hazards`; none on Rookie or near the start; snow biome patches are ice. A pure function of the cell, so co-op peers agree without syncing. First contact shows a hint.
+  - Leaderboard runs before this commit were on the easier tuning.
 
 ### 7.5 Ideas backlog (not started)
 - Kill cam / "Play of the Run" replay.

@@ -73,11 +73,11 @@ impl Game {
         if self.chests_opened == 1 {
             return 3;
         }
-        let luck = (self.wave.n as f32 * 0.004).min(0.1);
+        let luck = (self.wave.n as f32 * 0.003).min(0.08);
         let r = self.rng.f();
-        if r < 0.10 + luck {
+        if r < 0.05 + luck * 0.5 {
             5
-        } else if r < 0.45 + luck {
+        } else if r < 0.32 + luck {
             3
         } else {
             1

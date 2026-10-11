@@ -125,6 +125,7 @@ impl Game {
             turn: 0.0,
             r: 6.5,
             grazed: false,
+                delay: 0.0,
         });
     }
 

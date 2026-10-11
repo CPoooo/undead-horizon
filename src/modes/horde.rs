@@ -73,6 +73,8 @@ impl Game {
             });
         }
         self.nemesis_wave(n);
+        // a breather at the start of each wave before the first volley
+        self.volley_t = self.volley_t.max(4.0);
     }
     pub(crate) fn spawn_boss(&mut self, var: BossVar, pos: V2) {
         self.spawn_zombie(ZKind::Boss, pos);
@@ -139,6 +141,7 @@ impl Game {
         if n > 0 && self.director_tick() && self.wave.spawned < self.wave.total {
             self.horde_rush();
         }
+        self.update_volleys();
         let alive = self.alive();
         self.wave.timer -= DT;
         if self.wave.spawned < self.wave.total && self.wave.timer <= 0.0 && alive < max_alive {
