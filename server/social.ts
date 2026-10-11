@@ -9,7 +9,7 @@
 // Client -> server: { t: "friends.add", code } | { t: "friends.accept"|"friends.remove", id }
 //   | { t: "party.create"|"party.leave"|"party.start"|"party.end" }
 //   | { t: "party.invite"|"party.kick", id } | { t: "party.join"|"party.decline", partyId }
-//   | { t: "party.ready", ready } | { t: "party.diff", diff } | { t: "party.look", look }
+//   | { t: "party.ready", ready } | { t: "party.diff", diff } | { t: "party.mode", mode } | { t: "party.look", look }
 //   | { t: "signal", to, data } | { t: "ping" }
 //   | { t: "chat", text } | { t: "party.voice", on } | { t: "block"|"unblock", id } | { t: "report", id, reason, message }
 // Server -> client: hello, social, party, party.start, invite, signal, chat, toast, error, ping
@@ -184,6 +184,7 @@ async function partyState(uid: string) {
     token: pa.token, // only ever sent to members: it lets anyone with the link join
     hostId: pa.host_id,
     diff: pa.diff,
+    mode: pa.mode ?? "infinite",
     status: pa.status,
     seed: pa.seed ? String(pa.seed) : null,
     members: m.rows,
@@ -388,6 +389,14 @@ async function handle(uid: string, msg: any): Promise<void> {
       if (!pa || pa.host_id !== uid) throw new Error("Only the host can change the difficulty.");
       if (!DIFFS.includes(msg.diff)) return;
       await pool.query("update parties set diff = $2 where id = $1", [pa.id, msg.diff]);
+      await notify(await memberIds(pa.id), { k: "party" });
+      return;
+    }
+    case "party.mode": {
+      const pa = await partyOf(uid);
+      if (!pa || pa.host_id !== uid) throw new Error("Only the host can change the mode.");
+      if (!["infinite", "outbreak"].includes(msg.mode)) return;
+      await pool.query("update parties set mode = $2 where id = $1", [pa.id, msg.mode]);
       await notify(await memberIds(pa.id), { k: "party" });
       return;
     }

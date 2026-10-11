@@ -62,7 +62,10 @@ impl Game {
             }
         }
         self.start(opts);
-        self.mode = crate::modes::Mode::Infinite;
+        // co-op supports Infinite and Outbreak
+        if self.mode != crate::modes::Mode::Outbreak {
+            self.mode = crate::modes::Mode::Infinite;
+        }
         let mut net = Net::new(role, me);
         for slot in 0..MAX_PLAYERS {
             if slot as u8 == me {
@@ -1256,5 +1259,29 @@ mod tests {
             matches!(client.phase, Phase::Dying | Phase::GameOver),
             "client got the game-over event"
         );
+    }
+
+    #[test]
+    fn outbreak_coop_shares_power_and_powerups() {
+        let mut host = Game::new(3);
+        let mut client = Game::new(4);
+        for g in [&mut host, &mut client] {
+            g.screen = v2(1280.0, 720.0);
+            g.zoom = 1.0;
+            g.spawn_r = 700.0;
+        }
+        host.start_coop("role=host;me=0;names=Host,Guest;present=1,1,0;diff=rookie;mode=outbreak");
+        client.start_coop("role=client;me=1;names=Host,Guest;present=1,1,0;diff=rookie;mode=outbreak");
+        assert_eq!(host.mode, crate::modes::Mode::Outbreak);
+        assert!(host.ob.is_some() && client.ob.is_some());
+        let mut t = 0.0;
+        // the client flips the power: the host hears about it
+        client.world_change(crate::outbreak_interact::W_POWER, 0);
+        pump(&mut host, &mut client, &mut t, 10, |_, _, _| {});
+        assert!(host.ob.as_ref().unwrap().power, "host got the client's power switch");
+        // a host power-up reaches the client
+        host.apply_powerup(PickKind::DoublePoints, true);
+        pump(&mut host, &mut client, &mut t, 10, |_, _, _| {});
+        assert!(client.ob.as_ref().unwrap().double_t > 0.0);
     }
 }

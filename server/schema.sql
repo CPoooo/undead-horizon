@@ -148,3 +148,8 @@ create index if not exists client_errors_time_idx on client_errors (created_at d
 alter table runs drop constraint if exists runs_mode_check;
 alter table runs add constraint runs_mode_check check (mode in ('infinite','campaign','outbreak','siege'));
 alter table runs add column if not exists score bigint not null default 0;
+
+-- Party game mode, chosen by the host (Infinite or Outbreak).
+alter table parties add column if not exists mode text not null default 'infinite';
+alter table parties drop constraint if exists parties_mode_check;
+alter table parties add constraint parties_mode_check check (mode in ('infinite','outbreak'));

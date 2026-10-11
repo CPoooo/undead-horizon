@@ -560,10 +560,10 @@ impl Game {
                         .map(|(i, _)| i)
                         .collect();
                     if !spots.is_empty() {
-                        ob.box_at = spots[self.rng.below(spots.len())];
+                        let to = spots[self.rng.below(spots.len())];
+                        self.world_change(crate::outbreak_interact::W_BOXMOVE, to as u8);
                     }
                 }
-                ob.box_uses = 0;
                 self.toast = Some(("The mystery box has moved…".into(), 2.5));
             }
         }

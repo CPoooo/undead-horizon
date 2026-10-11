@@ -35,6 +35,10 @@ pub struct Prompt {
 
 pub const W_DOOR: u8 = 1;
 pub const W_POWER: u8 = 2;
+pub const W_BOXMOVE: u8 = 3;
+pub const W_TRAP: u8 = 4;
+pub const W_CANDLE: u8 = 5;
+pub const W_EGG: u8 = 6;
 
 impl Game {
     fn ob_target(&self) -> Option<(Target, V2)> {
@@ -284,7 +288,7 @@ impl Game {
                     deny(self);
                     return true;
                 }
-                self.activate_trap(i);
+                self.world_change(W_TRAP, i as u8);
             }
             Target::Part(i) => {
                 self.pick_part(i);
@@ -295,7 +299,12 @@ impl Game {
                 }
             }
             Target::Candle(i) => {
-                self.light_candle(i);
+                let power = self.ob.as_ref().map(|o| o.power).unwrap_or(false);
+                if power {
+                    self.world_change(W_CANDLE, i as u8);
+                } else {
+                    self.light_candle(i);
+                }
             }
         }
         true
@@ -373,6 +382,21 @@ impl Game {
                 self.say("power on");
                 self.add_shake(0.4);
             }
+            W_BOXMOVE => {
+                if let Some(ob) = self.ob.as_mut() {
+                    ob.box_at = idx as usize;
+                    ob.box_away = 0.0;
+                    ob.spin = None;
+                    ob.box_uses = 0;
+                }
+            }
+            W_TRAP => {
+                self.activate_trap(idx as usize);
+            }
+            W_CANDLE => {
+                self.light_candle(idx as usize);
+            }
+            W_EGG => self.finish_egg(),
             _ => {}
         }
     }

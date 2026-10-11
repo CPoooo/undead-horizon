@@ -223,6 +223,15 @@ impl Game {
             Some(r) if !s.egg_done && self.wave.n > r => {}
             _ => return,
         }
+        // host/solo decide; everyone gets the reward
+        self.world_change(crate::outbreak_interact::W_EGG, 0);
+    }
+
+    pub fn finish_egg(&mut self) {
+        let Some(s) = self.secrets.as_mut() else { return };
+        if s.egg_done {
+            return;
+        }
         s.egg_done = true;
         for pk in [Perk::IronGut, Perk::Quickdraw, Perk::SecondWind, Perk::Fleetfoot] {
             self.give_perk(pk);
