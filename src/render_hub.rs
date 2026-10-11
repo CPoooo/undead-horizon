@@ -4,6 +4,8 @@
 use crate::game::Game;
 use crate::math::*;
 use crate::render::PView;
+use crate::modes::hub::{DROP_HOLD, DROP_R};
+use std::f64::consts::TAU as TAU64;
 use web_sys::CanvasRenderingContext2d as Ctx;
 
 #[inline]
@@ -142,6 +144,74 @@ impl Game {
                 c.set_global_alpha(1.0);
             }
         }
+        // the Outskirts gate, the base turret and its zaps
+        if h.outskirts[2] > h.outskirts[0] {
+            c.set_font(&format!("900 14px {}", FONT));
+            c.set_fill_style_str("#ff9a5a");
+            outlined(c, "THE OUTSKIRTS →", 1110.0, -150.0, 3.0);
+            c.set_fill_style_str("#9cffb8");
+            outlined(c, "← HOME BASE", 890.0, 150.0, 3.0);
+            c.set_font(&format!("700 10px {}", FONT));
+            c.set_fill_style_str("#c8d2e8");
+            outlined(c, "weapons free · supply drops · no game over", 1110.0, -130.0, 2.5);
+            let tp = v2(940.0, -150.0);
+            c.set_fill_style_str("#2a3242");
+            c.begin_path();
+            let _ = c.arc(d(tp.x), d(tp.y), 14.0, 0.0, TAU64);
+            c.fill();
+            c.set_fill_style_str("#7ad7ff");
+            c.begin_path();
+            let _ = c.arc(d(tp.x), d(tp.y), d(5.0 + (t * 4.0).sin().abs() * 2.0), 0.0, TAU64);
+            c.fill();
+            for (a, b, k) in h.zaps.iter() {
+                c.set_global_alpha(d((k / 0.25).clamp(0.0, 1.0)));
+                c.set_stroke_style_str("#bfefff");
+                c.set_line_width(3.0);
+                c.begin_path();
+                c.move_to(d(a.x), d(a.y));
+                let mid = (*a + *b) * 0.5 + v2((t * 91.0).sin() * 14.0, (t * 77.0).cos() * 14.0);
+                c.line_to(d(mid.x), d(mid.y));
+                c.line_to(d(b.x), d(b.y));
+                c.stroke();
+                c.set_global_alpha(1.0);
+            }
+            c.set_stroke_style_str("rgba(0,0,0,0.85)");
+        }
+        if let Some(dr) = &h.drop {
+            let pulse = 0.5 + 0.5 * (t * 3.0).sin();
+            // light pillar
+            let _ = c.set_global_composite_operation("lighter");
+            c.set_global_alpha(d(0.22 + 0.12 * pulse));
+            c.set_fill_style_str("#ffd36a");
+            c.fill_rect(d(dr.pos.x - 10.0), d(dr.pos.y - 220.0), 20.0, 220.0);
+            c.set_global_alpha(0.12);
+            c.begin_path();
+            let _ = c.arc(d(dr.pos.x), d(dr.pos.y), d(DROP_R), 0.0, TAU64);
+            c.fill();
+            let _ = c.set_global_composite_operation("source-over");
+            c.set_global_alpha(1.0);
+            // the crate
+            c.set_fill_style_str("#6b4a22");
+            c.fill_rect(d(dr.pos.x - 16.0), d(dr.pos.y - 16.0), 32.0, 26.0);
+            c.set_stroke_style_str("#ffd36a");
+            c.set_line_width(2.0);
+            c.stroke_rect(d(dr.pos.x - 16.0), d(dr.pos.y - 16.0), 32.0, 26.0);
+            // hold ring
+            c.set_line_width(4.0);
+            c.set_stroke_style_str("rgba(255,211,106,0.25)");
+            c.begin_path();
+            let _ = c.arc(d(dr.pos.x), d(dr.pos.y), d(DROP_R), 0.0, TAU64);
+            c.stroke();
+            c.set_stroke_style_str("#ffd36a");
+            c.begin_path();
+            let k = (dr.held / DROP_HOLD).clamp(0.0, 1.0) as f64;
+            let _ = c.arc(d(dr.pos.x), d(dr.pos.y), d(DROP_R), -std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2 + TAU64 * k);
+            c.stroke();
+            c.set_font(&format!("900 13px {}", FONT));
+            c.set_fill_style_str("#ffd36a");
+            c.set_stroke_style_str("rgba(0,0,0,0.85)");
+            outlined(c, &format!("SUPPLY DROP · {:.0}s", (DROP_HOLD - dr.held).max(0.0)), dr.pos.x, dr.pos.y - 240.0, 3.0);
+        }
         // the memorial: names of the best runs live in the UI panel
         c.set_font(&format!("900 13px {}", FONT));
         c.set_fill_style_str("#e8f0ff");
@@ -160,9 +230,33 @@ impl Game {
         }
     }
 
-    /// "[E] Talk to ..." prompt (screen space).
+    /// "[E] Talk to ..." prompt (screen space), plus an edge arrow to an
+    /// off-screen Supply Drop.
     pub fn draw_hub_prompt(&self, c: &Ctx, w: f32, cy: f32) {
         let Some(h) = self.hub.as_ref() else { return };
+        if let Some(dr) = &h.drop {
+            let sp = v2(w * 0.5, cy) + (dr.pos - self.cam) * self.zoom;
+            let hgt = cy * 2.0;
+            if sp.x < 0.0 || sp.y < 0.0 || sp.x > w || sp.y > hgt {
+                let dir = (sp - v2(w * 0.5, cy)).norm();
+                let edge = v2(w * 0.5, cy) + dir * ((w * 0.5 - 40.0).min(cy - 40.0));
+                c.save();
+                let _ = c.translate(d(edge.x), d(edge.y));
+                let _ = c.rotate(d(dir.angle()));
+                c.set_fill_style_str("#ffd36a");
+                c.begin_path();
+                c.move_to(16.0, 0.0);
+                c.line_to(-10.0, -10.0);
+                c.line_to(-10.0, 10.0);
+                c.close_path();
+                c.fill();
+                c.restore();
+                c.set_text_align("center");
+                c.set_font(&format!("800 11px {}", FONT));
+                c.set_stroke_style_str("rgba(0,0,0,0.85)");
+                outlined(c, &format!("📦 {:.0}m", dr.pos.dist(self.player.pos) / 40.0), edge.x - dir.x * 30.0, edge.y - dir.y * 30.0, 3.0);
+            }
+        }
         if h.open.is_some() {
             return;
         }

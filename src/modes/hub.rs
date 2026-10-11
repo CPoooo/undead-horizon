@@ -3,6 +3,12 @@
 //! lines), the dispatcher's terminal launches missions, the memorial monument
 //! shows the leaderboard, and the firing range has dummies with a DPS meter.
 //! Party members in the hub walk around next to you.
+//!
+//! East through the gate lies **the Outskirts**, a free-roam zone: ambient
+//! zombies, destructible crates, and **Supply Drop** public events (hold the
+//! beacon for 30s against a surge; pays coins via the UI → `/hub/reward`).
+//! Going down out there gets you pulled back to base, never a game over, and
+//! the base turrets zap anything that follows you through the gate.
 
 use super::ModeHooks;
 use crate::game::{Banner, Game, ZKind, DT};
@@ -50,6 +56,36 @@ pub struct HubState {
     /// vendor whose stall is open in the UI
     pub open: Option<String>,
     pub pos_t: f32,
+    /// the Outskirts free-roam zone (x0, y0, x1, y1)
+    pub outskirts: [f32; 4],
+    pub amb_t: f32,
+    /// time until the next Supply Drop (counts down while you're out there)
+    pub drop_cd: f32,
+    pub drop: Option<SupplyDrop>,
+    pub drops_done: u32,
+    /// base turret zaps (from, to, t) for the renderer
+    pub zaps: Vec<(V2, V2, f32)>,
+}
+
+pub struct SupplyDrop {
+    pub pos: V2,
+    /// seconds held inside the ring
+    pub held: f32,
+    /// seconds since it landed (it leaves after DROP_MAX)
+    pub t: f32,
+}
+
+pub const DROP_R: f32 = 170.0;
+pub const DROP_HOLD: f32 = 30.0;
+pub const DROP_MAX: f32 = 90.0;
+const DROP_EVERY: f32 = 120.0;
+const AMBIENT_CAP: usize = 12;
+const GATE_X: f32 = 1000.0;
+const TURRET: V2 = V2 { x: 940.0, y: -150.0 };
+
+/// Nothing solid there (collision wouldn't push a body of radius `r`).
+fn free_spot(c: V2, r: f32) -> bool {
+    world::resolve(c, r).0.dist(c) < 0.5
 }
 
 pub const TALK_R: f32 = 110.0;
@@ -101,6 +137,7 @@ impl Game {
             .map(|i| v2(i.pos[0], i.pos[1]))
             .collect();
         let range = m.zones.iter().find(|z| z.id == "range").map(|z| z.rect).unwrap_or([0.0; 4]);
+        let outskirts = m.zones.iter().find(|z| z.id == "outskirts").map(|z| z.rect).unwrap_or([0.0; 4]);
         self.hub = Some(Box::new(HubState {
             npcs,
             mates: Vec::new(),
@@ -109,17 +146,180 @@ impl Game {
             range,
             open: None,
             pos_t: 0.0,
+            outskirts,
+            amb_t: 0.0,
+            drop_cd: 40.0,
+            drop: None,
+            drops_done: 0,
+            zaps: Vec::new(),
         }));
         self.wave.n = 0;
         self.wave.intermission = 0.0;
         self.audio.set_track(crate::audio::Track::Lobby);
     }
 
+    /// Weapons are only live on the firing range and out in the Outskirts.
     pub fn in_range_zone(&self) -> bool {
         let Some(h) = self.hub.as_ref() else { return true };
         let p = self.player.pos;
-        let [x0, y0, x1, y1] = h.range;
-        p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1
+        let inside = |[x0, y0, x1, y1]: [f32; 4]| p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+        inside(h.range) || inside(h.outskirts)
+    }
+
+    pub fn in_outskirts(&self) -> bool {
+        let Some(h) = self.hub.as_ref() else { return false };
+        let p = self.player.pos;
+        let [x0, y0, x1, y1] = h.outskirts;
+        x1 > x0 && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1
+    }
+
+    /// Downed out in the Outskirts: the base medics drag you home.
+    pub fn hub_rescue(&mut self) {
+        let spawn = world::map().map(|m| m.spawn).unwrap_or(V2::ZERO);
+        let p = &mut self.player;
+        p.hp = p.max_hp;
+        p.hp_ghost = p.hp;
+        p.iframes = 2.5;
+        p.pos = spawn;
+        p.prev = spawn;
+        p.vel = V2::ZERO;
+        if let Some(h) = self.hub.as_mut() {
+            h.drop = None;
+        }
+        self.banner = Some(Banner {
+            title: "PULLED BACK TO BASE".into(),
+            sub: "The medics patched you up. The Outskirts will still be there.".into(),
+            t: 0.0,
+            dur: 3.0,
+            color: "#9cffb8",
+        });
+        self.audio.play(crate::audio::Sfx::Heal);
+    }
+
+    /// Ambient zombies, the gate turret and Supply Drop events.
+    fn outskirts_tick(&mut self) {
+        let out = self.in_outskirts();
+        let p = self.player.pos;
+        // base turret: anything that follows you through the gate gets zapped
+        let mut zapped = Vec::new();
+        for z in self.zombies.iter_mut().filter(|z| !z.dead && !z.dummy) {
+            if z.pos.x < GATE_X - 30.0 {
+                z.dead = true;
+                zapped.push(z.pos);
+            }
+        }
+        for at in zapped {
+            if let Some(h) = self.hub.as_mut() {
+                h.zaps.push((TURRET, at, 0.25));
+            }
+            self.burst(at, 16, 260.0, "#7ad7ff", 3.0, 0.5, true, true);
+            self.sfx(crate::audio::Sfx::Lightning, at);
+        }
+        let Some(h) = self.hub.as_mut() else { return };
+        for z in h.zaps.iter_mut() {
+            z.2 -= DT;
+        }
+        h.zaps.retain(|z| z.2 > 0.0);
+        if out {
+            h.drop_cd -= DT;
+        }
+        // Supply Drop: land, hold the ring, get paid
+        let mut landed = None;
+        let mut done = false;
+        let mut gone = false;
+        if let Some(dr) = h.drop.as_mut() {
+            dr.t += DT;
+            if p.dist(dr.pos) < DROP_R && out {
+                dr.held += DT;
+            }
+            if dr.held >= DROP_HOLD {
+                done = true;
+            } else if dr.t >= DROP_MAX {
+                gone = true;
+            }
+        } else if out && h.drop_cd <= 0.0 {
+            let [x0, y0, x1, y1] = h.outskirts;
+            let mut at = v2((x0 + x1) * 0.5, (y0 + y1) * 0.5);
+            for _ in 0..12 {
+                let c = v2(self.rng.range(x0 + 250.0, x1 - 200.0), self.rng.range(y0 + 200.0, y1 - 200.0));
+                if c.dist(p) > 350.0 && free_spot(c, 60.0) {
+                    at = c;
+                    break;
+                }
+            }
+            h.drop = Some(SupplyDrop { pos: at, held: 0.0, t: 0.0 });
+            landed = Some(at);
+        }
+        let surge = h.drop.is_some();
+        if done || gone {
+            h.drop = None;
+            h.drop_cd = DROP_EVERY;
+            if done {
+                h.drops_done += 1;
+            }
+        }
+        let rect = h.outskirts;
+        if let Some(at) = landed {
+            self.banner = Some(Banner {
+                title: "SUPPLY DROP".into(),
+                sub: "Hold the beacon for 30s. They'll come for it.".into(),
+                t: 0.0,
+                dur: 3.0,
+                color: "#ffd36a",
+            });
+            self.ring(at, 260.0, 0.8, "#ffd36a", 8.0);
+            self.burst(at, 40, 420.0, "#ffd36a", 4.0, 0.9, false, true);
+            self.add_shake(0.35);
+            self.sfx(crate::audio::Sfx::Explosion, at);
+            self.say("supply drop");
+        }
+        if done {
+            self.ui_out.push(("hubreward", "supply".into()));
+            self.banner = Some(Banner {
+                title: "SUPPLIES SECURED".into(),
+                sub: "Ada's sending a reward your way".into(),
+                t: 0.0,
+                dur: 3.0,
+                color: "#9cffb8",
+            });
+            self.audio.play(crate::audio::Sfx::LevelUp);
+            // the surge breaks
+            for z in self.zombies.iter_mut().filter(|z| !z.dummy && z.pos.dist(p) > 300.0) {
+                z.dead = true;
+            }
+        }
+        if gone {
+            self.toast = Some(("The supply drop was overrun".into(), 2.5));
+        }
+        // ambient horde while you're out there (more during a Supply Drop)
+        if !out {
+            return;
+        }
+        let amb = self.zombies.iter().filter(|z| !z.dead && !z.dummy).count();
+        let cap = if surge { AMBIENT_CAP + 14 } else { AMBIENT_CAP };
+        let Some(h) = self.hub.as_mut() else { return };
+        h.amb_t -= DT;
+        if amb >= cap || h.amb_t > 0.0 {
+            return;
+        }
+        h.amb_t = if surge { 0.55 } else { 1.6 };
+        let [x0, y0, x1, y1] = rect;
+        for _ in 0..10 {
+            let c = v2(self.rng.range(x0 + 60.0, x1 - 40.0), self.rng.range(y0 + 40.0, y1 - 40.0));
+            if c.dist(p) > 480.0 && c.x > GATE_X + 150.0 && free_spot(c, 20.0) {
+                let k = match self.rng.below(10) {
+                    0..=5 => ZKind::Walker,
+                    6..=7 => ZKind::Runner,
+                    8 => ZKind::Crawler,
+                    _ => ZKind::Brute,
+                };
+                self.spawn_zombie(k, c);
+                if let Some(z) = self.zombies.last_mut() {
+                    z.xp = 0; // no level-up screens in the hub
+                }
+                break;
+            }
+        }
     }
 
     /// The vendor (or monument) in talking distance.
@@ -228,6 +428,7 @@ impl Game {
     }
 
     fn hub_tick(&mut self) {
+        self.outskirts_tick();
         let p = self.player.pos;
         // dummies: always standing, always full health
         let dummies = self.hub.as_ref().map(|h| h.dummies.clone()).unwrap_or_default();
@@ -318,5 +519,74 @@ impl ModeHooks for Hub {
 
     fn is_over(&self, _g: &Game) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::Phase;
+
+    fn hub() -> Game {
+        let mut g = Game::new(5);
+        g.screen = v2(1280.0, 720.0);
+        g.zoom = 1.0;
+        g.start("mode=hub");
+        g.phase = Phase::Playing;
+        g
+    }
+
+    fn tick(g: &mut Game, secs: f32) {
+        for _ in 0..(secs / DT) as usize {
+            g.mode.hooks().update_waves(g);
+            g.zombies.retain(|z| !z.dead);
+        }
+    }
+
+    #[test]
+    fn outskirts_spawn_zombies_and_the_gate_turret_guards_the_plaza() {
+        let mut g = hub();
+        assert!(!g.in_outskirts());
+        tick(&mut g, 3.0);
+        assert!(g.zombies.iter().all(|z| z.dummy), "nothing ambient in the plaza");
+        g.player.pos = v2(1300.0, 0.0);
+        assert!(g.in_outskirts() && g.in_range_zone(), "weapons free out there");
+        tick(&mut g, 6.0);
+        let amb: Vec<_> = g.zombies.iter().filter(|z| !z.dummy).collect();
+        assert!(!amb.is_empty() && amb.iter().all(|z| z.xp == 0 && z.pos.x > GATE_X));
+        g.spawn_gem_pub(v2(1300.0, 0.0), 50);
+        assert!(g.gems.is_empty(), "no XP gems in the hub");
+        // one follows us home: zapped at the gate
+        g.spawn_zombie(ZKind::Walker, v2(600.0, 0.0));
+        tick(&mut g, 0.1);
+        assert!(g.zombies.iter().all(|z| z.dummy || z.pos.x > GATE_X));
+    }
+
+    #[test]
+    fn going_down_out_there_is_a_rescue_not_a_game_over() {
+        let mut g = hub();
+        g.player.pos = v2(1500.0, 0.0);
+        g.player.iframes = 0.0;
+        g.player.hp = 5.0;
+        g.hurt_player(50.0, v2(1520.0, 0.0));
+        assert_eq!(g.phase, Phase::Playing);
+        assert!(g.player.hp >= g.player.max_hp && g.player.pos.x < GATE_X, "back at base, patched up");
+    }
+
+    #[test]
+    fn holding_a_supply_drop_pays_out() {
+        let mut g = hub();
+        g.player.pos = v2(1300.0, 0.0);
+        g.hub.as_mut().unwrap().drop_cd = 0.0;
+        tick(&mut g, 0.1);
+        let at = g.hub.as_ref().unwrap().drop.as_ref().expect("a drop landed").pos;
+        g.player.max_hp = 1.0e7;
+        g.player.hp = 1.0e7;
+        g.player.pos = at + v2(30.0, 0.0);
+        g.ui_out.clear();
+        tick(&mut g, DROP_HOLD + 0.5);
+        let h = g.hub.as_ref().unwrap();
+        assert!(h.drop.is_none() && h.drops_done == 1);
+        assert!(g.ui_out.iter().any(|e| e.0 == "hubreward"));
     }
 }

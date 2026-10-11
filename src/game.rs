@@ -2943,6 +2943,9 @@ impl Game {
     }
 
     pub(crate) fn spawn_gem(&mut self, pos: V2, value: u32) {
+        if self.hub.is_some() {
+            return; // no XP (and so no level-up screens) in the Home Base
+        }
         if self.gems.len() > 420 {
             // merge into a random existing gem to bound the count
             let i = self.rng.below(self.gems.len());
@@ -3027,7 +3030,9 @@ impl Game {
                 .map(|z| if z.kind == ZKind::Boss { z.boss_var.name().to_string() } else { z.kind.def().name.to_string() })
                 .unwrap_or_else(|| "projectile".into());
         }
-        if self.player.hp <= 0.0 && self.net.is_some() {
+        if self.player.hp <= 0.0 && self.hub.is_some() {
+            self.hub_rescue();
+        } else if self.player.hp <= 0.0 && self.net.is_some() {
             self.go_down();
         } else if self.player.hp <= 0.0 && self.second_wind() {
             // got back up

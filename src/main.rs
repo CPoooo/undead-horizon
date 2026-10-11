@@ -560,6 +560,13 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
                     }
                 }
             }
+            if a == "drop" {
+                // tests: a Supply Drop right next to us
+                let at = g.player.pos + math::v2(60.0, 0.0);
+                if let Some(h) = g.hub.as_mut() {
+                    h.drop = Some(modes::hub::SupplyDrop { pos: at, held: 0.0, t: 0.0 });
+                }
+            }
             if a == "tank" {
                 // tests: a player who can't go down
                 g.player.max_hp = 1.0e7;

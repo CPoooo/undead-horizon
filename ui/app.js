@@ -244,6 +244,19 @@
         }
       } catch {}
     },
+    /** Home Base Outskirts: a held Supply Drop (server rate-limits it; 2 min locally too). */
+    async supplyDrop() {
+      if (this.cloud) {
+        const r = await this.cloud.api('/hub/reward', { method: 'POST' });
+        if (r.profile) this.applyCloud(r.profile);
+        return r.coins || 0;
+      }
+      if (Date.now() - (this.lastDrop || 0) < 120000) return 0;
+      this.lastDrop = Date.now();
+      this.profile.coins += 40;
+      this.persistLocal();
+      return 40;
+    },
     async reload() {
       if (this.cloud) {
         try {
@@ -1301,6 +1314,11 @@
         break;
       }
       case 'hubopen': openStall(data); break;
+      case 'hubreward':
+        Data.supplyDrop()
+          .then((n) => { renderCoins(); toast(n ? `📦 Supplies secured! +🪙 ${n}` : '📦 Supplies secured! (reward already claimed recently)'); })
+          .catch(() => toast('📦 Supplies secured, but the reward couldn\'t reach the server.'));
+        break;
       case 'hubleave': closeStall(true); break;
       case 'hubpos': {
         const [x, y, aim] = String(data).split('~').map(Number);

@@ -196,3 +196,6 @@ alter table parties add constraint parties_mode_check check (mode in ('infinite'
 -- Public parties and Quick Play: anyone can join a public party with room.
 alter table parties add column if not exists public boolean not null default false;
 create index if not exists parties_public_idx on parties (created_at) where public;
+
+-- Home Base Outskirts: last Supply Drop reward (rate limit).
+alter table profiles add column if not exists last_drop timestamptz;

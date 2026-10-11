@@ -475,6 +475,20 @@ app.post("/welcome", async (c) => {
   return c.json({ bonus, profile: await profileJson(uid) });
 });
 
+/** Home Base Outskirts: a held Supply Drop pays out (at most once per 2 minutes). */
+export const SUPPLY_DROP_COINS = 40;
+app.use("/hub/reward", auth);
+app.post("/hub/reward", async (c) => {
+  const uid = c.get("userId");
+  await ensureProfile(uid);
+  const { rowCount } = await pool.query(
+    `update profiles set coins = coins + $2, last_drop = now(), updated_at = now()
+     where user_id = $1 and (last_drop is null or last_drop < now() - interval '2 minutes')`,
+    [uid, SUPPLY_DROP_COINS],
+  );
+  return c.json({ coins: rowCount ? SUPPLY_DROP_COINS : 0, profile: await profileJson(uid) });
+});
+
 /** Buy one rank of a permanent upgrade. */
 app.post("/meta/buy", async (c) => {
   const uid = c.get("userId");
