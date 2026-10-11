@@ -1178,6 +1178,7 @@
   on('continues', 'click', (e) => { const b = e.target.closest('[data-continue]'); if (b) continueRun(b.dataset.continue); });
   on('name', 'keydown', (e) => { if (e.key === 'Enter') start(); });
   on('resume', 'click', () => send('resume'));
+  on('photo-btn', 'click', () => window.UHPhoto?.enter());
   let afterSave = null;
   on('save', 'click', () => { afterSave = 'stay'; send('save'); });
   on('save-quit', 'click', () => { afterSave = 'quit'; send('save'); });
@@ -1257,6 +1258,7 @@
         break;
       case 'pause':
         state = 'paused';
+        $('photo-btn').style.display = window.UHCoop?.inGame ? 'none' : ''; // co-op never really pauses
         try { renderPause(JSON.parse(data)); } catch (e) { console.warn(e); }
         // Outbreak runs can't be saved mid-match (yet)
         for (const id of ['save', 'save-quit']) $(id).disabled = ['outbreak', 'siege'].includes(runCtx.mode) || !!window.UHCoop?.inGame;

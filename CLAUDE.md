@@ -302,6 +302,7 @@ Original design notes:
 
 ### Beyond v2 (AAA research additions)
 - [x] **AI Director** (`src/director.rs`, Left 4 Dead style): squad stress from crowding, low HP and damage taken drives BuildUp → Peak (hold 4s) → Relax (spawns ×3.5 slower, 8–20s, mercy heart for a hurt player). Quiet build-ups get a telegraphed **horde rush** from one side. Wave totals are unchanged; music intensity follows the tempo. Host/solo only.
+- [x] **Photo mode** (`src/photo.rs`, `ui/photo.js`): 📷 in the solo pause menu. Free camera (drag/WASD/pinch/wheel, leashed to 900 units), HUD and floating text hidden, vignette, 2.39:1 letterbox, hide-player toggle, 7 filters (CSS on the canvas, baked into the capture via `ctx.filter`), watermark. Capture shares through the share sheet on phones and downloads elsewhere. e2e: `photo.mjs`.
 
 ### Suggested order
 - M0

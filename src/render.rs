@@ -187,18 +187,19 @@ impl Game {
         self.spawn_r = (v2(w, h) * (0.5 / (base_zoom * portrait_k))).len() + 70.0;
         // phones held upright see a narrow strip: pull the camera back a little
         let portrait = if h > w * 1.25 { 0.85 } else { 1.0 };
-        self.zoom = base_zoom * portrait * (1.0 + self.zoom_punch);
+        self.zoom = base_zoom * portrait * (1.0 + self.zoom_punch) * self.photo.as_ref().map_or(1.0, |p| p.zoom);
         let half = v2(w, h) * (0.5 / self.zoom);
 
         let a = self.alpha;
         let ppos = self.player.prev.lerp(self.player.pos, a);
         let t = self.real_time as f32;
-        let sh = self.shake * self.shake * 16.0;
+        let sh = if self.photo.is_some() { 0.0 } else { self.shake * self.shake * 16.0 };
         let shake = v2(
             ((t * 61.0).sin() + (t * 23.0).sin() * 0.5) * sh,
             ((t * 53.0).cos() + (t * 31.0).cos() * 0.5) * sh,
         );
-        self.cam = self.camera_pos(ppos) + self.cam_kick + self.cam_look;
+        self.cam = self.camera_pos(ppos) + self.cam_kick + self.cam_look + self.photo.as_ref().map_or(V2::ZERO, |p| p.off);
+        let photo_hide_me = self.photo.as_ref().is_some_and(|p| p.hide_player);
 
         let _ = c.set_transform(d(dpr), 0.0, 0.0, d(dpr), 0.0, 0.0);
         c.set_image_smoothing_enabled(true);
@@ -237,7 +238,7 @@ impl Game {
 
         // depth-sorted bodies
         let mut list: Vec<(f32, Draw)> = Vec::with_capacity(self.zombies.len() + obs.len() + 1);
-        if !matches!(self.phase, Phase::Menu | Phase::Dying | Phase::GameOver) && !self.player.dead
+        if !matches!(self.phase, Phase::Menu | Phase::Dying | Phase::GameOver) && !self.player.dead && !photo_hide_me
         {
             list.push((ppos.y, Draw::Player));
         }
@@ -399,6 +400,14 @@ impl Game {
         }
         self.draw_bolts(c, t);
         self.draw_hub_overlays(c, t);
+        if self.photo.is_some() {
+            // a clean shot: no floating numbers, tags, pings or emote bubbles
+            c.restore();
+            self.draw_lighting(c, w, h, ppos, t);
+            self.draw_weather(c, w, h, t);
+            self.draw_photo_overlay(c, w, h);
+            return;
+        }
         self.draw_texts(c);
         self.draw_teammate_tags(c, t);
         // squad pings (markers) and teammates' emotes

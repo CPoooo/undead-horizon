@@ -567,6 +567,8 @@ pub struct Game {
     pub victory_t: f32,
     /// co-op: joined mid-match, spectating until the wave is cleared
     pub late_join: bool,
+    /// photo mode (free camera while paused)
+    pub photo: Option<crate::photo::Photo>,
     /// AI Director: stress-driven spawn pacing (horde modes)
     pub director: crate::director::Director,
     pub ult_queued: bool,
@@ -733,6 +735,7 @@ impl Game {
             victory_t: -1.0,
             late_join: false,
             director: Default::default(),
+            photo: None,
             ult_queued: false,
             net: None,
             net_in: Vec::new(),
@@ -948,6 +951,7 @@ impl Game {
         self.coins = 0;
         self.victory_t = -1.0;
         self.director = Default::default();
+        self.photo = None;
         self.ult_queued = false;
         self.net = None;
         self.net_in.clear();
@@ -1657,6 +1661,7 @@ impl Game {
     pub fn resume(&mut self) {
         if self.phase == Phase::Paused {
             self.phase = Phase::Playing;
+            self.photo = None;
             self.last_ms = -1.0;
             self.ui_out.push(("resume", String::new()));
             self.audio.play(Sfx::UiMove);

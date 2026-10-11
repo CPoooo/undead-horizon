@@ -16,6 +16,7 @@ mod modes;
 mod nav;
 mod net;
 mod outbreak_interact;
+mod photo;
 mod ping;
 mod render;
 mod render_hub;
@@ -481,6 +482,7 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
             g.ui_out.push(("saved", data));
         }
         "resume" => g.resume(),
+        "photo" => g.photo_cmd(a),
         "pause" => g.pause(),
         "menu" => g.to_menu(),
         "vol" => g.audio.set_volume(a.parse().unwrap_or(0.7)),
