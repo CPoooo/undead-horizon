@@ -450,7 +450,7 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
             g.lobby_mates = a
                 .split('|')
                 .filter(|s| !s.is_empty())
-                .take(2)
+                .take(3)
                 .map(|m| {
                     let f: Vec<&str> = m.split('~').collect();
                     (

@@ -362,8 +362,8 @@ impl Game {
             // party members stand beside us
             let font = "'Inter','Segoe UI',system-ui,sans-serif";
             for (k, (name, skin, hat, gun)) in self.lobby_mates.iter().enumerate() {
-                let side = if k == 0 { -1.0 } else { 1.0 };
-                let mp = ppos + v2(side * 62.0, 10.0);
+                let side = [-1.0f32, 1.0, 0.0][k.min(2)];
+                let mp = ppos + if k < 2 { v2(side * 62.0, 10.0) } else { v2(0.0, -48.0) };
                 c.set_global_alpha(0.25);
                 c.set_fill_style_str("#7ad7ff");
                 c.begin_path();

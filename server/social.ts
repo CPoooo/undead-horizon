@@ -1,4 +1,4 @@
-// Social + co-op lobby over WebSockets: friends, presence, parties (max 3),
+// Social + co-op lobby over WebSockets: friends, presence, parties (max 4),
 // invites, ready checks, and WebRTC signaling relay for peer-to-peer gameplay.
 //
 // Neon may run several isolates, each with its own sockets, so nothing is sent
@@ -19,7 +19,7 @@ import { pool, verifyToken, ensureProfile } from "./shared";
 import { DIFFS } from "./catalog";
 import { cleanChat, chatAllowed } from "./chat";
 
-const MAX_PARTY = 3;
+const MAX_PARTY = 4;
 const ONLINE_WINDOW = "45 seconds";
 
 type WS = WebSocket;
@@ -297,7 +297,7 @@ async function handle(uid: string, msg: any): Promise<void> {
         [uid, id],
       );
       if (!fr.rowCount) throw new Error("You can only invite friends.");
-      if ((await memberIds(pa.id)).length >= MAX_PARTY) throw new Error("Party is full (max 3).");
+      if ((await memberIds(pa.id)).length >= MAX_PARTY) throw new Error("Party is full (max 4).");
       await pool.query(
         `insert into party_invites (party_id, from_id, to_id) values ($1, $2, $3)
          on conflict (party_id, to_id) do update set created_at = now(), from_id = excluded.from_id`,
@@ -339,7 +339,7 @@ async function handle(uid: string, msg: any): Promise<void> {
         const pa = await client.query("select * from parties where id = $1 for update", [partyId]);
         if (!pa.rows[0] || pa.rows[0].status !== "open") throw new Error("That party is no longer open.");
         const n = await client.query("select count(*)::int as n from party_members where party_id = $1", [partyId]);
-        if (n.rows[0].n >= MAX_PARTY) throw new Error("Party is full (max 3).");
+        if (n.rows[0].n >= MAX_PARTY) throw new Error("Party is full (max 4).");
         await client.query(
           "insert into party_members (party_id, user_id, look) values ($1, $2, $3) on conflict do nothing",
           [partyId, uid, msg.look ?? {}],

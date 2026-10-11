@@ -1,5 +1,5 @@
 // Party voice chat: a small full mesh of audio-only WebRTC links between
-// everyone in the party who joined voice (max 3, so at most 2 links each).
+// everyone in the party who joined voice (max 4, so at most 3 links each).
 // Separate from the game links, so it works in the lobby and during matches,
 // and survives a match ending. Signaling rides the social socket as
 // "v-offer" / "v-answer" / "v-ice"; the lower user id always offers.

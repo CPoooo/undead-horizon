@@ -724,15 +724,24 @@ impl Game {
         for p in &players {
             write_player(&mut w, p);
         }
-        let zs: Vec<&Zombie> = self.zombies.iter().filter(|z| !z.dead).take(600).collect();
+        // the zombies nearest to any player, positions relative to an origin
+        let origin = v2(self.player.pos.x.round(), self.player.pos.y.round());
+        let targets = self.targets();
+        let near = |z: &Zombie| targets.iter().map(|t| t.1.dist2(z.pos)).fold(f32::MAX, f32::min);
+        let mut zs: Vec<&Zombie> = self.zombies.iter().filter(|z| !z.dead).collect();
+        if zs.len() > 450 {
+            zs.sort_by(|a, b| near(a).partial_cmp(&near(b)).unwrap_or(std::cmp::Ordering::Equal));
+            zs.truncate(450);
+        }
+        w.v2(origin);
         w.u16(zs.len() as u16);
         for z in zs {
             w.u32(z.uid);
             w.u8(z.kind as u8);
             w.u8(z.boss_var as u8);
-            w.v2(z.pos);
+            w.pos16(z.pos, origin);
             w.angle(z.face);
-            w.f32(z.hp);
+            w.u8(((z.hp / z.max_hp.max(1.0)).clamp(0.0, 1.0) * 255.0) as u8);
             w.f32(z.max_hp);
             let mut fl = 0u8;
             if z.flash > 0.3 {
@@ -795,6 +804,7 @@ impl Game {
             for _ in 0..np {
                 players.push(read_player(r)?);
             }
+            let origin = r.v2()?;
             let nz = r.u16()?;
             let mut zs = Vec::with_capacity(nz as usize);
             for _ in 0..nz {
@@ -802,9 +812,9 @@ impl Game {
                     r.u32()?,
                     r.u8()?,
                     r.u8()?,
-                    r.v2()?,
+                    r.pos16(origin)?,
                     r.angle()?,
-                    r.f32()?,
+                    r.u8()? as f32 / 255.0,
                     r.f32()?,
                     r.u8()?,
                     r.u8()?,
@@ -875,8 +885,8 @@ impl Game {
                 None => replica(uid, kind, var, pos),
             };
             z.face = face;
-            z.hp = hp;
             z.max_hp = max_hp.max(1.0);
+            z.hp = hp * z.max_hp; // sent as a fraction
             if fl & 1 != 0 {
                 z.flash = z.flash.max(0.6);
             }

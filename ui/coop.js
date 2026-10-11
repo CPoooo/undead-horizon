@@ -210,7 +210,7 @@
     if (!box) return;
     if (!window.UHCloud) { box.innerHTML = ''; return; }
     if (!signedIn()) {
-      box.innerHTML = `<div class="party empty-party"><b>👥 Co-op</b><span>Sign in to party up with up to 2 friends.</span>
+      box.innerHTML = `<div class="party empty-party"><b>👥 Co-op</b><span>Sign in to party up with up to 3 friends.</span>
         <button class="btn small secondary" data-signin>Sign in</button></div>`;
       return;
     }
@@ -219,7 +219,7 @@
       return;
     }
     if (!S.party) {
-      box.innerHTML = `<div class="party empty-party"><b>👥 Co-op</b><span>Play Infinite with up to 2 friends.</span>
+      box.innerHTML = `<div class="party empty-party"><b>👥 Co-op</b><span>Play with up to 3 friends.</span>
         <button class="btn small blue" id="party-create">Create party</button></div>`;
       $('party-create').onclick = () => wsSend({ t: 'party.create', look: look() });
       return;
@@ -228,7 +228,7 @@
     const amHost = p.hostId === S.me?.id;
     const me = p.members.find((m) => m.id === S.me?.id);
     const allReady = p.members.every((m) => m.ready);
-    const slots = [0, 1, 2].map((i) => {
+    const slots = [0, 1, 2, 3].map((i) => {
       const m = p.members[i];
       if (!m) return `<div class="pm empty">Open slot<span>invite a friend</span></div>`;
       return `<div class="pm ${m.online ? '' : 'offline'}">
@@ -239,7 +239,7 @@
       </div>`;
     }).join('');
     box.innerHTML = `<div class="party">
-      <div class="party-head"><b>👥 Party ${p.members.length}/3</b><span class="hint">${esc(window.UHDiffName?.(p.diff) || p.diff)}${amHost ? ' · you set the difficulty' : ' · host sets difficulty'}</span></div>
+      <div class="party-head"><b>👥 Party ${p.members.length}/4</b><span class="hint">${esc(window.UHDiffName?.(p.diff) || p.diff)}${amHost ? ' · you set the difficulty' : ' · host sets difficulty'}</span></div>
       <div class="pms">${slots}</div>
       <div class="seg party-mode" style="margin-top:8px">${['infinite', 'outbreak', 'siege'].map((m) =>
         `<button data-pmode="${m}" class="${(p.mode || 'infinite') === m ? 'on' : ''}" ${amHost ? '' : 'disabled'}>${m === 'outbreak' ? '🧟 Outbreak' : m === 'siege' ? '🏰 Siege' : '♾️ Infinite'}</button>`).join('')}</div>
@@ -525,7 +525,7 @@
   }
 
   function opts(role, present) {
-    const names = [0, 1, 2].map((i) => (S.roster.find((m) => m.slot === i)?.name || '').replace(/[;,=|]/g, ''));
+    const names = [0, 1, 2, 3].map((i) => (S.roster.find((m) => m.slot === i)?.name || '').replace(/[;,=|]/g, ''));
     return `role=${role};me=${S.mySlot};names=${names.join(',')};present=${present.join(',')};mode=${['outbreak', 'siege'].includes(S.party.mode) ? S.party.mode : 'infinite'};diff=${S.party.diff};name=${names[S.mySlot]};${UI().equipString()}`;
   }
 
@@ -541,7 +541,7 @@
   function hostGo() {
     if (S.inGame || S.mySlot !== 0) return;
     clearTimeout(startTimer);
-    const present = [0, 1, 2].map((i) => (i === 0 ? 1 : linkOpen(S.peers.get(i)) ? 1 : 0));
+    const present = [0, 1, 2, 3].map((i) => (i === 0 ? 1 : linkOpen(S.peers.get(i)) ? 1 : 0));
     for (const m of S.roster.slice(1)) {
       const p = S.peers.get(m.slot);
       if (present[m.slot]) p.r.send(JSON.stringify({ t: 'go', present }));

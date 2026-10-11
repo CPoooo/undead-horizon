@@ -11,11 +11,11 @@
 
 use crate::math::{v2, V2};
 
-pub const MAX_PLAYERS: usize = 3;
+pub const MAX_PLAYERS: usize = 4;
 
 /// Bump whenever the wire format or sim rules change in a way that would
 /// desync peers running different builds.
-pub const PROTOCOL: u16 = 11;
+pub const PROTOCOL: u16 = 12;
 
 pub const MSG_PSTATE: u8 = 1; // client -> host (unreliable): own player state
 pub const MSG_HITS: u8 = 2; // client -> host (reliable): damage dealt to zombies
@@ -225,6 +225,12 @@ impl W {
     pub fn angle(&mut self, a: f32) {
         self.u8(((a.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU) * 256.0) as u8);
     }
+    /// A position as 16-bit offsets from `origin` (snapshot compression).
+    pub fn pos16(&mut self, p: V2, origin: V2) {
+        let d = p - origin;
+        self.0.extend_from_slice(&(d.x.round().clamp(-32767.0, 32767.0) as i16).to_le_bytes());
+        self.0.extend_from_slice(&(d.y.round().clamp(-32767.0, 32767.0) as i16).to_le_bytes());
+    }
 }
 
 pub struct R<'a> {
@@ -259,6 +265,11 @@ impl<'a> R<'a> {
     }
     pub fn angle(&mut self) -> Option<f32> {
         Some(self.u8()? as f32 / 256.0 * std::f32::consts::TAU)
+    }
+    pub fn pos16(&mut self, origin: V2) -> Option<V2> {
+        let x = i16::from_le_bytes(self.take::<2>()?) as f32;
+        let y = i16::from_le_bytes(self.take::<2>()?) as f32;
+        Some(origin + v2(x, y))
     }
 }
 
