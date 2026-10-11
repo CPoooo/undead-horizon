@@ -22,6 +22,7 @@ mod render_siege;
 mod render_map;
 mod secrets;
 mod status;
+mod tutorial;
 mod upgrades;
 mod world;
 

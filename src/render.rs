@@ -425,6 +425,29 @@ impl Game {
             self.use_shown = show_use;
             self.ui_out.push(("usebtn", if show_use { "1".into() } else { "0".into() }));
         }
+        if let Some(tu) = &self.tutorial {
+            if self.phase == Phase::Playing {
+                let (title, how) = crate::tutorial::STEPS[tu.step.min(crate::tutorial::STEPS.len() - 1)];
+                let font = "'Inter','Segoe UI',system-ui,sans-serif";
+                let bw = (w * 0.9).min(560.0);
+                let x = w * 0.5 - bw * 0.5;
+                let y = if w < 640.0 { 150.0 } else { 96.0 };
+                round_rect(c, x, y, bw, 54.0, 12.0);
+                c.set_fill_style_str("rgba(8,12,22,0.85)");
+                c.fill();
+                c.set_stroke_style_str("#7ad7ff");
+                c.set_line_width(2.0);
+                c.stroke();
+                c.set_text_align("center");
+                c.set_text_baseline("middle");
+                c.set_font(&format!("800 14px {}", font));
+                c.set_fill_style_str("#7ad7ff");
+                text(c, &format!("TUTORIAL {}/{} · {}", tu.step + 1, crate::tutorial::STEPS.len(), title), w * 0.5, y + 17.0);
+                c.set_font(&format!("600 {}px {}", if w < 640.0 { 11 } else { 13 }, font));
+                c.set_fill_style_str("#e8f0ff");
+                text(c, how, w * 0.5, y + 37.0);
+            }
+        }
         if let Some(bi) = &self.boss_intro {
             self.draw_boss_intro(c, w, h, bi.var, bi.t);
         }

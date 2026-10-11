@@ -25,7 +25,16 @@
 </head>
 <body>
   <canvas id="game"></canvas>
-  <div id="loader"><div class="spinner"></div><div style="color:#94a0bd;font-weight:600">Raising the dead…</div></div>
+  <div id="loader"><div class="spinner"></div><div style="color:#94a0bd;font-weight:600">Raising the dead…</div>
+    <div id="loader-tip" style="color:#6f7a96;font-size:13px;max-width:420px;text-align:center;padding:0 16px"></div></div>
+  <script>
+    // loading tips (shown while the game boots)
+    (function () {
+      var tips = ['Dashing makes you invulnerable for a split second.', 'Hit a boss in its glowing back for double damage.', 'A maxed power plus its partner passive evolves at the next chest.', 'Burn + poison = Blight. Chill + shock = Shatter.', 'In Outbreak, hold E at a window to rebuild the boards for points.', 'Siege: barricades reroute the horde. Wall them in and they will chew through.', 'Grazing enemy shots charges your ultimate.', 'Each survivor has an ability on Q. Pick yours in the Locker.', 'The Home Base vendors talk back. Try asking Rusty Vex about the zombies.', 'Elite zombies drop chests more often.'];
+      var el = document.getElementById('loader-tip');
+      if (el) el.textContent = '💡 ' + tips[Math.floor(Math.random() * tips.length)];
+    })();
+  </script>
   <div id="toast"></div>
 
   <!-- ============ LOBBY / MAIN MENU ============ -->

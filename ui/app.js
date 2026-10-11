@@ -841,7 +841,8 @@
     else if (settings.mode === 'infinite' && (settings.muts || []).length) extra = `;mut=${settings.muts.join(',')}`;
     const map = extra + (settings.mode === 'outbreak' ? `;map=${settings.map || 'asylum'}`
       : settings.mode === 'siege' ? `;map=${settings.siegeMap || 'keep'}${settings.glass ? ';variant=glass' : ''}` : '');
-    send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}${map}`);
+    const tut = !settings.tutorialDone && settings.mode === 'infinite' && !extra ? ';tutorial=1' : '';
+    send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}${map}${tut}`);
   }
   async function continueRun(slot) {
     const sv = Data.profile.saves[slot];
@@ -1213,6 +1214,7 @@
         break;
       }
       case 'bindings': renderBinds(String(data)); break;
+      case 'tutorial': settings.tutorialDone = true; saveSettings(); break;
       case 'usebtn': $('t-use').classList.toggle('on', data === '1'); break;
       case 'readybtn': $('t-ready').classList.toggle('on', data === '1'); break;
       case 'haptic': {

@@ -288,7 +288,7 @@ Original design notes:
   - subtitles for all radio and announcer lines
 - [x] A3 (M) **Safari, iOS and PWA.** (PWA + layouts done; a real-device iOS pass is still worth doing) Finishes item 13: real-device Safari/iOS pass (Web Audio unlock, ITP and auth), a PWA manifest and service worker (offline solo play, install prompt), and landscape vs portrait HUD layouts.
 - [ ] A4 (M) **Performance.** Pool particles, bullets and texts; batch draws; add a perf budget test (1,000 zombies at 60 fps). Evaluate a WebGL renderer if Canvas2D tops out (spike only).
-- [ ] A5 (S) **Onboarding.** First-run interactive tutorial (move, dash, level-up, revive), contextual tips, and loading tips.
+- [x] A5 (S) **Onboarding.** First-run interactive tutorial (move, dash, level-up, revive), contextual tips, and loading tips.
 - [ ] A6 (S) **Settings sync.** Sync settings to the cloud profile.
 - [ ] A7 (S) **Balance telemetry.** Privacy-light: run summaries (mode, wave, build, cause of death) to Neon, plus a SQL view for balancing.
 - [ ] A8 (S) **Localization.** i18n string table framework (en first).

@@ -459,6 +459,7 @@ pub struct Game {
     pub secrets: Option<Box<crate::secrets::Secrets>>,
     pub siege: Option<Box<crate::modes::siege::SiegeState>>,
     pub hub: Option<Box<crate::modes::hub::HubState>>,
+    pub tutorial: Option<crate::tutorial::Tutorial>,
     /// the touch USE button is visible
     pub use_shown: bool,
     pub ready_shown: bool,
@@ -532,6 +533,7 @@ pub struct Game {
     pub mutators: content::Mutators,
     /// daily run: everyone gets the same seed
     pub daily: String,
+    pub want_tutorial: bool,
     pub relics: content::RelicBonus,
     pub camo: usize,
     /// kills per enemy kind and bosses felled this run (achievements, bestiary)
@@ -625,6 +627,7 @@ impl Game {
             secrets: None,
             siege: None,
             hub: None,
+            tutorial: None,
             use_shown: false,
             ready_shown: false,
             boss_intro: None,
@@ -685,6 +688,7 @@ impl Game {
             access: content::Access::default(),
             mutators: content::Mutators::default(),
             daily: String::new(),
+            want_tutorial: false,
             relics: content::RelicBonus::default(),
             camo: 0,
             kind_kills: [0; 15],
@@ -789,6 +793,7 @@ impl Game {
                     }
                 }
                 "daily" => self.daily = v.chars().take(10).collect(),
+                "tutorial" => self.want_tutorial = v == "1",
                 "relics" => self.relics = content::relic_bonus(v),
                 "camo" => self.camo = v.parse::<usize>().unwrap_or(0).min(content::CAMOS.len() - 1),
                 "map" => self.map_id = v.to_string(),
@@ -833,6 +838,7 @@ impl Game {
         self.variant.clear();
         self.mutators = content::Mutators::default();
         self.daily.clear();
+        self.want_tutorial = false;
         self.mode = Mode::Infinite;
         self.pending_chapter = 0;
         self.apply_opts(opts);
@@ -877,6 +883,7 @@ impl Game {
         self.secrets = None;
         self.siege = None;
         self.hub = None;
+        self.tutorial = None;
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -932,6 +939,10 @@ impl Game {
         }
         self.phase = Phase::Playing;
         self.mode.hooks().on_start(self);
+        if self.want_tutorial && self.mode == Mode::Infinite {
+            self.want_tutorial = false;
+            self.start_tutorial();
+        }
         self.audio.play(Sfx::UiSelect);
     }
 
@@ -1298,6 +1309,7 @@ impl Game {
         }
         self.tick_callouts(real_dt);
         self.tick_boss_intro(real_dt);
+        self.tick_tutorial(real_dt);
         if self.phase != Phase::Paused {
             self.update_corpses(real_dt);
         }
@@ -4553,5 +4565,27 @@ mod tests {
         assert_eq!(a, b, "...but the same daily seed gives the same run");
         assert!(m.glass && m.fast);
         assert!(hp <= 50.0, "glass cannon halves health");
+    }
+
+    #[test]
+    fn tutorial_steps_complete_from_play() {
+        let mut g = Game::new(33);
+        g.start("diff=rookie;tutorial=1");
+        assert!(g.tutorial.is_some());
+        g.player.pos = v2(400.0, 0.0);
+        g.tick_tutorial(0.1);
+        assert_eq!(g.tutorial.as_ref().unwrap().step, 1, "moved");
+        g.player.dash_id += 1;
+        g.tick_tutorial(0.1);
+        g.kills += 5;
+        g.tick_tutorial(0.1);
+        g.player.level += 1;
+        g.tick_tutorial(0.1);
+        assert_eq!(g.tutorial.as_ref().unwrap().step, 4);
+        assert!(g.player.ult >= 1.0, "ultimate handed over for the last step");
+        g.ult_uses = 1;
+        g.tick_tutorial(0.1);
+        assert!(g.tutorial.is_none());
+        assert!(g.ui_out.iter().any(|e| e.0 == "tutorial"));
     }
 }
