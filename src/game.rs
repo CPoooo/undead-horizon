@@ -567,6 +567,8 @@ pub struct Game {
     pub victory_t: f32,
     /// co-op: joined mid-match, spectating until the wave is cleared
     pub late_join: bool,
+    /// the Nemesis that hunts this player (solo horde runs)
+    pub nemesis: Option<crate::nemesis::Nemesis>,
     /// photo mode (free camera while paused)
     pub photo: Option<crate::photo::Photo>,
     /// AI Director: stress-driven spawn pacing (horde modes)
@@ -736,6 +738,7 @@ impl Game {
             late_join: false,
             director: Default::default(),
             photo: None,
+            nemesis: None,
             ult_queued: false,
             net: None,
             net_in: Vec::new(),
@@ -797,6 +800,7 @@ impl Game {
                     self.player_name = if n.is_empty() { "Survivor".into() } else { n };
                 }
                 "best" => self.best_wave = v.parse().unwrap_or(0),
+                "nemesis" => self.set_nemesis_opt(v),
                 "mode" => {
                     self.mode = match v {
                         "campaign" => Mode::Campaign(self.chapter()),
@@ -881,6 +885,7 @@ impl Game {
         self.want_tutorial = false;
         self.mode = Mode::Infinite;
         self.pending_chapter = 0;
+        self.nemesis = None;
         self.apply_opts(opts);
         self.player = Game::fresh_player();
         let map = world::load_builtin(&self.map_id);
@@ -2792,6 +2797,7 @@ impl Game {
                 z.last_hitter,
             )
         };
+        self.nemesis_check_kill(uid, pos);
         // a fuse that went off on its own isn't anyone's kill
         if !fuse_done && killer == self.my_slot() {
             self.credit_kill();
@@ -3037,6 +3043,7 @@ impl Game {
         } else if self.player.hp <= 0.0 && self.second_wind() {
             // got back up
         } else if self.player.hp <= 0.0 {
+            self.nemesis_on_death(from);
             self.player.hp = 0.0;
             self.phase = Phase::Dying;
             self.dying_t = 0.0;

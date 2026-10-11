@@ -14,6 +14,7 @@ mod input;
 mod math;
 mod modes;
 mod nav;
+mod nemesis;
 mod net;
 mod outbreak_interact;
 mod photo;

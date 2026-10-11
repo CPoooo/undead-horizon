@@ -72,6 +72,7 @@ impl Game {
                 w.u8(boss as u8);
             });
         }
+        self.nemesis_wave(n);
     }
     pub(crate) fn spawn_boss(&mut self, var: BossVar, pos: V2) {
         self.spawn_zombie(ZKind::Boss, pos);

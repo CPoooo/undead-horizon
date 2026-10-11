@@ -306,6 +306,7 @@ Original design notes:
 ### Beyond v2 (AAA research additions)
 - [x] **AI Director** (`src/director.rs`, Left 4 Dead style): squad stress from crowding, low HP and damage taken drives BuildUp → Peak (hold 4s) → Relax (spawns ×3.5 slower, 8–20s, mercy heart for a hurt player). Quiet build-ups get a telegraphed **horde rush** from one side. Wave totals are unchanged; music intensity follows the tempo. Host/solo only.
 - [x] **Photo mode** (`src/photo.rs`, `ui/photo.js`): 📷 in the solo pause menu. Free camera (drag/WASD/pinch/wheel, leashed to 900 units), HUD and floating text hidden, vignette, 2.39:1 letterbox, hide-player toggle, 7 filters (CSS on the canvas, baked into the capture via `ctx.filter`), watermark. Capture shares through the share sheet on phones and downloads elsewhere. e2e: `photo.mjs`.
+- [x] **Nemesis system** (`src/nemesis.rs`, Shadow of Mordor style): the zombie that kills you in solo Infinite/Campaign rises as a named Nemesis (name + title generated in `ui/app.js`, kept in synced settings). From wave 3 (certain by 8) it hunts you once per run: elite affix, ×8+ HP, red aura, name plate, a taunt. Kill it for a chest; if it kills you again it ranks up (max 5) with a scarier title. Exploders and bats rise as brutes and runners. e2e: `nemesis.mjs`.
 
 ### Suggested order
 - M0

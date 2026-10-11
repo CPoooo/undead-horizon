@@ -937,6 +937,43 @@
   on('story-go', 'click', () => { clearInterval(storyTimer); const r = storyResolve; storyResolve = null; r && r(); });
 
   let runCtx = null;
+  // ------------------------------------------------------------------ nemesis
+  // The zombie that kills you rises as a named Nemesis that hunts later runs
+  // (src/nemesis.rs). Kept in settings, so it follows a signed-in account.
+  const ZNAMES = ['Walker', 'Runner', 'Brute', 'Spitter', 'Exploder', 'Boss', 'Crawler', 'Screamer', 'Armored', 'Bat', 'Burrower', 'Hellhound', 'Sapper', 'Ogre', 'Archer'];
+  const NEM_FIRST = ['Gnasher', 'Old Mags', 'Rotjaw', 'Sister Ash', 'Hollow Pete', 'Crooked Hank', 'Mother Moss', 'Grinbone', 'The Deacon', 'Lady Veil', 'Ratcatcher', 'Big Lou', 'Whistler', 'Marrow', 'Tin Tom', 'Patchwork'];
+  const NEM_TITLE = [
+    ['the Hungry', 'the Patient', 'of the Ditch', 'the Unwashed'],
+    ['the Unbroken', 'the Courier-Eater', 'Who Remembers'],
+    ['the Twice-Fed', 'the Scarred', 'Bane of Couriers'],
+    ['the Undying', 'Horizon\'s Shadow', 'the Grave-Walker'],
+    ['the Endless', 'Death\'s Favourite', 'the Last Thing You See'],
+  ];
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  function nemesisOpt() {
+    const n = settings.nemesis;
+    if (!n || n.slain || !['infinite', 'campaign'].includes(settings.mode)) return '';
+    return `;nemesis=${n.kind},${n.rank},${String(n.name).replace(/[;=,|]/g, '')}`;
+  }
+  /** Game event on death: "<kind>|<1 if the Nemesis itself got us>". Returns a line for the death screen. */
+  function onNemesisDeath(data) {
+    const [kind, again] = String(data).split('|').map(Number);
+    const n = settings.nemesis;
+    if (again && n) {
+      n.rank = Math.min(5, n.rank + 1);
+      n.kills = (n.kills || 1) + 1;
+      n.name = `${n.base} ${pick(NEM_TITLE[n.rank - 1])}`;
+      saveSettings();
+      return `☠ Your Nemesis grows stronger: ${n.name} (rank ${n.rank})`;
+    }
+    if (n && !n.slain) return ''; // the current Nemesis is still out there
+    const base = pick(NEM_FIRST);
+    settings.nemesis = { kind, rank: 1, base, name: `${base} ${pick(NEM_TITLE[0])}`, kills: 1, born: Date.now() };
+    saveSettings();
+    return `☠ The ${ZNAMES[kind] || 'zombie'} that killed you rose as your Nemesis: ${settings.nemesis.name}`;
+  }
+  let nemesisLine = '';
+
   let dailyOverride = '';
   async function start() {
     const name = playerName();
@@ -957,7 +994,8 @@
     const map = extra + (settings.mode === 'outbreak' ? `;map=${settings.map || 'asylum'}`
       : settings.mode === 'siege' ? `;map=${settings.siegeMap || 'keep'}${settings.glass ? ';variant=glass' : ''}` : '');
     const tut = !settings.tutorialDone && settings.mode === 'infinite' && !extra ? ';tutorial=1' : '';
-    send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}${map}${tut}`);
+    nemesisLine = '';
+    send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}${map}${tut}${tut ? '' : nemesisOpt()}`);
   }
   async function continueRun(slot) {
     const sv = Data.profile.saves[slot];
@@ -1339,6 +1377,12 @@
         break;
       case 'hubleave': closeStall(true); break;
       case 'hubemote': window.UHCoop?.hubEmote?.(Number(data)); break;
+      case 'nemesis': nemesisLine = onNemesisDeath(data); break;
+      case 'nemesisslain':
+        if (settings.nemesis) { settings.nemesis.slain = true; saveSettings(); }
+        toast(`☠ Nemesis slain! ${settings.nemesis?.name || ''} won't hunt you again.`);
+        send('sfx|ready');
+        break;
       case 'hubpos': {
         const [x, y, aim] = String(data).split('~').map(Number);
         window.UHCoop?.hubPos?.(x, y, aim);
@@ -1448,6 +1492,7 @@
           }
         }
         renderCoins();
+        if (nemesisLine) { rec = rec ? `${rec} · ${nemesisLine}` : nemesisLine; nemesisLine = ''; }
         $('record').textContent = rec;
         state = 'gameover';
         show('gameover');

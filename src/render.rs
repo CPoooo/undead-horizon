@@ -399,6 +399,7 @@ impl Game {
             c.restore();
         }
         self.draw_bolts(c, t);
+        self.draw_nemesis(c, t);
         self.draw_hub_overlays(c, t);
         if self.photo.is_some() {
             // a clean shot: no floating numbers, tags, pings or emote bubbles
