@@ -24,6 +24,7 @@ mod secrets;
 mod status;
 mod tutorial;
 mod upgrades;
+mod weather;
 mod world;
 
 use game::{Game, Phase};
@@ -530,6 +531,17 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
                 let var = content::BossVar::from_u8(v.parse().unwrap_or(0));
                 g.spawn_boss(var, p);
                 g.boss_intro(var);
+            }
+            if let Some(v) = a.strip_prefix("sky=") {
+                let (sky, clock) = v.split_once(',').unwrap_or((v, "0.25"));
+                g.weather.sky = match sky {
+                    "rain" => weather::Sky::Rain,
+                    "fog" => weather::Sky::Fog,
+                    _ => weather::Sky::Clear,
+                };
+                g.weather.k = 1.0;
+                g.weather.next = 999.0;
+                g.weather.clock = clock.parse().unwrap_or(0.25);
             }
             if a == "horde" && g.phase == Phase::Playing {
                 let p = g.player.pos;

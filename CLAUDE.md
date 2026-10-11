@@ -270,7 +270,7 @@ Original design notes:
 - [ ] M9 (S) **Co-op modes.** Campaign co-op: the host's chapter, with progress credited to all who have it unlocked.
 
 ### M8 · World & presentation
-- [ ] V1 (M) **Day/night and weather.** Day/night cycle in Infinite, plus weather (rain streaks, fog) that changes visibility and spawns (more runners at night).
+- [x] V1 (M) **Day/night and weather.** Day/night cycle in Infinite, plus weather (rain streaks, fog) that changes visibility and spawns (more runners at night).
 - [ ] V2 (M) **Biomes.** Biome regions in the procedural world (graveyard, pine forest, town ruins, snowfield) with biome props and native zombie variants (via F1).
 - [ ] V3 (S) **Destructibles.** Explosive barrels, breakable crates (drops), and environmental kills.
 - [ ] V4 (M) **Character polish.** Better animation (procedural walk bob, reload, hurt flinch) and new cosmetic slots: backpack, kill effect, death effect, emote.

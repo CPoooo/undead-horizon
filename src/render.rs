@@ -396,6 +396,7 @@ impl Game {
 
         // ---------------- screen space
         self.draw_lighting(c, w, h, ppos, t);
+        self.draw_weather(c, w, h, t);
         if !matches!(self.phase, Phase::Menu) {
             self.draw_offscreen(c, w, h, a, t);
             self.draw_hud(c, w, h, t);
@@ -2068,7 +2069,7 @@ impl Game {
         let dark = if self.phase == Phase::Menu {
             0.55
         } else {
-            (0.42 + self.wave.n as f32 * 0.012).min(0.72)
+            ((0.42 + self.wave.n as f32 * 0.012).min(0.72) + self.sky_darkness()).clamp(0.2, 0.86)
         };
         if !self.draw_light_mask(c, w, h, ppos, dark, cy) {
             if let Ok(g) =

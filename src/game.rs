@@ -460,6 +460,7 @@ pub struct Game {
     pub siege: Option<Box<crate::modes::siege::SiegeState>>,
     pub hub: Option<Box<crate::modes::hub::HubState>>,
     pub tutorial: Option<crate::tutorial::Tutorial>,
+    pub weather: crate::weather::Weather,
     /// the touch USE button is visible
     pub use_shown: bool,
     /// render big hordes with cheap zombies
@@ -632,6 +633,7 @@ impl Game {
             siege: None,
             hub: None,
             tutorial: None,
+            weather: crate::weather::Weather::new(),
             use_shown: false,
             lod: false,
             ready_shown: false,
@@ -890,6 +892,7 @@ impl Game {
         self.siege = None;
         self.hub = None;
         self.tutorial = None;
+        self.weather = crate::weather::Weather::new();
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -1317,6 +1320,7 @@ impl Game {
         self.tick_callouts(real_dt);
         self.tick_boss_intro(real_dt);
         self.tick_tutorial(real_dt);
+        self.tick_weather(real_dt);
         if self.phase != Phase::Paused {
             self.update_corpses(real_dt);
         }
@@ -3800,7 +3804,12 @@ impl Game {
             if d.min_wave == 0 || n < d.min_wave as f32 {
                 0.0
             } else {
-                (d.weight.0 + d.weight.1 * n).min(d.weight.2)
+                let night = if k == ZKind::Runner || k == ZKind::Crawler {
+                    1.0 + 0.8 * self.weather.night()
+                } else {
+                    1.0
+                };
+                (d.weight.0 + d.weight.1 * n).min(d.weight.2) * night
             }
         };
         let total: f32 = ZKind::ALL.iter().map(|k| weight(*k)).sum();
@@ -4237,6 +4246,7 @@ mod tests {
         assert!(front < back * 0.5, "front {front} vs back {back}");
         // burrower: untargetable until it erupts next to you
         g.zombies.clear();
+        g.wave.intermission = 1.0e9; // no other spawns during this check
         g.spawn_zombie(ZKind::Burrower, v2(400.0, 0.0));
         g.grid.build(g.player.pos, &g.zombies);
         assert!(g.nearest_zombie(g.player.pos, 2000.0, 0).is_none(), "hidden from the grid");
@@ -4637,5 +4647,26 @@ mod tests {
         // 2 sim steps per 60 fps frame (120 Hz); leave most of the 16.7 ms for rendering
         eprintln!("perf: {:.3} ms per step with {} zombies", per_step, g.zombies.len());
         assert!(per_step < 4.0, "sim step took {per_step:.2} ms");
+    }
+
+    #[test]
+    fn day_night_and_weather() {
+        let mut g = Game::new(35);
+        g.start("diff=rookie");
+        let w = &mut g.weather;
+        w.clock = 0.25;
+        let noon = w.night();
+        w.clock = 0.75;
+        let midnight = w.night();
+        assert!(noon < 0.05 && midnight > 0.95);
+        assert!(g.sky_darkness() > 0.2, "nights are darker");
+        // the weather changes over time
+        g.weather.next = 0.0;
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..20000 {
+            g.tick_weather(0.05);
+            seen.insert(format!("{:?}", g.weather.sky));
+        }
+        assert!(seen.len() >= 2, "{seen:?}");
     }
 }
