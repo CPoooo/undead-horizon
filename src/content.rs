@@ -745,3 +745,88 @@ pub const CHAPTERS: [Chapter; 5] = [
         ],
     },
 ];
+
+// ------------------------------------------------------------------ characters
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kit {
+    HeatSink,
+    Turret,
+    HealPulse,
+    FlameCone,
+}
+
+pub struct Character {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub class: &'static str,
+    pub icon: &'static str,
+    pub color: &'static str,
+    /// gun id that gets +15% damage in their hands
+    pub signature: &'static str,
+    pub kit: Kit,
+    pub ability: &'static str,
+    pub ability_icon: &'static str,
+    /// ability cooldown (s)
+    pub cd: f32,
+    pub passive: &'static str,
+}
+
+pub const CHARACTERS: [Character; 4] = [
+    Character {
+        id: "rook",
+        name: "Rook",
+        class: "Gunner",
+        icon: "🎯",
+        color: "#ffd36a",
+        signature: "pistol",
+        kit: Kit::HeatSink,
+        ability: "Heat Sink",
+        ability_icon: "🔥",
+        cd: 16.0,
+        passive: "+10% fire rate",
+    },
+    Character {
+        id: "mara",
+        name: "Mara",
+        class: "Engineer",
+        icon: "🔧",
+        color: "#7ad7ff",
+        signature: "smg",
+        kit: Kit::Turret,
+        ability: "Sentry Turret",
+        ability_icon: "🛰️",
+        cd: 22.0,
+        passive: "+30% pickup radius",
+    },
+    Character {
+        id: "doc",
+        name: "Doc Hale",
+        class: "Medic",
+        icon: "⛑️",
+        color: "#9cffb8",
+        signature: "rifle",
+        kit: Kit::HealPulse,
+        ability: "Heal Pulse",
+        ability_icon: "💚",
+        cd: 18.0,
+        passive: "Regenerates, revives twice as fast",
+    },
+    Character {
+        id: "ash",
+        name: "Ash",
+        class: "Pyro",
+        icon: "🔥",
+        color: "#ff8a3a",
+        signature: "shotgun",
+        kit: Kit::FlameCone,
+        ability: "Flame Cone",
+        ability_icon: "🌋",
+        cd: 14.0,
+        passive: "Hits can set zombies ablaze",
+    },
+];
+
+pub fn character_index(id: &str) -> usize {
+    CHARACTERS.iter().position(|c| c.id == id).unwrap_or(0)
+}

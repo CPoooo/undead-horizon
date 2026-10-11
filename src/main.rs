@@ -1,3 +1,4 @@
+mod abilities;
 mod audio;
 mod boss;
 mod callouts;

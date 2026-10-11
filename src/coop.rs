@@ -210,7 +210,7 @@ impl Game {
             self.ult_ready_played = true;
             let p = self.player.pos;
             self.push_sfx(Sfx::UltReady, p);
-            self.toast = Some(("ULTIMATE READY — press Q".into(), 2.2));
+            self.toast = Some(("ULTIMATE READY — press R".into(), 2.2));
         }
         let vl = self.ups.get(Up::Vampire);
         let pact = self.has_evo(crate::upgrades::Evo::BloodPact);
@@ -253,12 +253,14 @@ impl Game {
                 .find(|r| {
                     r.present && r.state.alive() && r.render_pos(now).dist(me) < REVIVE_RADIUS
                 })
-                .map(|r| r.name.clone())
+                .map(|r| (r.name.clone(), r.state.flags & PF_MEDIC != 0))
         });
+        let medic = helper.as_ref().map(|h| h.1).unwrap_or(false);
+        let helper = helper.map(|h| h.0);
         let p = &mut self.player;
         p.bleed -= DT;
         if helper.is_some() {
-            p.revive += DT / REVIVE_TIME;
+            p.revive += DT / REVIVE_TIME * if medic { 2.0 } else { 1.0 };
         } else {
             p.revive = (p.revive - DT * 0.5).max(0.0);
         }
@@ -490,6 +492,12 @@ impl Game {
         }
         if p.hurt_flash > 0.3 {
             flags |= PF_HURT;
+        }
+        if self.kit() == crate::content::Kit::HealPulse {
+            flags |= PF_MEDIC;
+        }
+        if self.ability_t > 0.0 {
+            flags |= PF_ABILITY;
         }
         NetPlayer {
             slot: self.my_slot(),

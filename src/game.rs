@@ -477,6 +477,11 @@ pub struct Game {
     pub skin: usize,
     pub hat: usize,
     pub tracer: usize,
+    /// character (content::CHARACTERS) and their ability state
+    pub character: usize,
+    pub ability_cd: f32,
+    pub ability_t: f32,
+    pub turrets: Vec<crate::abilities::Turret>,
     pub coins: u32,
     /// authored map id (`start|map=asylum`); empty = the procedural world
     pub map_id: String,
@@ -605,6 +610,10 @@ impl Game {
             skin: 0,
             hat: 0,
             tracer: 0,
+            character: 0,
+            ability_cd: 0.0,
+            ability_t: 0.0,
+            turrets: Vec::new(),
             coins: 0,
             map_id: String::new(),
             victory_t: -1.0,
@@ -690,6 +699,7 @@ impl Game {
                 "skin" => self.skin = content::skin_index(v),
                 "hat" => self.hat = content::hat_index(v),
                 "tracer" => self.tracer = content::tracer_index(v),
+                "char" => self.character = content::character_index(v),
                 "map" => self.map_id = v.to_string(),
                 _ => {}
             }
@@ -759,6 +769,9 @@ impl Game {
         self.banish_mode = false;
         self.chest = None;
         self.chests_opened = 0;
+        self.ability_cd = 3.0;
+        self.ability_t = 0.0;
+        self.turrets.clear();
         self.evolved.clear();
         self.volatile.clear();
         self.slams.clear();
@@ -852,7 +865,9 @@ impl Game {
         (1.0 + 0.25 * self.ups.f(Up::Damage)) * (1.0 + 0.08 * self.ups.f(Up::Velocity))
     }
     pub(crate) fn fire_interval(&self) -> f32 {
-        let base = 0.30 * GUNS[self.gun].interval / (1.0 + 0.16 * self.ups.f(Up::FireRate));
+        let class = if self.kit() == content::Kit::HeatSink { 1.1 } else { 1.0 };
+        let heat = if self.kit() == content::Kit::HeatSink && self.ability_t > 0.0 { 2.0 } else { 1.0 };
+        let base = 0.30 * GUNS[self.gun].interval / ((1.0 + 0.16 * self.ups.f(Up::FireRate)) * class * heat);
         if self.player.frenzy > 0.0 {
             base * 0.5
         } else {
@@ -863,7 +878,8 @@ impl Game {
         255.0 * (1.0 + 0.09 * self.ups.f(Up::Speed)) * GUNS[self.gun].move_mult
     }
     pub fn magnet_r(&self) -> f32 {
-        95.0 * (1.0 + 0.45 * self.ups.f(Up::Magnet))
+        let eng = if self.kit() == content::Kit::Turret { 1.3 } else { 1.0 };
+        95.0 * (1.0 + 0.45 * self.ups.f(Up::Magnet)) * eng
     }
     pub(crate) fn crit_chance(&self) -> f32 {
         0.05 + 0.10 * self.ups.f(Up::Crit)
@@ -1259,6 +1275,7 @@ impl Game {
                 Action::Dash => self.player.dash_buf = 0.18,
                 Action::Interact => return self.try_interact(),
                 Action::Ult => self.try_ult(),
+                Action::Ability => return self.try_ability(),
                 Action::AutoAim => {
                     self.auto_aim = !self.auto_aim;
                     let msg = if self.auto_aim {
@@ -1646,7 +1663,7 @@ impl Game {
             .collect();
         let shots_per_sec = 1.0 / self.fire_interval();
         format!(
-            "{{\"run\":{},\"hp\":{:.0},\"maxHp\":{:.0},\"xp\":{:.0},\"xpNext\":{:.0},\"dmg\":{:.1},\"fireRate\":{:.2},\"speed\":{:.0},\"crit\":{:.0},\"magnet\":{:.0},\"ult\":{:.0},\"remaining\":{},\"gunName\":\"{}\",\"diffName\":\"{}\",\"upgrades\":[{}]}}",
+            "{{\"run\":{},\"hp\":{:.0},\"maxHp\":{:.0},\"xp\":{:.0},\"xpNext\":{:.0},\"dmg\":{:.1},\"fireRate\":{:.2},\"speed\":{:.0},\"crit\":{:.0},\"magnet\":{:.0},\"ult\":{:.0},\"remaining\":{},\"gunName\":\"{}\",\"diffName\":\"{}\",\"char\":{{\"name\":\"{}\",\"class\":\"{}\",\"icon\":\"{}\",\"color\":\"{}\",\"ability\":\"{}\",\"passive\":\"{}\"}},\"upgrades\":[{}]}}",
             self.stats_json(),
             self.player.hp,
             self.player.max_hp,
@@ -1661,6 +1678,12 @@ impl Game {
             self.remaining(),
             GUNS[self.gun].name,
             self.difficulty().name,
+            content::CHARACTERS[self.character].name,
+            content::CHARACTERS[self.character].class,
+            content::CHARACTERS[self.character].icon,
+            content::CHARACTERS[self.character].color,
+            content::CHARACTERS[self.character].ability,
+            content::CHARACTERS[self.character].passive,
             ups.join(",")
         )
     }
@@ -1675,7 +1698,7 @@ impl Game {
         let ups: Vec<String> = self.ups.0.iter().map(|l| l.to_string()).collect();
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={};score={};charges={},{},{};ban={};evo={}",
+            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={};score={};charges={},{},{};ban={};evo={};char={}",
             SAVE_VERSION,
             self.player_name.replace([';', '=', '|'], ""),
             self.mode.id(),
@@ -1708,7 +1731,8 @@ impl Game {
                 .iter()
                 .map(|e| (*e as u8).to_string())
                 .collect::<Vec<_>>()
-                .join(",")
+                .join(","),
+            content::CHARACTERS[self.character].id
         )
     }
 
@@ -1811,6 +1835,7 @@ impl Game {
             self.grid.build(self.player.pos, &self.zombies);
         }
         if alive_play && !self.player.dead {
+            self.update_abilities();
             self.update_player();
             if self.player_alive() {
                 self.update_weapons();
@@ -2193,9 +2218,10 @@ impl Game {
         let extra = self.ups.get(Up::Multishot) as i32 + if hail { 2 } else { 0 };
         let speed = 920.0 * gun.speed * (1.0 + 0.2 * self.ups.f(Up::Velocity));
         let life = 0.62 * gun.life * (1.0 + 0.15 * self.ups.f(Up::Velocity));
-        let dmg = 10.0 * gun.dmg * self.dmg_mult();
+        let dmg = 10.0 * gun.dmg * self.dmg_mult() * self.signature_mult();
         let pierce = self.ups.get(Up::Pierce) as i32 + gun.pierce + if hail { 4 } else { 0 };
-        let bounces = self.ups.get(Up::Ricochet) as i32;
+        let heat_sink = self.kit() == content::Kit::HeatSink && self.ability_t > 0.0;
+        let bounces = self.ups.get(Up::Ricochet) as i32 + if heat_sink { 2 } else { 0 };
         let crit_c = self.crit_chance();
         let shoot = |g: &mut Game, a: f32| {
             let a = a + if gun.jitter > 0.0 {
@@ -3130,6 +3156,7 @@ impl Game {
                 if !self.zombies[j].dead {
                     let from = self.player.pos;
                     self.reflect_shot(j, from);
+                    self.pyro_ignite(j);
                 }
                 b.last_hit = uid;
                 // impact sparks
@@ -3942,5 +3969,36 @@ mod tests {
             g.update_zombies();
         }
         assert!(g.eshots.iter().any(|s| s.r > 10.0), "a rock is in the air");
+    }
+
+    #[test]
+    fn character_kits() {
+        let mut g = Game::new(23);
+        g.start("char=mara;gun=smg");
+        assert_eq!(g.kit(), content::Kit::Turret);
+        assert!(g.signature_mult() > 1.1, "Mara's signature SMG");
+        g.ability_cd = 0.0;
+        assert!(g.try_ability());
+        assert_eq!(g.turrets.len(), 1);
+        assert!(g.ability_cd > 0.0);
+        // the turret shoots at zombies on its own
+        g.spawn_zombie(ZKind::Walker, g.turrets[0].pos + v2(200.0, 0.0));
+        g.grid.build(g.player.pos, &g.zombies);
+        let n = g.bullets.len();
+        for _ in 0..60 {
+            g.update_abilities();
+        }
+        assert!(g.bullets.len() > n, "turret fired");
+        // heat sink doubles fire rate
+        let mut h = Game::new(24);
+        h.start("char=rook");
+        let slow = h.fire_interval();
+        h.ability_cd = 0.0;
+        h.try_ability();
+        assert!(h.fire_interval() < slow * 0.6);
+        // saves keep the survivor
+        let mut k = Game::new(25);
+        k.load_save(&g.save_string());
+        assert_eq!(content::CHARACTERS[k.character].id, "mara");
     }
 }

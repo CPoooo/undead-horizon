@@ -64,6 +64,13 @@
       { id: 'rainbow', name: 'Prism', color: 'conic-gradient(#f44,#fb4,#ff4,#4f7,#4cf,#c4f,#f44)', price: 1000, rarity: 'epic' },
     ],
   };
+  // Survivors (ids must match content::CHARACTERS). Free for now.
+  CATALOG.char = [
+    { id: 'rook', name: 'Rook · Gunner', icon: '🎯', price: 0, desc: 'Q: Heat Sink (double fire rate, ricochets). Passive: +10% fire rate. Signature: M9.' },
+    { id: 'mara', name: 'Mara · Engineer', icon: '🔧', price: 0, desc: 'Q: Sentry Turret. Passive: +30% pickup radius. Signature: Viper SMG.' },
+    { id: 'doc', name: 'Doc Hale · Medic', icon: '⛑️', price: 0, desc: 'Q: Heal Pulse (heals, shoves zombies). Passive: regen, 2× revive speed. Signature: Marksman.' },
+    { id: 'ash', name: 'Ash · Pyro', icon: '🔥', price: 0, desc: 'Q: Flame Cone. Passive: hits can ignite. Signature: Boomstick.' },
+  ];
   const CAT_LABEL = { gun: '🔫 Guns', perk: '✨ Perks', skin: '👕 Skins', hat: '🎩 Hats', tracer: '☄️ Tracers' };
   const find = (cat, id) => CATALOG[cat].find((i) => i.id === id) || CATALOG[cat][0];
 
@@ -141,8 +148,8 @@
 
   const freshProfile = () => ({
     coins: 0,
-    owned: ['gun:pistol', 'perk:none', 'skin:default', 'hat:none', 'tracer:default'],
-    equipped: { gun: 'pistol', perk: 'none', skin: 'default', hat: 'none', tracer: 'default' },
+    owned: ['gun:pistol', 'perk:none', 'skin:default', 'hat:none', 'tracer:default', 'char:rook', 'char:mara', 'char:doc', 'char:ash'],
+    equipped: { gun: 'pistol', perk: 'none', skin: 'default', hat: 'none', tracer: 'default', char: 'rook' },
     campaign: { unlocked: 0, cleared: [] },
     saves: { infinite: null, campaign: null },
     stats: { runs: 0, kills: 0, bestWave: 0 },
@@ -216,7 +223,12 @@
       this.persistLocal();
     },
     async equip(cat, id) {
-      if (this.cloud) return this.applyCloud(await this.cloud.api('/equip', { method: 'POST', body: { cat, id } }));
+      // the survivor pick is also kept locally, so it works before the server knows about it
+      if (cat === 'char') { settings.char = id; saveSettings(); this.profile.equipped.char = id; }
+      if (this.cloud) {
+        try { return this.applyCloud(await this.cloud.api('/equip', { method: 'POST', body: { cat, id } })); }
+        catch (e) { if (cat === 'char') return; throw e; }
+      }
       this.profile.equipped[cat] = id;
       this.persistLocal();
     },
@@ -343,7 +355,7 @@
   }
   const equipString = () => {
     const e = Data.profile.equipped;
-    return `gun=${e.gun};perk=${e.perk === 'none' ? '' : e.perk};skin=${e.skin};hat=${e.hat};tracer=${e.tracer}`;
+    return `gun=${e.gun};perk=${e.perk === 'none' ? '' : e.perk};skin=${e.skin};hat=${e.hat};tracer=${e.tracer};char=${settings.char || e.char || 'rook'}`;
   };
   const pushEquip = () => send('equip|' + equipString());
 
@@ -360,7 +372,7 @@
   function renderTag() {
     const e = Data.profile.equipped;
     $('tag-name').textContent = ($('name').value || '').trim() || 'Survivor';
-    $('tag-loadout').textContent = `${find('gun', e.gun).name} · ${find('perk', e.perk).name}`;
+    $('tag-loadout').textContent = `${find('char', settings.char || e.char).name} · ${find('gun', e.gun).name} · ${find('perk', e.perk).name}`;
   }
   function renderMode() {
     for (const b of $('mode-seg').children) b.classList.toggle('on', b.dataset.mode === settings.mode);
@@ -478,8 +490,12 @@
         `<div class="item ${p.equipped[cat] === it.id ? 'equipped' : ''}" data-eq="${cat}:${it.id}" style="cursor:pointer">${rarityTag(it)}${visual(cat, it)}<div class="nm">${esc(it.name)}</div>
           <div class="ds">${p.equipped[cat] === it.id ? '✓ Equipped' : 'Click to equip'}</div></div>`).join('')}</div></div>`;
     };
+    const curChar = settings.char || p.equipped.char || 'rook';
+    const chars = `<div class="locker-group"><h3>Survivor</h3><div class="items chars">${CATALOG.char.map((it) =>
+      `<div class="item ${curChar === it.id ? 'equipped' : ''}" data-eq="char:${it.id}" style="cursor:pointer"><div class="ico">${it.icon}</div><div class="nm">${esc(it.name)}</div>
+        <div class="ds">${esc(it.desc)}</div></div>`).join('')}</div></div>`;
     $('locker').innerHTML =
-      `<h2>Loadout</h2>${group('gun', 'Primary weapon')}${group('perk', 'Starting perk')}
+      `<h2>Survivor</h2>${chars}<h2 style="margin-top:20px">Loadout</h2>${group('gun', 'Primary weapon')}${group('perk', 'Starting perk')}
        <h2 style="margin-top:20px">Character</h2>${group('skin', 'Outfit')}${group('hat', 'Headgear')}${group('tracer', 'Bullet tracers')}
        <div class="hint" style="margin-top:12px">Buy more in the 🛒 Shop with coins earned by surviving waves.</div>`;
   }
@@ -609,7 +625,7 @@
   on('next-ch', 'click', () => { settings.chapter = Math.min(settings.chapter + 1, STORY.length - 1); start(); });
   on('pause-btn', 'click', () => send('pause'));
   const tap = (id, cmd) => $(id).addEventListener('touchstart', (e) => { e.preventDefault(); send(cmd); }, { passive: false });
-  tap('t-dash', 'dash'); tap('t-ult', 'ult');
+  tap('t-dash', 'dash'); tap('t-ult', 'ult'); tap('t-abil', 'act|ability');
 
   window.addEventListener('keydown', (e) => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
@@ -623,9 +639,10 @@
   function renderPause(d) {
     lastPause = d;
     const r = d.run;
-    $('p-sub').textContent = r.mode === 'campaign'
+    const who = d.char ? `${d.char.icon} ${d.char.name} (${d.char.class})` : '';
+    $('p-sub').textContent = (r.mode === 'campaign'
       ? `Chapter ${r.chapter + 1}: ${STORY[r.chapter].title} · ${d.diffName} · ${d.gunName}`
-      : `Infinite · ${d.diffName} · ${d.gunName}`;
+      : `Infinite · ${d.diffName} · ${d.gunName}`) + (who ? ` · ${who}` : '');
     $('p-hp').style.width = `${Math.max(0, (d.hp / d.maxHp) * 100)}%`;
     $('p-hp-t').textContent = `${d.hp} / ${d.maxHp}`;
     $('p-lvl').textContent = r.level;

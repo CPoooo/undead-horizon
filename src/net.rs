@@ -15,7 +15,7 @@ pub const MAX_PLAYERS: usize = 3;
 
 /// Bump whenever the wire format or sim rules change in a way that would
 /// desync peers running different builds.
-pub const PROTOCOL: u16 = 5;
+pub const PROTOCOL: u16 = 6;
 
 pub const MSG_PSTATE: u8 = 1; // client -> host (unreliable): own player state
 pub const MSG_HITS: u8 = 2; // client -> host (reliable): damage dealt to zombies
@@ -45,6 +45,8 @@ pub const PF_DASH: u8 = 4;
 pub const PF_FRENZY: u8 = 8;
 pub const PF_HURT: u8 = 16;
 pub const PF_CONNECTED: u8 = 32;
+pub const PF_MEDIC: u8 = 64; // revives teammates twice as fast
+pub const PF_ABILITY: u8 = 128; // class ability active (heat sink / flames)
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Role {

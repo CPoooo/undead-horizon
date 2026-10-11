@@ -245,10 +245,12 @@ app.post("/equip", async (c) => {
   const { cat, id } = await c.req.json();
   if (!CATEGORIES.includes(cat)) return c.json({ error: "bad_category" }, 400);
   await ensureProfile(uid);
+  // free items (survivors) need no ownership row
+  const free = PRICES[`${cat}:${id}`] === 0 && cat === "char";
   const { rowCount } = await pool.query(
     `update profiles set equipped = jsonb_set(equipped, array[$2], to_jsonb($3::text)), updated_at = now()
-     where user_id = $1 and ($2 || ':' || $3) = any(owned)`,
-    [uid, cat, id],
+     where user_id = $1 and (($2 || ':' || $3) = any(owned) or $4)`,
+    [uid, cat, id, free],
   );
   if (!rowCount) return c.json({ error: "not_owned" }, 409);
   return c.json(await profileJson(uid));

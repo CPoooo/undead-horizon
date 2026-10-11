@@ -210,6 +210,9 @@ input[type=range] { flex: 1; accent-color: #7fd65a; }
 body.touch.playing #touch-ui { display: flex; }
 .tbtn { width: 74px; height: 74px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(20,24,40,.55); color: #fff; font-weight: 900; font-size: 13px; backdrop-filter: blur(4px); display: grid; place-items: center; }
 .tbtn.ult { width: 62px; height: 62px; margin-bottom: 70px; border-color: rgba(255,211,106,.5); }
+.tbtn.abil { width: 56px; height: 56px; margin-bottom: 140px; border-color: rgba(122,215,255,.5); }
+.items.chars { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.items.chars .ico { font-size: 30px; }
 .tbtn:active { transform: scale(.92); background: rgba(80,100,160,.6); }
 #pause-btn { position: fixed; top: 52px; left: 16px; z-index: 5; display: none; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: rgba(14,17,28,.6); color: #fff; font-weight: 900; }
 body.touch.playing #pause-btn { display: block; }

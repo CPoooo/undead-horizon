@@ -173,8 +173,8 @@ Not scheduled yet; design notes for when we pick it up.
   - burrower (pops up near the player with a telegraph)
 - [x] C7 (M) **Boss 2.0.** Multi-phase bosses with weak points (crit zones), clear telegraphs (ground decals), and enrage timers. Boss intro card (name plus taunt). Add 2 new bosses.
 - [ ] C8 (L, split) **Characters / classes** with unique starting weapon, passive and active ability (Q becomes a per-character ability, ultimate moves to R):
-  - C8a (M) character table plus selection UI in the lobby showcase; persist in profile and server `equipped.character`
-  - C8b (M) 4 kits:
+  - [x] C8a (M) character table plus selection UI in the lobby showcase; persist in profile and server `equipped.character`
+  - [x] C8b (M) 4 kits:
     - **Gunner:** heat-sink burst
     - **Engineer:** deployable turret (reused by Siege)
     - **Medic:** heal pulse and faster revives

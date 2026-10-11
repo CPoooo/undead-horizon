@@ -100,6 +100,8 @@ pub struct PView {
     pub recoil: f32,
     pub blink: bool,
     pub frenzy: bool,
+    /// class ability active: glow in this color
+    pub ability: Option<&'static str>,
     pub hurt: f32,
     pub skin: usize,
     pub gun: usize,
@@ -126,6 +128,11 @@ impl Game {
             recoil: pl.recoil,
             blink: pl.iframes > 0.0 && pl.dash_t <= 0.0 && !pl.downed,
             frenzy: pl.frenzy > 0.0,
+            ability: if self.ability_t > 0.0 {
+                Some(crate::content::CHARACTERS[self.character].color)
+            } else {
+                None
+            },
             hurt: pl.hurt_flash,
             skin: self.skin,
             gun: self.gun,
@@ -144,6 +151,7 @@ impl Game {
             recoil: r.recoil,
             blink: false,
             frenzy: s.flags & crate::net::PF_FRENZY != 0,
+            ability: if s.flags & crate::net::PF_ABILITY != 0 { Some("#ffb03a") } else { None },
             hurt: if s.flags & crate::net::PF_HURT != 0 {
                 0.8
             } else {
@@ -264,6 +272,7 @@ impl Game {
         }
 
         self.draw_blades(c, ppos, t);
+        self.draw_turrets(c, t);
         self.draw_bullets(c, a);
         self.draw_particles(c);
         self.draw_lights(c);
@@ -330,6 +339,7 @@ impl Game {
                     recoil: 0.0,
                     blink: false,
                     frenzy: false,
+                    ability: None,
                     hurt: 0.0,
                     skin: *skin,
                     gun: *gun,
@@ -838,6 +848,14 @@ impl Game {
             c.set_global_alpha(d(0.25 + 0.15 * (t * 20.0).sin()));
             c.set_fill_style_str("#ffd84a");
             circle(c, body.x, body.y, PR + 8.0);
+            let _ = c.set_global_composite_operation("source-over");
+            c.set_global_alpha(if blink { 0.45 } else { 1.0 });
+        }
+        if let Some(col) = v.ability {
+            let _ = c.set_global_composite_operation("lighter");
+            c.set_global_alpha(d(0.3 + 0.2 * (t * 14.0).sin()));
+            c.set_fill_style_str(col);
+            circle(c, body.x, body.y, PR + 11.0);
             let _ = c.set_global_composite_operation("source-over");
             c.set_global_alpha(if blink { 0.45 } else { 1.0 });
         }
@@ -1675,6 +1693,43 @@ impl Game {
         }
     }
 
+    fn draw_turrets(&self, c: &Ctx, t: f32) {
+        for tu in self.turrets.iter() {
+            let p = tu.pos;
+            c.set_fill_style_str("rgba(0,0,0,0.3)");
+            c.begin_path();
+            let _ = c.ellipse(d(p.x + 3.0), d(p.y + 8.0), 16.0, 8.0, 0.0, 0.0, TAU64);
+            c.fill();
+            // tripod
+            c.set_stroke_style_str("#3a4250");
+            c.set_line_width(3.0);
+            c.begin_path();
+            for k in 0..3 {
+                let a = k as f32 * TAU / 3.0 + 0.5;
+                c.move_to(d(p.x), d(p.y - 6.0));
+                c.line_to(d(p.x + a.cos() * 14.0), d(p.y + a.sin() * 8.0 + 4.0));
+            }
+            c.stroke();
+            let head = p + v2(0.0, -10.0);
+            c.set_fill_style_str("#5a6a80");
+            circle(c, head.x, head.y, 9.0);
+            let barrel = head + V2::from_angle(tu.aim) * 16.0;
+            c.set_stroke_style_str("#2a303a");
+            c.set_line_width(4.0);
+            c.begin_path();
+            c.move_to(d(head.x), d(head.y));
+            c.line_to(d(barrel.x), d(barrel.y));
+            c.stroke();
+            let blink = if tu.life < 3.0 { (t * 10.0).sin() > 0.0 } else { true };
+            if blink {
+                let _ = c.set_global_composite_operation("lighter");
+                c.set_fill_style_str("#7ad7ff");
+                circle(c, head.x, head.y, 3.0);
+                let _ = c.set_global_composite_operation("source-over");
+            }
+        }
+    }
+
     /// Additive glow pools for transient lights (muzzle flashes, blasts).
     fn draw_lights(&self, c: &Ctx) {
         if self.lights.is_empty() {
@@ -2184,7 +2239,45 @@ impl Game {
             c.set_font(&format!("800 10px {}", font));
             c.set_fill_style_str("#ffffff");
             c.set_stroke_style_str("rgba(0,0,0,0.8)");
-            outlined(c, "Q", cx, cy + 38.0, 3.0);
+            outlined(c, "R", cx, cy + 38.0, 3.0);
+        }
+
+        // class ability (right of the ultimate)
+        let ch = &crate::content::CHARACTERS[self.character];
+        let ax = cx + 64.0;
+        let ay = cy + 6.0;
+        let ak = 1.0 - (self.ability_cd / ch.cd).clamp(0.0, 1.0);
+        let aready = self.ability_cd <= 0.0;
+        c.set_fill_style_str("rgba(10,12,20,0.75)");
+        circle(c, ax, ay, 21.0);
+        if self.ability_t > 0.0 {
+            let _ = c.set_global_composite_operation("lighter");
+            c.set_global_alpha(d(0.4 + 0.3 * (t * 10.0).sin()));
+            c.set_fill_style_str(ch.color);
+            circle(c, ax, ay, 26.0);
+            let _ = c.set_global_composite_operation("source-over");
+            c.set_global_alpha(1.0);
+        }
+        c.set_stroke_style_str(if aready { ch.color } else { "#4a5a70" });
+        c.set_line_width(4.0);
+        c.begin_path();
+        let _ = c.arc(d(ax), d(ay), 19.0, -PI as f64 / 2.0, -PI as f64 / 2.0 + TAU64 * ak as f64);
+        c.stroke();
+        c.set_font("17px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif");
+        c.set_fill_style_str("#ffffff");
+        c.set_global_alpha(if aready { 1.0 } else { 0.45 });
+        text(c, ch.ability_icon, ax, ay);
+        c.set_global_alpha(1.0);
+        if !aready {
+            c.set_font(&format!("800 11px {}", font));
+            c.set_stroke_style_str("rgba(0,0,0,0.85)");
+            outlined(c, &format!("{}", self.ability_cd.ceil() as i32), ax, ay + 1.0, 3.0);
+        }
+        if !self.input.is_touch {
+            c.set_font(&format!("800 10px {}", font));
+            c.set_fill_style_str("#ffffff");
+            c.set_stroke_style_str("rgba(0,0,0,0.8)");
+            outlined(c, "Q", ax, ay + 32.0, 3.0);
         }
 
         // upgrade tray (bottom-left)
