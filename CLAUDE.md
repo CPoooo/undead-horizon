@@ -260,9 +260,10 @@ Original design notes:
   - Done: a party member not in the running match gets "⚔ Join the match in progress" → `joinreq` signal → the host re-offers (`late`) in the old slot (or the lowest free one), sends `go{late}` + `joined` to the others, and `peerjoin|slot|name` makes the host game send HELLO + a one-off world sync (doors, power, box, boards, defenses, crystal) as `MSG_EVENTS`. Late joiners spectate until the wave is cleared; bled-out players also respawn on wave clear. The server now allows `party.join` into `in_game` parties (needs deploy).
   - A dropped client rejoins: same slot, host resends a full snapshot.
   - A new friend joins mid-run as spectator, then spawns on wave clear.
-- [ ] M3 (L, split) **Host migration.**
-  - M3a (M) periodic compact world checkpoint from host to clients
-  - M3b (M) on host loss, the lowest slot promotes itself, rebuilds from the checkpoint, and re-signals peers
+- [x] M3 (L, split) **Host migration.**
+  - [x] M3a (M) periodic compact world checkpoint from host to clients (`MSG_CHECKPOINT`, 1 Hz: wave counters, uids, Outbreak round state, Siege phase/queue; protocol 14)
+  - [x] M3b (M) on host loss, the lowest slot promotes itself, rebuilds from the checkpoint, and re-signals peers
+    - A client that loses the host first asks it `alive?` over the social socket (2.5s). If it answers, the client was the one who dropped: it leaves and can rejoin (M2). Otherwise everyone picks the lowest slot still in the party: it runs `promote|old` (replicas rescaled to wave stats; a lone spectator respawns) and re-offers with `migrate`; the others run `hostmoved|old|new` and accept only that offer (20s timeout). On clients the host link is always keyed 0; `Net.host_slot` tracks the real slot.
 - [x] M4 (S) **4 players.** `MAX_PLAYERS=4`, party max 4, UI slots. Profile the snapshot size; quantize to i16 if needed.
 - [x] M5 (S) **Ping and quick chat.**
   - Ping wheel: "Here", "Enemy", "Need revive", "Box here".

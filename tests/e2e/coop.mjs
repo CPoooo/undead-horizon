@@ -60,6 +60,7 @@ try {
 
   // M2: B's connection dies mid-match; B goes back to the party and rejoins the
   // running match as a late joiner (spectating until the wave is cleared)
+  await A.evaluate(() => window.UHUI.send('dev|tank')); // the host stands alone for a while: don't let it die
   await B.evaluate(() => window.UHCoop.debug.pcs.forEach((pc) => pc.close()));
   await B.waitForFunction(() => !window.UHCoop.debug.inGame, null, { timeout: 20000 });
   await A.waitForFunction(() => window.UHCoop.debug.peers.length === 0, null, { timeout: 20000 });
@@ -79,8 +80,17 @@ try {
   await A.waitForSelector('#pause.show', { timeout: 5000 });
   A.once('dialog', (d) => d.accept());
   await A.click('#quit');
+  // M3: host migration. B is the only one left, so B takes over and keeps playing
+  await B.waitForFunction(() => window.UHCoop.debug.migrations >= 1 && window.UHCoop.debug.hostSlot === 1, null, { timeout: 20000 });
+  await B.waitForTimeout(2000);
+  check(await B.evaluate(() => window.UHCoop.debug.inGame && window.UHUI.state() === 'playing'), 'host quits: the client takes over as host and keeps playing');
+  await B.screenshot({ path: `${OUT}/coop-migrated-B.png` });
+  await B.keyboard.press('Escape');
+  await B.waitForSelector('#pause.show', { timeout: 5000 });
+  B.once('dialog', (d) => d.accept());
+  await B.click('#quit');
   await B.waitForFunction(() => !window.UHCoop.debug.inGame, null, { timeout: 20000 });
-  check(true, 'client leaves the match when the host quits');
+  check(true, 'the new host can leave the match');
   await B.evaluate(() => window.UHUI.toMenu());
   await A.waitForFunction(() => window.UHCoop.debug.party?.status === 'open', null, { timeout: 15000 });
   await B.waitForFunction(() => window.UHCoop.debug.party?.status === 'open' && document.getElementById('party-ready'), null, { timeout: 15000 });

@@ -15,7 +15,7 @@ pub const MAX_PLAYERS: usize = 4;
 
 /// Bump whenever the wire format or sim rules change in a way that would
 /// desync peers running different builds.
-pub const PROTOCOL: u16 = 13;
+pub const PROTOCOL: u16 = 14;
 
 pub const MSG_PSTATE: u8 = 1; // client -> host (unreliable): own player state
 pub const MSG_HITS: u8 = 2; // client -> host (reliable): damage dealt to zombies
@@ -28,6 +28,7 @@ pub const MSG_BUILD: u8 = 8; // client -> host: place a Siege defense (kind, pos
 pub const MSG_DEFENSE: u8 = 9; // client -> host: upgrade / sell a defense (B_*, uid)
 pub const MSG_READY: u8 = 10; // client -> host: ready to end the Siege build phase
 pub const MSG_PING: u8 = 11; // client -> host: ping / emote (kind, pos)
+pub const MSG_CHECKPOINT: u8 = 12; // host -> clients (reliable, ~1 Hz): host-only state for host migration
 
 // events
 pub const E_HURT: u8 = 1;
@@ -158,6 +159,9 @@ pub struct Net {
     pub snap_interval: f64,
     pub tick: u32,
     pub game_over_sent: bool,
+    /// slot of the current host (changes after a host migration)
+    pub host_slot: u8,
+    pub checkpoint_t: f64,
 }
 
 impl Net {
@@ -176,6 +180,8 @@ impl Net {
             snap_interval: 0.05,
             tick: 0,
             game_over_sent: false,
+            host_slot: 0,
+            checkpoint_t: 0.0,
         }
     }
     pub fn players(&self) -> usize {

@@ -124,7 +124,7 @@ pub struct SiegeState {
     /// "Glass Crystal" challenge: 40% crystal health, double coins
     pub glass: bool,
     /// co-op ready vote for ending the build phase (by slot)
-    pub ready: [bool; 3],
+    pub ready: [bool; crate::net::MAX_PLAYERS],
 }
 
 pub const GRID: f32 = 40.0;
@@ -174,7 +174,7 @@ impl Game {
             next_uid: 1,
             walled_in: false,
             glass,
-            ready: [false; 3],
+            ready: [false; crate::net::MAX_PLAYERS],
         }));
         self.wave.n = 0;
         self.wave.intermission = 0.0;
@@ -431,7 +431,7 @@ impl Game {
             s.build_t = s.build_t.min(0.5);
             return true;
         }
-        s.ready[me as usize % 3] = true;
+        s.ready[me as usize % crate::net::MAX_PLAYERS] = true;
         if self.is_client() {
             let mut w = net::W::new();
             w.u8(net::MSG_READY);
@@ -445,7 +445,7 @@ impl Game {
 
     pub fn mark_ready(&mut self, slot: u8) {
         if let Some(s) = self.siege.as_mut() {
-            s.ready[slot as usize % 3] = true;
+            s.ready[slot as usize % crate::net::MAX_PLAYERS] = true;
         }
         self.check_ready_vote();
     }
@@ -453,7 +453,7 @@ impl Game {
     fn check_ready_vote(&mut self) {
         let present: Vec<u8> = self.targets().iter().filter(|t| t.0 != 255).map(|t| t.0).collect();
         let Some(s) = self.siege.as_mut() else { return };
-        if present.iter().all(|p| s.ready[*p as usize % 3]) {
+        if present.iter().all(|p| s.ready[*p as usize % crate::net::MAX_PLAYERS]) {
             s.build_t = s.build_t.min(0.5);
         }
     }
@@ -498,7 +498,7 @@ impl Game {
         self.wave.boss_timer = 8.0;
         if let Some(s) = self.siege.as_mut() {
             s.phase = SiegePhase::Combat;
-            s.ready = [false; 3];
+            s.ready = [false; crate::net::MAX_PLAYERS];
             s.queue = plan;
             s.spawn_t = 0.5;
             s.build_sel = None;

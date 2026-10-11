@@ -31,10 +31,14 @@
     roster: null,
   };
 
+  // after a host migration (M3) the host is whoever took over, not slot 0;
+  // on clients the host's link is always keyed 0
+  const hosting = () => S.mySlot === (S.hostSlot || 0);
+
   // ------------------------------------------------------------------ Rust bridge
   window.uhNetPoll = () => (S.inbox.length ? S.inbox.shift() : undefined);
   window.uhNetSend = (slot, reliable, data) => {
-    const peer = S.mySlot === 0 ? S.peers.get(slot) : S.peers.get(0);
+    const peer = hosting() ? S.peers.get(slot) : S.peers.get(0);
     const ch = peer && (reliable ? peer.r : peer.u);
     if (!ch || ch.readyState !== 'open') return;
     if (!reliable && ch.bufferedAmount > 256 * 1024) return; // drop stale snapshots under congestion
@@ -417,7 +421,7 @@
     if (!peer.troubleAt) {
       peer.troubleAt = Date.now();
       const name = S.roster?.find((m) => m.slot === peer.slot)?.name || 'a teammate';
-      UI().toast(S.mySlot === 0 || peer.slot !== 0 ? `Connection to ${name} dropped, reconnecting…` : 'Connection to the host dropped, reconnecting…');
+      UI().toast(hosting() || peer.slot !== 0 ? `Connection to ${name} dropped, reconnecting…` : 'Connection to the host dropped, reconnecting…');
       clearTimeout(peer.giveUp);
       peer.giveUp = setTimeout(() => {
         if (S.peers.get(peer.slot) === peer && peer.troubleAt) { try { peer.pc.close(); } catch {} peerGone(peer.slot); }
@@ -438,7 +442,7 @@
     if (S.peers.get(peer.slot) !== peer || !peer.troubleAt || !S.inGame) return;
     if ((peer.restarts = (peer.restarts || 0) + 1) > 3) return;
     S.restarts = (S.restarts || 0) + 1;
-    if (S.mySlot !== 0) { wsSend({ t: 'signal', to: peer.uid, data: { kind: 'restart', sid: peer.sid } }); return; }
+    if (!hosting()) { wsSend({ t: 'signal', to: peer.uid, data: { kind: 'restart', sid: peer.sid } }); return; }
     const pc = peer.pc;
     if (pc.signalingState !== 'stable') return;
     try {
@@ -469,6 +473,7 @@
     else if (S.loading) return; // duplicate start event
     const roster = slotsFor(S.party);
     S.roster = roster;
+    S.hostSlot = 0;
     const mine = roster.find((m) => m.id === S.me.id);
     if (!mine) return;
     S.mySlot = mine.slot;
@@ -485,21 +490,22 @@
     }
   }
 
-  async function connectTo(m, attempt, late = false) {
+  async function connectTo(m, attempt, late = false, migrate = false) {
     const sid = S.sid;
     const old = S.peers.get(m.slot);
     if (old) { S.peers.delete(m.slot); try { old.pc.close(); } catch {} }
     const servers = await iceServers();
-    if (S.sid !== sid || (S.inGame && !late)) return;
+    if (S.sid !== sid || (S.inGame && !late && !migrate)) return;
     const pc = new RTCPeerConnection({ iceServers: servers });
     const peer = wire(m.slot, pc, m.id);
     peer.attempt = attempt;
     peer.late = late;
+    peer.migrate = migrate;
     peer.onChannel(pc.createDataChannel('u', { ordered: false, maxRetransmits: 0 }));
     peer.onChannel(pc.createDataChannel('r', { ordered: true }));
     await pc.setLocalDescription(await pc.createOffer());
-    wsSend({ t: 'signal', to: m.id, data: { kind: 'offer', sid, slot: m.slot, attempt, late: late ? 1 : 0, roster: late ? S.roster.map(({ id, name, slot }) => ({ id, name, slot })) : undefined, sdp: pc.localDescription.sdp } });
-    if (late) return;
+    wsSend({ t: 'signal', to: m.id, data: { kind: 'offer', sid, slot: m.slot, attempt, late: late ? 1 : 0, migrate: migrate ? 1 : 0, roster: late ? S.roster.map(({ id, name, slot }) => ({ id, name, slot })) : undefined, sdp: pc.localDescription.sdp } });
+    if (late || migrate) return;
     S.linkStatus[m.slot] = attempt ? 'retrying' : 'connecting';
     renderLoading();
   }
@@ -523,6 +529,33 @@
     if (data.sid && S.sid && data.sid !== S.sid && data.kind !== 'offer') return; // older match
     switch (data.kind) {
       case 'offer': {
+        if (data.migrate && S.inGame) {
+          // a teammate took over as host. If our own host link is still fine,
+          // they lost the host, not us: stay put (they carry on solo).
+          if (linkOpen(S.peers.get(0)) && S.awaitHost !== from) return;
+          if (S.awaitHost !== from) {
+            const nx = successor(S.hostSlot || 0);
+            if (!nx || nx.id !== from) return;
+            const old = S.hostSlot || 0;
+            S.roster = S.roster.filter((m) => m.slot !== old);
+            S.hostSlot = nx.slot;
+            send(`hostmoved|${old}|${nx.slot}`);
+          }
+          S.awaitHost = null;
+          clearTimeout(S.migrateT);
+          const servers = await iceServers();
+          const prev = S.peers.get(0);
+          if (prev) { S.peers.delete(0); try { prev.pc.close(); } catch {} }
+          const pc = new RTCPeerConnection({ iceServers: servers });
+          const peer = wire(0, pc, from);
+          await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+          await pc.setLocalDescription(await pc.createAnswer());
+          wsSend({ t: 'signal', to: from, data: { kind: 'answer', sid: data.sid, sdp: pc.localDescription.sdp } });
+          peer.described = true;
+          await flushPendingIce(peer);
+          S.migrations = (S.migrations || 0) + 1;
+          break;
+        }
         if (S.inGame || from !== S.party.hostId) return;
         if (S.sid !== data.sid) { closePeers(); S.sid = data.sid; }
         S.mySlot = data.slot;
@@ -551,7 +584,7 @@
       }
       case 'joinreq': {
         // host: a party member wants into the running match (rejoin or a new friend)
-        if (S.mySlot !== 0 || !S.inGame || data.sid !== S.sid) return;
+        if (!hosting() || !S.inGame || data.sid !== S.sid) return;
         const mem = S.party?.members.find((x) => x.id === from);
         if (!mem) return;
         let slot = S.roster.find((x) => x.id === from)?.slot;
@@ -578,15 +611,27 @@
         } catch (e) { console.warn('[coop] reoffer', e); }
         break;
       }
+      case 'alive?':
+        // a client lost its link to us: tell it we're still running the match
+        if (hosting() && S.inGame && data.sid === S.sid) wsSend({ t: 'signal', to: from, data: { kind: 'alive', sid: S.sid } });
+        break;
+      case 'alive':
+        if (S.aliveCheck && S.aliveCheck === from && S.inGame) {
+          S.aliveCheck = null;
+          clearTimeout(S.aliveT);
+          UI().toast('You lost connection to the host. Rejoin from the party panel.');
+          send('peerleft|0');
+        }
+        break;
       case 'restart': {
         // a client lost us: restart ICE from our side
-        if (S.mySlot !== 0 || !S.inGame) return;
+        if (!hosting() || !S.inGame) return;
         const peer = [...S.peers.values()].find((p) => p.uid === from && p.sid === data.sid);
         if (peer) { peer.troubleAt ||= Date.now(); restartIce(peer); }
         break;
       }
       case 'answer': {
-        if (S.mySlot !== 0) return;
+        if (!hosting()) return;
         const peer = [...S.peers.values()].find((p) => p.uid === from);
         if (peer && peer.pc.signalingState === 'have-local-offer') {
           await peer.pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
@@ -619,7 +664,7 @@
 
   function checkAllOpen() {
     for (const slot of S.peers.keys()) setLinkStatus(slot);
-    if (S.inGame && S.mySlot === 0) {
+    if (S.inGame && hosting()) {
       for (const p of S.peers.values()) if (p.late && !p.lateSent && linkOpen(p)) lateGo(p);
       return;
     }
@@ -682,7 +727,7 @@
       if (Array.isArray(m.roster)) S.roster = m.roster;
       S.late = true;
       startGame(opts('client', m.present) + ';late=1');
-    } else if (m.t === 'joined' && S.inGame && S.mySlot !== 0) {
+    } else if (m.t === 'joined' && S.inGame && !hosting()) {
       if (Array.isArray(m.roster)) S.roster = m.roster;
       send(`peerjoin|${m.slot}|${String(m.name || '').replace(/[|;]/g, '')}`);
     } else if (m.t === 'go' && S.mySlot !== 0 && !S.inGame) { S.late = false; startGame(opts('client', m.present)); }
@@ -723,8 +768,52 @@
     clearTimeout(p.restartT);
     clearTimeout(p.giveUp);
     S.peers.delete(slot);
-    if (S.inGame) send('peerleft|' + slot);
+    if (S.inGame && slot === 0 && !hosting()) hostLost();
+    else if (S.inGame) send('peerleft|' + slot);
     else if (S.loading) { if (S.linkStatus) S.linkStatus[slot] = 'failed'; renderLoading(); }
+  }
+
+  // ------------------------------------------------------------------ host migration (M3)
+  // Everyone left computes the same successor: the lowest slot still in the
+  // party. The successor promotes its game (replica + last checkpoint) and
+  // re-offers to the others, who accept only from that player. Alone, you
+  // simply carry on as a solo host.
+  const MIGRATE_WAIT = 20000;
+  function successor(oldSlot) {
+    const inParty = (m) => m.id === S.me?.id || (S.party?.members || []).some((pm) => pm.id === m.id);
+    return (S.roster || []).filter((m) => m.slot !== oldSlot && inParty(m)).sort((a, b) => a.slot - b.slot)[0];
+  }
+  // First ask the old host (over the social socket) whether it's still running
+  // the match: if it answers, *we* dropped, so leave and offer the rejoin.
+  const ALIVE_WAIT = 2500;
+  function hostLost() {
+    const old = S.hostSlot || 0;
+    const uid = S.roster?.find((m) => m.slot === old)?.id;
+    if (!uid || !S.ws || S.ws.readyState !== 1) { migrate(); return; }
+    S.aliveCheck = uid;
+    wsSend({ t: 'signal', to: uid, data: { kind: 'alive?', sid: S.sid } });
+    clearTimeout(S.aliveT);
+    S.aliveT = setTimeout(() => { if (S.aliveCheck === uid) { S.aliveCheck = null; migrate(); } }, ALIVE_WAIT);
+  }
+  function migrate() {
+    if (!S.inGame) return;
+    const old = S.hostSlot || 0;
+    const next = successor(old);
+    if (!next) { send('peerleft|0'); return; }
+    S.roster = S.roster.filter((m) => m.slot !== old);
+    S.hostSlot = next.slot;
+    if (next.slot === S.mySlot) {
+      send(`promote|${old}`);
+      S.migrations = (S.migrations || 0) + 1;
+      for (const m of S.roster) if (m.slot !== S.mySlot) connectTo(m, 0, false, true);
+    } else {
+      send(`hostmoved|${old}|${next.slot}`);
+      S.awaitHost = next.id;
+      clearTimeout(S.migrateT);
+      S.migrateT = setTimeout(() => {
+        if (S.inGame && !linkOpen(S.peers.get(0))) { S.awaitHost = null; send('peerleft|0'); }
+      }, MIGRATE_WAIT);
+    }
   }
 
   function closePeers() {
@@ -835,7 +924,7 @@
     get me() { return S.me; },
     get social() { return S.social; },
     /** for tests/debugging */
-    get debug() { return { late: !!S.late, restarts: S.restarts || 0, restart: (slot) => { const p = S.peers.get(slot); if (p) { p.troubleAt = Date.now(); restartIce(p); } }, slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
+    get debug() { return { hostSlot: S.hostSlot || 0, migrations: S.migrations || 0, late: !!S.late, restarts: S.restarts || 0, restart: (slot) => { const p = S.peers.get(slot); if (p) { p.troubleAt = Date.now(); restartIce(p); } }, slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
     inviteLink,
     /** Home Base: share our position with the party, and read theirs */
     hubPos(x, y, aim) { if (S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },

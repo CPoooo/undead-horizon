@@ -13,6 +13,8 @@ use crate::upgrades::Up;
 const SNAP_HZ: f64 = 20.0;
 const STATE_HZ: f64 = 30.0;
 const GEMS_HZ: f64 = 12.0;
+/// host-only state for host migration (M3a)
+const CHECKPOINT_HZ: f64 = 1.0;
 const REVIVE_TIME: f32 = 3.0;
 const REVIVE_RADIUS: f32 = 75.0;
 pub const BLEED_TIME: f32 = 30.0;
@@ -247,8 +249,173 @@ impl Game {
         self.push_sfx(Sfx::Heal, pos);
     }
 
+    // ------------------------------------------------------------ host migration
+    /// Host: everything a client would need to carry on as host that snapshots
+    /// and events don't already replicate.
+    fn encode_checkpoint(&self) -> Vec<u8> {
+        let mut w = W::new();
+        w.u8(MSG_CHECKPOINT);
+        w.u16(self.wave.total.min(u16::MAX as u32) as u16);
+        w.u16(self.wave.spawned.min(u16::MAX as u32) as u16);
+        w.f32(self.wave.timer);
+        w.f32(self.wave.boss_timer);
+        w.u8(self.wave.boss_pending as u8);
+        w.u32(self.next_uid);
+        w.f32(self.time);
+        match &self.ob {
+            Some(ob) => {
+                w.u8(1);
+                w.u8(ob.hound_round as u8);
+                w.u16(ob.next_hounds.min(u16::MAX as u32) as u16);
+                w.u16(ob.drops_round.min(u16::MAX as u32) as u16);
+                w.u16(ob.box_uses.min(u16::MAX as u32) as u16);
+            }
+            None => w.u8(0),
+        }
+        match &self.siege {
+            Some(s) => {
+                w.u8(1);
+                w.u8(matches!(s.phase, crate::modes::siege::SiegePhase::Combat) as u8);
+                w.f32(s.build_t);
+                w.f32(s.spawn_t);
+                w.u32(s.next_uid);
+                w.u8(s.queue.len().min(8) as u8);
+                for q in s.queue.iter().take(8) {
+                    w.u8(q.len().min(255) as u8);
+                    for k in q.iter().take(255) {
+                        w.u8(*k as u8);
+                    }
+                }
+            }
+            None => w.u8(0),
+        }
+        w.0
+    }
+
+    fn apply_checkpoint(&mut self, r: &mut R) {
+        let parsed = (|| {
+            let total = r.u16()?;
+            let spawned = r.u16()?;
+            let timer = r.f32()?;
+            let boss_timer = r.f32()?;
+            let boss_pending = r.u8()? != 0;
+            let next_uid = r.u32()?;
+            let time = r.f32()?;
+            Some((total, spawned, timer, boss_timer, boss_pending, next_uid, time))
+        })();
+        let Some((total, spawned, timer, boss_timer, boss_pending, next_uid, time)) = parsed else { return };
+        self.wave.total = total as u32;
+        self.wave.spawned = spawned as u32;
+        self.wave.timer = timer;
+        self.wave.boss_timer = boss_timer;
+        self.wave.boss_pending = boss_pending;
+        self.next_uid = self.next_uid.max(next_uid);
+        self.time = self.time.max(time);
+        if r.u8() == Some(1) {
+            let (Some(hr), Some(nh), Some(dr), Some(bu)) = (r.u8(), r.u16(), r.u16(), r.u16()) else { return };
+            if let Some(ob) = self.ob.as_mut() {
+                ob.hound_round = hr != 0;
+                ob.next_hounds = nh as u32;
+                ob.drops_round = dr as u32;
+                ob.box_uses = bu as u32;
+            }
+        }
+        if r.u8() == Some(1) {
+            let (Some(ph), Some(bt), Some(st), Some(nu), Some(np)) = (r.u8(), r.f32(), r.f32(), r.u32(), r.u8()) else { return };
+            let mut queue = Vec::new();
+            for _ in 0..np {
+                let Some(c) = r.u8() else { return };
+                let mut q = Vec::new();
+                for _ in 0..c {
+                    let Some(k) = r.u8() else { return };
+                    q.push(zkind_from(k));
+                }
+                queue.push(q);
+            }
+            if let Some(s) = self.siege.as_mut() {
+                s.phase = if ph != 0 { crate::modes::siege::SiegePhase::Combat } else { crate::modes::siege::SiegePhase::Build };
+                s.build_t = bt;
+                s.spawn_t = st;
+                s.next_uid = s.next_uid.max(nu);
+                s.queue = queue;
+            }
+        }
+    }
+
+    /// Host migration (M3b): the host is gone and we have the lowest slot left.
+    /// Take over the world from our replica plus the last checkpoint.
+    pub fn promote(&mut self, old: u8) {
+        let me = self.my_slot();
+        let Some(net) = &mut self.net else { return };
+        if net.role == Role::Host {
+            return;
+        }
+        net.role = Role::Host;
+        net.host_slot = me;
+        net.game_over_sent = false;
+        for s in [old, 0] {
+            if let Some(r) = net.remotes.get_mut(s as usize) {
+                r.present = false;
+            }
+        }
+        self.predicted.clear();
+        self.eshots.clear(); // replicas carry no velocity or damage
+        // replicas carry base stats: scale them back up to this wave
+        let n = self.scale_n();
+        let df = self.difficulty();
+        let sm = (1.0 + (0.018 * (n - 1) as f32).min(0.35)) * if self.mutators.fast { 1.3 } else { 1.0 };
+        let mut top = self.next_uid;
+        for z in self.zombies.iter_mut() {
+            let def = z.kind.def();
+            let bs = if z.kind == ZKind::Boss { z.boss_var.stats().2 } else { 1.0 };
+            z.speed = def.speed * sm * df.speed * bs;
+            z.dmg = def.dmg * (1.0 + 0.04 * (n - 1) as f32) * df.dmg;
+            z.xp = def.xp;
+            top = top.max(z.uid + 1);
+        }
+        self.next_uid = top;
+        if self.wave.intermission <= 0.0 && self.wave.total == 0 {
+            // no checkpoint yet: treat what's alive as the rest of the wave
+            self.wave.total = self.alive();
+            self.wave.spawned = self.wave.total;
+        }
+        // spectating with nobody left standing would end the run on the spot
+        let anyone_up = self.net.as_ref().is_some_and(|n| n.remotes.iter().any(|r| r.present && r.state.alive()));
+        if self.player.dead && !anyone_up {
+            self.respawn_spectator();
+        }
+        self.banner = Some(Banner {
+            title: "YOU'RE THE HOST NOW".into(),
+            sub: "The host left · the match carries on".into(),
+            t: 0.0,
+            dur: 3.0,
+            color: "#ffd36a",
+        });
+    }
+
+    /// Host migration seen from another client: `new` took over from `old`.
+    pub fn host_moved(&mut self, old: u8, new: u8) {
+        let Some(net) = &mut self.net else { return };
+        net.host_slot = new;
+        net.last_snap_at = 0.0;
+        if let Some(r) = net.remotes.get_mut(old as usize) {
+            r.present = false;
+        }
+        let name = net.remotes.get(new as usize).map(|r| r.name.clone()).unwrap_or_default();
+        self.toast = Some((format!("Host left · {} is hosting now", name), 3.0));
+    }
+
     pub fn peer_left(&mut self, slot: u8) {
         let host_left = slot == 0 && self.is_client();
+        // after a migration the host's link is still key 0, but its player is its own slot
+        if host_left {
+            let hs = self.net.as_ref().map(|n| n.host_slot).unwrap_or(0);
+            if hs != 0 {
+                if let Some(r) = self.net.as_mut().and_then(|n| n.remotes.get_mut(hs as usize)) {
+                    r.present = false;
+                }
+            }
+        }
         if let Some(net) = &mut self.net {
             if let Some(r) = net.remotes.get_mut(slot as usize) {
                 if r.present {
@@ -588,6 +755,20 @@ impl Game {
                     out.push((c, true, ev.clone()));
                 }
             }
+            let cp_due = {
+                let n = self.net.as_mut().unwrap();
+                let d = now - n.checkpoint_t >= 1.0 / CHECKPOINT_HZ;
+                if d {
+                    n.checkpoint_t = now;
+                }
+                d
+            };
+            if cp_due && !clients.is_empty() {
+                let cp = self.encode_checkpoint();
+                for &c in &clients {
+                    out.push((c, true, cp.clone()));
+                }
+            }
         } else {
             let due = {
                 let n = self.net.as_mut().unwrap();
@@ -821,6 +1002,7 @@ impl Game {
                 let (Some(kind), Some(idx)) = (r.u8(), r.u8()) else { return };
                 self.world_change(kind, idx);
             }
+            MSG_CHECKPOINT if !host => self.apply_checkpoint(&mut r),
             MSG_SNAP if !host => self.apply_snapshot(&mut r),
             MSG_GEMS if !host => self.apply_gems(&mut r),
             MSG_EVENTS if !host => self.apply_events(&mut r),
@@ -1484,6 +1666,86 @@ mod tests {
         host.player.dead = true;
         host.wave_cleared();
         assert!(!host.player.dead);
+    }
+
+    /// Routes messages through a star around `hub` (JS keys the host link as 0 on clients).
+    fn pump_star(hub: &mut Game, leaves: &mut [&mut Game], t: &mut f64, frames: usize) {
+        for _ in 0..frames {
+            *t += 16.7;
+            hub.frame(*t);
+            for l in leaves.iter_mut() {
+                l.frame(*t);
+            }
+            for (to, _rel, data) in std::mem::take(&mut hub.net_out) {
+                if let Some(l) = leaves.iter_mut().find(|l| l.my_slot() == to) {
+                    l.net_in.push((0, data));
+                }
+            }
+            for l in leaves.iter_mut() {
+                let from = l.my_slot();
+                for (to, _rel, data) in std::mem::take(&mut l.net_out) {
+                    if to == 0 {
+                        hub.net_in.push((from, data));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn host_migration_lowest_slot_takes_over_and_the_match_continues() {
+        let o = "names=Host,Ann,Ben;present=1,1,1;diff=rookie";
+        let mut host = Game::new(1);
+        let mut ann = Game::new(2);
+        let mut ben = Game::new(3);
+        for g in [&mut host, &mut ann, &mut ben] {
+            g.screen = v2(1280.0, 720.0);
+            g.zoom = 1.0;
+            g.spawn_r = 700.0;
+        }
+        host.start_coop(&format!("role=host;me=0;{o}"));
+        ann.start_coop(&format!("role=client;me=1;{o}"));
+        ben.start_coop(&format!("role=client;me=2;{o}"));
+        let mut t = 0.0;
+        pump_star(&mut host, &mut [&mut ann, &mut ben], &mut t, 260);
+        for g in [&mut host, &mut ann, &mut ben] {
+            g.player.hp = 1.0e6;
+            g.player.max_hp = 1.0e6;
+        }
+        pump_star(&mut host, &mut [&mut ann, &mut ben], &mut t, 60);
+        assert!(host.wave.total > 0 && ann.wave.total == host.wave.total, "checkpoint mirrors the wave");
+        assert!(!ann.zombies.is_empty(), "replicas exist");
+        let wave = host.wave.n;
+        // the host vanishes: Ann (lowest slot left) promotes, Ben follows her
+        drop(host);
+        ann.promote(0);
+        ben.host_moved(0, 1);
+        assert!(ann.is_host() && ann.net.as_ref().unwrap().host_slot == 1);
+        // a spectator left alone respawns instead of wiping
+        let mut solo = Game::new(9);
+        solo.start_coop("role=client;me=1;names=Host,Ann;present=1,1,0;diff=rookie;late=1");
+        solo.phase = Phase::Playing;
+        assert!(solo.player.dead);
+        solo.promote(0);
+        assert!(!solo.player.dead, "a lone spectator who takes over respawns");
+        let before: Vec<(u32, V2)> = ann.zombies.iter().map(|z| (z.uid, z.pos)).collect();
+        pump_star(&mut ann, &mut [&mut ben], &mut t, 120);
+        let moved = ann.zombies.iter().any(|z| before.iter().any(|b| b.0 == z.uid && b.1.dist(z.pos) > 5.0));
+        assert!(moved || ann.zombies.is_empty(), "the new host simulates the horde");
+        let bn = ben.net.as_ref().unwrap();
+        assert!(bn.remotes[1].present && !bn.remotes[0].present, "Ben sees Ann as the host");
+        assert!(bn.last_snap_at > 0.0, "Ben gets snapshots from the new host");
+        // the wave still ends and the next one starts for both
+        ann.wave.spawned = ann.wave.total;
+        ann.wave.boss_pending = false;
+        for z in ann.zombies.iter_mut() {
+            z.dead = true;
+        }
+        let coins = ben.coins;
+        pump_star(&mut ann, &mut [&mut ben], &mut t, 900);
+        assert!(ann.wave.n > wave, "waves keep coming after the migration");
+        assert!(ben.coins > coins, "Ben gets the wave-clear reward from the new host");
+        assert_eq!(ben.wave.n, ann.wave.n);
     }
 
     #[test]

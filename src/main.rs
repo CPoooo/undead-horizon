@@ -445,6 +445,11 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
         "start" => g.start(a),
         "coop" => g.start_coop(a),
         "peerleft" => g.peer_left(a.parse().unwrap_or(255)),
+        "promote" => g.promote(a.parse().unwrap_or(0)),
+        "hostmoved" => {
+            let (o, n) = a.split_once('|').unwrap_or(("0", "0"));
+            g.host_moved(o.parse().unwrap_or(0), n.parse().unwrap_or(0));
+        }
         "peerjoin" => {
             let (slot, name) = a.split_once('|').unwrap_or((a, ""));
             g.peer_joined(slot.parse().unwrap_or(255), name);
@@ -551,6 +556,11 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
                         }
                     }
                 }
+            }
+            if a == "tank" {
+                // tests: a player who can't go down
+                g.player.max_hp = 1.0e7;
+                g.player.hp = 1.0e7;
             }
             if let Some(v) = a.strip_prefix("sky=") {
                 let (sky, clock) = v.split_once(',').unwrap_or((v, "0.25"));
