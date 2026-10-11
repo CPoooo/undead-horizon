@@ -2,8 +2,8 @@
 //! (oscillators + filtered noise), so the game ships with zero audio assets.
 
 use web_sys::{
-    AudioBuffer, AudioContext, AudioContextState, AudioNode, BiquadFilterType, GainNode,
-    OscillatorType,
+    AudioBuffer, AudioContext, AudioContextState, AudioNode, BiquadFilterNode, BiquadFilterType,
+    GainNode, OscillatorType,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -37,9 +37,11 @@ pub enum Sfx {
     ReadyUp,
     /// co-op match launch sting (host pressed start)
     MatchStart,
+    /// kill-streak / multi-kill stinger
+    Stinger,
 }
 
-const SFX_COUNT: usize = 27;
+const SFX_COUNT: usize = 28;
 
 impl Sfx {
     fn idx(self) -> usize {
@@ -69,6 +71,13 @@ pub struct Audio {
     master: Option<GainNode>,
     sfx_bus: Option<GainNode>,
     music_bus: Option<GainNode>,
+    /// music stems: rhythm (always), percussion, lead (fade in with intensity)
+    stems: Option<[GainNode; 3]>,
+    /// low-health muffle on everything
+    muffle: Option<BiquadFilterNode>,
+    /// 0 = healthy, 1 = nearly dead (muffle + heartbeat)
+    pub low_hp: f32,
+    next_heart: f64,
     noise: Option<AudioBuffer>,
     last: [f64; SFX_COUNT],
     voices_this_frame: u32,
@@ -99,6 +108,10 @@ impl Audio {
             master: None,
             sfx_bus: None,
             music_bus: None,
+            stems: None,
+            muffle: None,
+            low_hp: 0.0,
+            next_heart: 0.0,
             noise: None,
             last: [-1.0; SFX_COUNT],
             voices_this_frame: 0,
@@ -140,9 +153,13 @@ impl Audio {
         comp.release().set_value(0.18);
         comp.connect_with_audio_node(&ctx.destination()).ok()?;
 
+        let muffle = ctx.create_biquad_filter().ok()?;
+        muffle.set_type(BiquadFilterType::Lowpass);
+        muffle.frequency().set_value(20000.0);
+        muffle.connect_with_audio_node(&comp).ok()?;
         let master = ctx.create_gain().ok()?;
         master.gain().set_value(self.volume);
-        master.connect_with_audio_node(&comp).ok()?;
+        master.connect_with_audio_node(&muffle).ok()?;
 
         let sfx = ctx.create_gain().ok()?;
         sfx.gain().set_value(1.0);
@@ -150,6 +167,13 @@ impl Audio {
         let music = ctx.create_gain().ok()?;
         music.gain().set_value(self.music_volume * 0.55);
         music.connect_with_audio_node(&master).ok()?;
+        let mk = |v: f32| -> Option<GainNode> {
+            let g = ctx.create_gain().ok()?;
+            g.gain().set_value(v);
+            g.connect_with_audio_node(&music).ok()?;
+            Some(g)
+        };
+        let stems = [mk(1.0)?, mk(0.0)?, mk(0.0)?];
 
         // 1s of white noise, reused by every noise voice.
         let sr = ctx.sample_rate();
@@ -170,6 +194,8 @@ impl Audio {
         self.master = Some(master);
         self.sfx_bus = Some(sfx);
         self.music_bus = Some(music);
+        self.stems = Some(stems);
+        self.muffle = Some(muffle);
         self.ctx = Some(ctx);
         Some(())
     }
@@ -224,6 +250,7 @@ impl Audio {
                 | Sfx::UltReady
                 | Sfx::ReadyUp
                 | Sfx::MatchStart
+                | Sfx::Stinger
         );
         if !important && self.voices_this_frame > 10 {
             return;
@@ -327,12 +354,24 @@ impl Audio {
         let d = self.out(pan)?;
         let jit = 1.0 + ((t * 113.7).fract() as f32 - 0.5) * 0.12; // pitch variety
         match s {
+            Sfx::Stinger => {
+                // a bright rising triad
+                for (k, f) in [523.25f32, 659.25, 783.99, 1046.5].iter().enumerate() {
+                    let tt = t + k as f64 * 0.06;
+                    self.tone(&d, O::Square, tt, *f, *f, 0.18, 0.06 * v, 0.004)?;
+                    self.tone(&d, O::Triangle, tt, *f * 2.0, *f * 2.0, 0.22, 0.04 * v, 0.004)?;
+                }
+            }
             Sfx::ShootHeavy => {
+                // transient, body, and a long low tail
+                self.noise(&d, t, F::Highpass, 5000.0, 2500.0, 0.7, 0.03, 0.25 * v)?;
+                self.noise(&d, t + 0.02, F::Lowpass, 900.0, 120.0, 0.7, 0.55, 0.12 * v)?;
                 self.noise(&d, t, F::Lowpass, 2600.0 * jit, 150.0, 1.0, 0.28, 0.55 * v)?;
                 self.tone(&d, O::Sine, t, 140.0, 38.0, 0.25, 0.5 * v, 0.002)?;
                 self.tone(&d, O::Square, t, 420.0 * jit, 90.0, 0.08, 0.06 * v, 0.002)?;
             }
             Sfx::Shoot => {
+                self.noise(&d, t + 0.015, F::Lowpass, 1400.0, 200.0, 0.7, 0.22, 0.05 * v)?;
                 self.tone(&d, O::Square, t, 880.0 * jit, 180.0, 0.07, 0.07 * v, 0.002)?;
                 self.noise(&d, t, F::Highpass, 3000.0, 1500.0, 0.7, 0.05, 0.12 * v)?;
                 self.tone(&d, O::Sine, t, 160.0, 50.0, 0.06, 0.18 * v, 0.002)?;
@@ -712,6 +751,29 @@ impl Audio {
             }
             return Some(());
         }
+        // crossfade stems and the low-health muffle
+        let it = self.intensity;
+        let smooth = |a: f32, b: f32| ((it - a) / (b - a)).clamp(0.0, 1.0);
+        if let Some(st) = &self.stems {
+            let _ = st[1].gain().set_target_at_time(smooth(0.12, 0.45), now, 0.4);
+            let _ = st[2].gain().set_target_at_time(smooth(0.4, 0.8), now, 0.6);
+        }
+        if let Some(m) = &self.muffle {
+            let f = 20000.0 * (1.0 - self.low_hp) + 700.0 * self.low_hp;
+            let _ = m.frequency().set_target_at_time(f, now, 0.25);
+        }
+        if self.low_hp > 0.05 && self.next_heart < now + 0.2 {
+            let t = self.next_heart.max(now + 0.02);
+            let sfx: AudioNode = self.sfx_bus.as_ref()?.clone().into();
+            let g = 0.35 + 0.4 * self.low_hp;
+            self.tone(&sfx, OscillatorType::Sine, t, 70.0, 38.0, 0.16, g, 0.004)?;
+            self.tone(&sfx, OscillatorType::Sine, t + 0.18, 64.0, 34.0, 0.14, g * 0.7, 0.004)?;
+            self.next_heart = t + 0.95 - 0.35 * self.low_hp as f64;
+        }
+        let stems: [AudioNode; 3] = match &self.stems {
+            Some(s) => [s[0].clone().into(), s[1].clone().into(), s[2].clone().into()],
+            None => [bus.clone(), bus.clone(), bus.clone()],
+        };
         let bpm = 92.0 + self.intensity as f64 * 40.0;
         let step = 60.0 / bpm / 2.0; // eighth notes
                                      // A minor-ish dark progression (bass roots)
@@ -726,9 +788,9 @@ impl Audio {
             use OscillatorType as O;
             // bass pulse
             if st % 4 == 0 || (self.intensity > 0.45 && st % 4 == 3) {
-                self.tone(&bus, O::Sawtooth, t, root, root, step * 1.6, 0.11, 0.01)?;
+                self.tone(&stems[0], O::Sawtooth, t, root, root, step * 1.6, 0.11, 0.01)?;
                 self.tone(
-                    &bus,
+                    &stems[0],
                     O::Sine,
                     t,
                     root * 0.5,
@@ -740,12 +802,12 @@ impl Audio {
             }
             // kick-like heartbeat
             if st == 0 || st == 3 || (self.intensity > 0.3 && (st == 8 || st == 11)) {
-                self.tone(&bus, O::Sine, t, 120.0, 40.0, 0.18, 0.45, 0.003)?;
+                self.tone(&stems[0], O::Sine, t, 120.0, 40.0, 0.18, 0.45, 0.003)?;
             }
-            // hats when things heat up
-            if self.intensity > 0.2 && st % 2 == 1 {
+            // hats (percussion stem, faded in by intensity)
+            if st % 2 == 1 {
                 self.noise(
-                    &bus,
+                    &stems[1],
                     t,
                     F::Highpass,
                     7000.0,
@@ -755,14 +817,20 @@ impl Audio {
                     0.05 + 0.05 * self.intensity,
                 )?;
             }
-            // snare on 2 & 4 at high intensity
-            if self.intensity > 0.55 && (st == 4 || st == 12) {
-                self.noise(&bus, t, F::Bandpass, 1800.0, 900.0, 0.8, 0.14, 0.18)?;
+            // snare on 2 & 4
+            if st == 4 || st == 12 {
+                self.noise(&stems[1], t, F::Bandpass, 1800.0, 900.0, 0.8, 0.14, 0.18)?;
+            }
+            // driving 16th-note saw arpeggio (lead stem) for the big fights
+            if self.intensity > 0.35 {
+                let arp = [1.0f32, 1.5, 2.0, 1.189][(st % 4) as usize];
+                let f = root * 4.0 * arp;
+                self.tone(&stems[2], O::Sawtooth, t, f, f, step * 0.45, 0.028, 0.004)?;
             }
             // eerie lead arpeggio
             if st % 8 == 6 && (b / 8) % 2 == 1 {
                 let f = root * 8.0 * [1.0, 1.189, 1.498, 1.335][(b as usize / 16) % 4];
-                self.tone(&bus, O::Triangle, t, f, f * 0.995, step * 3.0, 0.035, 0.05)?;
+                self.tone(&stems[2], O::Triangle, t, f, f * 0.995, step * 3.0, 0.035, 0.05)?;
             }
             self.next_beat += step;
             self.beat = self.beat.wrapping_add(1);

@@ -211,6 +211,7 @@ impl Game {
             let p = self.player.pos;
             self.push_sfx(Sfx::UltReady, p);
             self.toast = Some(("ULTIMATE READY — press R".into(), 2.2));
+            self.say("ultimate ready");
         }
         let vl = self.ups.get(Up::Vampire);
         let pact = self.has_evo(crate::upgrades::Evo::BloodPact);

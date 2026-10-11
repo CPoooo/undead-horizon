@@ -75,6 +75,7 @@ impl Game {
         if let Some(e) = self.evo_ready() {
             self.evolved.push(e);
             picks.push(ChestPick::Evo(e));
+            self.say("evolution");
             self.banner = Some(crate::game::Banner {
                 title: "EVOLUTION!".into(),
                 sub: format!("{}: {}", e.def().name, e.def().desc),

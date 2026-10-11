@@ -308,6 +308,7 @@
   const XSETTINGS = [
     { key: 'lookahead', label: 'Camera lookahead (leads your aim)', kind: 'toggle', def: true, cmd: (v) => 'lookahead|' + (v ? 1 : 0) },
     { key: 'haptics', label: 'Vibration', kind: 'range', min: 0, max: 1, step: 0.1, def: 0.6 },
+    { key: 'announcer', label: 'Announcer voice', kind: 'toggle', def: true },
   ];
   for (const x of XSETTINGS) if (settings[x.key] === undefined) settings[x.key] = x.def;
   function renderXSettings() {
@@ -702,6 +703,18 @@
         break;
       }
       case 'autoaim': settings.autoaim = data === '1'; applySettings(); break;
+      case 'say': {
+        if (!settings.announcer || !window.speechSynthesis) break;
+        try {
+          const u = new SpeechSynthesisUtterance(String(data));
+          u.pitch = 0.3; u.rate = 0.95; u.volume = Math.min(1, (settings.vol ?? 0.7) * 1.1);
+          const v = speechSynthesis.getVoices().find((x) => /en[-_]/i.test(x.lang) && /male|daniel|david|fred|google uk/i.test(x.name));
+          if (v) u.voice = v;
+          speechSynthesis.cancel();
+          speechSynthesis.speak(u);
+        } catch {}
+        break;
+      }
       case 'haptic': {
         const [ms, str] = String(data).split(':').map(Number);
         const k = settings.haptics ?? 0.6;

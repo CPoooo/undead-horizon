@@ -947,6 +947,13 @@ impl Game {
         }
     }
 
+    /// Announcer voice line (Web Speech in the UI, behind a setting).
+    pub fn say(&mut self, line: &str) {
+        if !self.ui_out.iter().any(|e| e.0 == "say") {
+            self.ui_out.push(("say", line.to_string()));
+        }
+    }
+
     /// Rumble the phone / gamepad (ms, 0..1 strength); the UI scales it by the setting.
     pub fn haptic(&mut self, ms: u32, strength: f32) {
         if self.ui_out.iter().filter(|e| e.0 == "haptic").count() < 2 {
@@ -1192,6 +1199,12 @@ impl Game {
             0.0
         };
         self.audio.intensity += (target - self.audio.intensity) * damp(0.5, real_dt);
+        let low = if matches!(self.phase, Phase::Playing | Phase::LevelUp) && !self.player.dead {
+            (1.0 - self.player.hp / (self.player.max_hp * 0.3).max(1.0)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        self.audio.low_hp += (low - self.audio.low_hp) * damp(4.0, real_dt);
         self.flush_sfx();
         let _ = self.audio.update_music();
     }

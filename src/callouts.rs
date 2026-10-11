@@ -70,7 +70,8 @@ impl Game {
             if let Some(&(_, text, color)) = TIERS.iter().rev().find(|t| t.0 == self.multi_n) {
                 self.callout = Some(Callout { text, color, t: 0.0 });
                 self.score += (self.multi_n * 25) as u64;
-                self.audio.play(Sfx::UltReady);
+                self.audio.play(Sfx::Stinger);
+                self.say(&text.to_lowercase());
             }
         }
         if killer == 255 {
