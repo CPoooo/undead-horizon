@@ -407,3 +407,22 @@ body:not(.playing) #voice-hud { display: none; }
 #vendor .mission { display: flex; flex-direction: column; gap: 8px; }
 #vendor .mission button { text-align: left; }
 @media (max-width: 640px) { #vendor { top: auto; bottom: 12px; max-height: 62%; } }
+
+/* Career tab */
+.acct { display: flex; gap: 14px; align-items: center; }
+.acct-lv { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; font-weight: 900; font-size: 22px; background: radial-gradient(circle, #ffd36a, #b07a10); color: #1a1206; }
+.acct-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); margin: 6px 0; overflow: hidden; }
+.acct-bar > div { height: 100%; background: linear-gradient(90deg, #ffd36a, #ff9a3a); }
+.achs, .codexes { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.ach { display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 10px; background: rgba(255,255,255,.03); opacity: .45; }
+.ach.got { opacity: 1; background: rgba(255,211,106,.1); border: 1px solid rgba(255,211,106,.3); }
+.ach .ai { font-size: 22px; }
+.ach b, .codex b { display: block; font-size: 13px; }
+.ach span, .codex span { font-size: 11px; color: var(--muted); }
+.codex { padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.04); }
+.codex.unk { opacity: .5; }
+.codex i { display: block; font-style: normal; font-size: 11px; color: #ffb070; margin-top: 3px; }
+.mastery { display: grid; grid-template-columns: 1.4fr 1fr 1.4fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.item.locked { opacity: .55; }
+.item.rel-2 { border-color: rgba(108,200,255,.5); }
+.item.rel-3 { border-color: rgba(213,140,255,.7); box-shadow: 0 0 14px rgba(213,140,255,.25); }

@@ -19,6 +19,8 @@ import { PRICES, CHAPTERS, DIFFS, CATEGORIES, waveCoins } from "./catalog";
 import { pool, verifyToken, cleanName, ensureProfile } from "./shared";
 import { social } from "./social";
 import { vendor } from "./vendor";
+// shared with the browser (window.UHProg): one source of truth for progression rules
+import Prog from "../ui/progression.js";
 
 type Env = { Variables: { userId: string } };
 const app = new Hono<Env>();
@@ -153,6 +155,7 @@ async function profileJson(userId: string) {
     imported: p.imported,
     friendCode: p.friend_code,
     saves,
+    progress: Prog.normalize(p.progress),
   };
 }
 
@@ -354,9 +357,19 @@ app.post("/runs", async (c) => {
     stats.runs += 1;
     stats.kills += kills;
     if (mode === "infinite") stats.bestWave = Math.max(stats.bestWave || 0, wave);
+    // career: xp, levels (coins + items), achievements, mastery, bestiary, relic drops
+    const kk = Array.isArray(r.kk) ? r.kk.slice(0, 15).map((n: unknown) => int(n, 0, 100000)) : [];
+    const bosses = int(r.bosses, 0, Math.ceil(wave / 5) + 4);
+    const career = Prog.applyRun(p.progress, {
+      mode, diff, wave, level, kills, time, victory, players, gun, score, kk, bosses,
+      combo: int(r.combo, 0, 100000), evos: int(r.evos, 0, 8), chests: int(r.chests, 0, 200),
+      stars: int(r.stars, 0, 3), pure: !!r.pure, chapter,
+    });
+    const owned = new Set(p.owned as string[]);
+    for (const it of career.items) owned.add(it);
     await client.query(
-      `update profiles set coins = coins + $2, campaign = $3, stats = $4, updated_at = now() where user_id = $1`,
-      [uid, coins, campaign, stats],
+      `update profiles set coins = coins + $2, campaign = $3, stats = $4, progress = $5, owned = $6, updated_at = now() where user_id = $1`,
+      [uid, coins + career.coins, campaign, stats, career.progress, [...owned]],
     );
     await client.query("commit");
     if (mode === "infinite" && !abandoned) {
@@ -371,13 +384,70 @@ app.post("/runs", async (c) => {
       );
       rank = rr.rows[0].rank;
     }
-    return c.json({ id: String(ins.rows[0].id), coins, rank, profile: await profileJson(uid) });
+    return c.json({
+      id: String(ins.rows[0].id),
+      coins,
+      rank,
+      career: { xp: career.xp, levelsGained: career.levelsGained, coins: career.coins, items: career.items, achievements: career.achievements, relics: career.relics },
+      profile: await profileJson(uid),
+    });
   } catch (e) {
     await client.query("rollback");
     throw e;
   } finally {
     client.release();
   }
+});
+
+// ---------------------------------------------------------------- career
+app.use("/meta/*", auth);
+app.use("/relics/*", auth);
+app.use("/achievement", auth);
+
+/** Buy one rank of a permanent upgrade. */
+app.post("/meta/buy", async (c) => {
+  const uid = c.get("userId");
+  const { id } = await c.req.json();
+  const def = Prog.META.find((m: { id: string }) => m.id === id);
+  if (!def) return c.json({ error: "bad_upgrade" }, 400);
+  const p = await ensureProfile(uid);
+  const prog = Prog.normalize(p.progress);
+  const rank = prog.meta[id] || 0;
+  if (rank >= def.max) return c.json({ error: "maxed" }, 409);
+  const cost = Prog.metaCost(id, rank);
+  prog.meta[id] = rank + 1;
+  const { rowCount } = await pool.query(
+    "update profiles set coins = coins - $2, progress = $3, updated_at = now() where user_id = $1 and coins >= $2",
+    [uid, cost, prog],
+  );
+  if (!rowCount) return c.json({ error: "insufficient_coins" }, 409);
+  return c.json(await profileJson(uid));
+});
+
+/** Equip up to three relics you own. */
+app.post("/relics/equip", async (c) => {
+  const uid = c.get("userId");
+  const { uids } = await c.req.json();
+  const p = await ensureProfile(uid);
+  const prog = Prog.normalize(p.progress);
+  prog.equippedRelics = (Array.isArray(uids) ? uids : [])
+    .map(String)
+    .filter((u: string) => prog.relics.some((r: { uid: string }) => r.uid === u))
+    .slice(0, 3);
+  await pool.query("update profiles set progress = $2, updated_at = now() where user_id = $1", [uid, prog]);
+  return c.json(await profileJson(uid));
+});
+
+/** Event achievements the game reports directly (secrets). */
+app.post("/achievement", async (c) => {
+  const uid = c.get("userId");
+  const { id } = await c.req.json();
+  if (!Prog.EVENT_ACHIEVEMENTS.includes(id)) return c.json({ error: "bad_achievement" }, 400);
+  const p = await ensureProfile(uid);
+  const prog = Prog.normalize(p.progress);
+  if (!prog.achievements.includes(id)) prog.achievements.push(id);
+  await pool.query("update profiles set progress = $2, updated_at = now() where user_id = $1", [uid, prog]);
+  return c.json(await profileJson(uid));
 });
 
 export default app;

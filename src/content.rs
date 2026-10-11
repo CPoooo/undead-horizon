@@ -987,3 +987,77 @@ pub const CHARACTERS: [Character; 4] = [
 pub fn character_index(id: &str) -> usize {
     CHARACTERS.iter().position(|c| c.id == id).unwrap_or(0)
 }
+
+// ------------------------------------------------------------------ meta progression
+
+/// Permanent upgrade ranks bought with coins (P2). Each rank is a small edge.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct Meta {
+    pub dmg: u8,
+    pub hp: u8,
+    pub spd: u8,
+    pub magnet: u8,
+    pub reroll: u8,
+    pub banish: u8,
+}
+
+impl Meta {
+    pub fn parse(spec: &str) -> Meta {
+        let mut m = Meta::default();
+        for kv in spec.split(',') {
+            let Some((k, v)) = kv.split_once(':') else { continue };
+            let n = v.parse::<u8>().unwrap_or(0).min(5);
+            match k {
+                "dmg" => m.dmg = n,
+                "hp" => m.hp = n,
+                "spd" => m.spd = n,
+                "magnet" => m.magnet = n,
+                "reroll" => m.reroll = n.min(3),
+                "banish" => m.banish = n.min(3),
+                _ => {}
+            }
+        }
+        m
+    }
+    pub fn is_pure(&self) -> bool {
+        *self == Meta::default()
+    }
+}
+
+/// Stat bonuses from equipped relics (P3), in percent unless noted.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct RelicBonus {
+    pub dmg: f32,
+    pub hp: f32,
+    pub rate: f32,
+    pub crit: f32,
+    pub speed: f32,
+    pub magnet: f32,
+}
+
+/// Relic stats: `id` names the base (its main stat), then rarity (1-3), then
+/// up to two affix stats. Spec: `ember:3:crit:speed,locket:1,...`
+pub fn relic_bonus(spec: &str) -> RelicBonus {
+    let mut b = RelicBonus::default();
+    let add = |b: &mut RelicBonus, stat: &str, v: f32| match stat {
+        "ember" | "dmg" => b.dmg += v,
+        "locket" | "hp" => b.hp += v,
+        "charm" | "rate" => b.rate += v,
+        "dice" | "crit" => b.crit += v,
+        "sigil" | "speed" => b.speed += v,
+        "lodestone" | "magnet" => b.magnet += v,
+        _ => {}
+    };
+    for r in spec.split(',').filter(|r| !r.is_empty()).take(3) {
+        let f: Vec<&str> = r.split(':').collect();
+        let rarity = f.get(1).and_then(|x| x.parse::<f32>().ok()).unwrap_or(1.0).clamp(1.0, 3.0);
+        add(&mut b, f[0], 4.0 * rarity);
+        for a in f.iter().skip(2).take(2) {
+            add(&mut b, a, 1.5 * rarity);
+        }
+    }
+    b
+}
+
+/// Weapon mastery camo tints (P4), unlocked by kills with that gun.
+pub const CAMOS: [&str; 4] = ["", "#4a6a3a", "#3a5a8a", "#d4af37"];

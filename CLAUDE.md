@@ -178,14 +178,14 @@ Original design notes:
   - bat swarm (flyer, ignores obstacles)
   - burrower (pops up near the player with a telegraph)
 - [x] C7 (M) **Boss 2.0.** Multi-phase bosses with weak points (crit zones), clear telegraphs (ground decals), and enrage timers. Boss intro card (name plus taunt). Add 2 new bosses.
-- [ ] C8 (L, split) **Characters / classes** with unique starting weapon, passive and active ability (Q becomes a per-character ability, ultimate moves to R):
+- [x] C8 (L, split) **Characters / classes** with unique starting weapon, passive and active ability (Q becomes a per-character ability, ultimate moves to R):
   - [x] C8a (M) character table plus selection UI in the lobby showcase; persist in profile and server `equipped.character`
   - [x] C8b (M) 4 kits:
     - **Gunner:** heat-sink burst
     - **Engineer:** deployable turret (reused by Siege)
     - **Medic:** heal pulse and faster revives
     - **Pyro:** flame cone
-  - C8c (S) unlock gating through achievements (P5)
+  - [x] C8c (S) unlock gating through achievements (P5)
 - [x] C9 (S) **Projectile pressure.** More enemy projectiles with fair telegraphs (dodge skill expression), plus a "danger" outline for bullets hitting the player.
 
 ### M3 · Outbreak mode (CoD Zombies homage — use original names, no trademarks)
@@ -230,14 +230,14 @@ Original design notes:
 - [x] S8 (M) **Co-op replication.** Host-authoritative defense placement and build-phase ready-vote via the party and net events.
 
 ### M5 · Progression & loot
-- [ ] P1 (M) **Account level.** Account XP from all modes; level rewards (coins, cosmetics) shown on a progress track. Server: `profiles.account_xp`; award in `/runs`.
-- [ ] P2 (M) **Permanent upgrades.** A coin-sink tree (tiny % boosts, plus reroll and banish charges).
+- [x] P1 (M) **Account level.** Account XP from all modes; level rewards (coins, cosmetics) shown on a progress track. Server: `profiles.account_xp`; award in `/runs`.
+- [x] P2 (M) **Permanent upgrades.** A coin-sink tree (tiny % boosts, plus reroll and banish charges).
   - The leaderboard gets a "Pure" filter (no meta upgrades) for fairness.
   - Server stores ranks and validates costs (mirror in `catalog.ts`).
-- [ ] P3 (M) **Relics.** 3 loadout relic slots. Relics drop from bosses with rarity and 1–2 affixes (Dungeon Defenders loot); inventory UI in the Locker. Server: `relics` table; drops validated against run progress.
-- [ ] P4 (S) **Weapon mastery.** Kills per gun unlock camo tints (per-gun counters in the profile).
-- [ ] P5 (M) **Achievements.** 50+ achievements (some hidden) with toasts. Server table plus client checks; they gate characters, cosmetics and the Outbreak secret rewards.
-- [ ] P6 (S) **Bestiary and Codex.** Enemy entries unlocked on first kill, plus a lore page (campaign story).
+- [x] P3 (M) **Relics.** 3 loadout relic slots. Relics drop from bosses with rarity and 1–2 affixes (Dungeon Defenders loot); inventory UI in the Locker. Server: `relics` table; drops validated against run progress.
+- [x] P4 (S) **Weapon mastery.** Kills per gun unlock camo tints (per-gun counters in the profile).
+- [x] P5 (M) **Achievements.** 50+ achievements (some hidden) with toasts. Server table plus client checks; they gate characters, cosmetics and the Outbreak secret rewards.
+- [x] P6 (S) **Bestiary and Codex.** Enemy entries unlocked on first kill, plus a lore page (campaign story).
 
 ### M6 · Live & retention (free, no FOMO)
 - [ ] L1 (M) **Challenges.** Daily (3) and weekly (5) challenges, generated server-side from a date seed. Progress is reported in `/runs`; rewards are coins and season XP.

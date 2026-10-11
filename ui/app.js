@@ -153,6 +153,7 @@
     campaign: { unlocked: 0, cleared: [] },
     saves: { infinite: null, campaign: null },
     stats: { runs: 0, kills: 0, bestWave: 0 },
+    progress: window.UHProg.fresh(),
   });
   const normalizeProfile = (p) => {
     const f = freshProfile();
@@ -160,6 +161,7 @@
     p.equipped = Object.assign(freshProfile().equipped, p.equipped || {});
     p.campaign = Object.assign({ unlocked: 0, cleared: [] }, p.campaign || {});
     p.stats = Object.assign({ runs: 0, kills: 0, bestWave: 0 }, p.stats || {});
+    p.progress = window.UHProg.normalize(p.progress);
     // older builds had a single save slot
     p.saves = Object.assign({ infinite: null, campaign: null }, p.saves || {});
     if (p.save) {
@@ -239,7 +241,7 @@
       if (this.cloud) {
         const r = await this.cloud.api('/runs', { method: 'POST', body: { ...s, abandoned } });
         this.applyCloud(r.profile);
-        return { coins: r.coins, rank: r.rank, id: r.id };
+        return { coins: r.coins, rank: r.rank, id: r.id, career: r.career || null };
       }
       const p = this.profile;
       p.coins += s.coins;
@@ -269,8 +271,38 @@
         if (!c.cleared.includes(s.chapter)) c.cleared.push(s.chapter);
         c.unlocked = Math.max(c.unlocked, Math.min(s.chapter + 1, STORY.length - 1));
       }
+      // career progress (the server does the same in /runs when signed in)
+      const career = window.UHProg.applyRun(p.progress, { ...s, abandoned });
+      p.progress = career.progress;
+      p.coins += career.coins;
+      for (const it of career.items) if (!p.owned.includes(it)) p.owned.push(it);
       this.persistLocal();
-      return { coins: s.coins, rank, id };
+      return { coins: s.coins, rank, id, career };
+    },
+    async buyMeta(id) {
+      if (this.cloud) return this.applyCloud(await this.cloud.api('/meta/buy', { method: 'POST', body: { id } }));
+      const p = this.profile.progress;
+      const def = window.UHProg.META.find((m) => m.id === id);
+      const rank = p.meta[id] || 0;
+      const cost = window.UHProg.metaCost(id, rank);
+      if (!def || rank >= def.max || this.profile.coins < cost) throw new Error('cannot_buy');
+      this.profile.coins -= cost;
+      p.meta[id] = rank + 1;
+      this.persistLocal();
+    },
+    async equipRelics(uids) {
+      if (this.cloud) return this.applyCloud(await this.cloud.api('/relics/equip', { method: 'POST', body: { uids } }));
+      this.profile.progress.equippedRelics = uids.slice(0, 3);
+      this.profile.progress = window.UHProg.normalize(this.profile.progress);
+      this.persistLocal();
+    },
+    async eventAchievement(id) {
+      const p = this.profile.progress;
+      if (p.achievements.includes(id)) return false;
+      if (this.cloud) { try { this.applyCloud(await this.cloud.api('/achievement', { method: 'POST', body: { id } })); } catch {} }
+      if (!this.profile.progress.achievements.includes(id)) this.profile.progress.achievements.push(id);
+      this.persistLocal();
+      return true;
     },
     /** Each mode has its own slot; saving overwrites that slot only. */
     async putSave(data, summary) {
@@ -368,7 +400,12 @@
   }
   const equipString = () => {
     const e = Data.profile.equipped;
-    return `gun=${e.gun};perk=${e.perk === 'none' ? '' : e.perk};skin=${e.skin};hat=${e.hat};tracer=${e.tracer};char=${settings.char || e.char || 'rook'}`;
+    const pr = Data.profile.progress || window.UHProg.fresh();
+    const relics = pr.equippedRelics.map((u) => pr.relics.find((r) => r.uid === u)).filter(Boolean).map(window.UHProg.relicSpec).join(',');
+    let ch = settings.char || e.char || 'rook';
+    if (!window.UHProg.charUnlocked(ch, pr)) ch = 'rook';
+    return `gun=${e.gun};perk=${e.perk === 'none' ? '' : e.perk};skin=${e.skin};hat=${e.hat};tracer=${e.tracer};char=${ch}` +
+      `;meta=${window.UHProg.metaSpec(pr.meta)};relics=${relics};camo=${window.UHProg.camoTier(pr.gunKills[e.gun])}`;
   };
   const pushEquip = () => send('equip|' + equipString());
 
@@ -385,7 +422,8 @@
   function renderTag() {
     const e = Data.profile.equipped;
     $('tag-name').textContent = ($('name').value || '').trim() || 'Survivor';
-    $('tag-loadout').textContent = `${find('char', settings.char || e.char).name} · ${find('gun', e.gun).name} · ${find('perk', e.perk).name}`;
+    const lv = window.UHProg.levelFromXp(Data.profile.progress?.xp || 0).level;
+    $('tag-loadout').textContent = `Lv ${lv} · ${find('char', settings.char || e.char).name} · ${find('gun', e.gun).name} · ${find('perk', e.perk).name}`;
   }
   function renderMode() {
     for (const b of $('mode-seg').children) b.classList.toggle('on', b.dataset.mode === settings.mode);
@@ -459,11 +497,41 @@
   });
 
   // tabs
+  function renderCareer() {
+    const P = window.UHProg;
+    const pr = Data.profile.progress;
+    const lv = P.levelFromXp(pr.xp);
+    const got = new Set(pr.achievements);
+    const ach = P.ACHIEVEMENTS.map((a) => {
+      const has = got.has(a.id);
+      const secret = a.hidden && !has;
+      return `<div class="ach ${has ? 'got' : ''}" title="${esc(secret ? 'Secret achievement' : a.desc)}"><div class="ai">${secret ? '❔' : a.icon}</div><div><b>${esc(secret ? '???' : a.name)}</b><span>${esc(secret ? 'Secret' : a.desc)}</span></div></div>`;
+    }).join('');
+    const codex = P.KINDS.map((k) => {
+      const n = pr.kinds[k] || 0;
+      return `<div class="codex ${n ? '' : 'unk'}"><b>${n ? esc(k) : '???'}</b><span>${n ? esc(P.BESTIARY[k] || '') : 'Kill one to learn more.'}</span><i>${n ? n.toLocaleString() + ' killed' : ''}</i></div>`;
+    }).join('');
+    const guns = CATALOG.gun.map((g) => {
+      const k = pr.gunKills[g.id] || 0;
+      const tier = P.camoTier(k);
+      const next = P.CAMO_AT[tier];
+      return `<div class="mastery"><span>${g.icon} ${esc(g.name)}</span><span>${['No camo', '🌲 Woodland', '🌊 Urban', '👑 Gold'][tier]}</span><span class="hint">${k.toLocaleString()} kills${next ? ` · next at ${next.toLocaleString()}` : ' · mastered'}</span></div>`;
+    }).join('');
+    $('career').innerHTML = `
+      <div class="acct"><div class="acct-lv">${lv.level}</div><div style="flex:1"><b>Account level ${lv.level}</b>
+        <div class="acct-bar"><div style="width:${Math.round((lv.into / lv.need) * 100)}%"></div></div>
+        <span class="hint">${lv.into.toLocaleString()} / ${lv.need.toLocaleString()} XP · next reward: 🪙 ${P.levelReward(lv.level + 1).coins}${P.levelReward(lv.level + 1).item ? ' + ' + esc(P.levelReward(lv.level + 1).item.split(':')[1]) : ''}</span></div></div>
+      <div class="hint" style="margin:6px 0 14px">${pr.runs} runs · ${pr.kills.toLocaleString()} kills · ${pr.bosses} bosses · ${got.size}/${P.ACHIEVEMENTS.length} achievements</div>
+      <h3>🏅 Achievements</h3><div class="achs">${ach}</div>
+      <h3 style="margin-top:18px">📖 Bestiary</h3><div class="codexes">${codex}</div>
+      <h3 style="margin-top:18px">🔫 Weapon mastery</h3><div class="masteries">${guns}</div>`;
+  }
   on('tabs', 'click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     for (const x of $('tabs').children) x.classList.toggle('on', x === b);
-    for (const t of ['lb', 'shop', 'locker', 'friends', 'settings']) $('tab-' + t)?.classList.toggle('on', t === b.dataset.tab);
+    for (const t of ['lb', 'shop', 'locker', 'career', 'friends', 'settings']) $('tab-' + t)?.classList.toggle('on', t === b.dataset.tab);
+    if (b.dataset.tab === 'career') renderCareer();
     if (b.dataset.tab === 'friends') window.UHCoop?.render();
     if (b.dataset.tab === 'shop') renderShop();
     if (b.dataset.tab === 'locker') renderLocker();
@@ -482,7 +550,25 @@
   });
   const visual = (cat, it) => it.color ? `<div class="sw" style="background:${it.color}"></div>` : `<div class="ic">${it.icon}</div>`;
   const rarityTag = (it) => it.rarity === 'epic' ? '<span class="rar" style="color:var(--epic)">EPIC</span>' : '';
+  function renderMeta() {
+    const pr = Data.profile.progress;
+    $('meta-box').innerHTML = `<h3 style="margin:0 0 8px">⬆️ Permanent upgrades <span class="hint">(apply to every run; the board marks runs without them as Pure)</span></h3>
+      <div class="items">${window.UHProg.META.map((m) => {
+        const rank = pr.meta[m.id] || 0;
+        const cost = window.UHProg.metaCost(m.id, rank);
+        return `<div class="item"><div class="ic">${m.icon}</div><div class="nm">${esc(m.name)} ${'●'.repeat(rank)}${'○'.repeat(m.max - rank)}</div><div class="ds">${esc(m.desc)}</div>
+          ${rank >= m.max ? '<button class="btn small secondary" disabled>Maxed</button>' : `<button class="btn small gold" data-meta="${m.id}" ${Data.profile.coins >= cost ? '' : 'disabled'}>🪙 ${cost.toLocaleString()}</button>`}</div>`;
+      }).join('')}</div><h3 style="margin:16px 0 8px">🛍️ Items</h3>`;
+  }
+  on('meta-box', 'click', async (e) => {
+    const b = e.target.closest('[data-meta]');
+    if (!b) return;
+    b.disabled = true;
+    try { await Data.buyMeta(b.dataset.meta); toast('Upgrade purchased!'); } catch { toast('Not enough coins.'); }
+    renderMeta(); renderCoins(); pushEquip();
+  });
   function renderShop() {
+    renderMeta();
     const p = Data.profile;
     $('shop-items').innerHTML = CATALOG[shopCat].filter((it) => it.price > 0).map((it) => {
       const owned = p.owned.includes(`${shopCat}:${it.id}`);
@@ -521,15 +607,34 @@
           <div class="ds">${p.equipped[cat] === it.id ? '✓ Equipped' : 'Click to equip'}</div></div>`).join('')}</div></div>`;
     };
     const curChar = settings.char || p.equipped.char || 'rook';
-    const chars = `<div class="locker-group"><h3>Survivor</h3><div class="items chars">${CATALOG.char.map((it) =>
-      `<div class="item ${curChar === it.id ? 'equipped' : ''}" data-eq="char:${it.id}" style="cursor:pointer"><div class="ico">${it.icon}</div><div class="nm">${esc(it.name)}</div>
-        <div class="ds">${esc(it.desc)}</div></div>`).join('')}</div></div>`;
+    const prog = p.progress;
+    const chars = `<div class="locker-group"><h3>Survivor</h3><div class="items chars">${CATALOG.char.map((it) => {
+      const open = window.UHProg.charUnlocked(it.id, prog);
+      const need = window.UHProg.ACHIEVEMENTS.find((a) => a.id === window.UHProg.CHAR_UNLOCK[it.id]);
+      return `<div class="item ${curChar === it.id ? 'equipped' : ''} ${open ? '' : 'locked'}" ${open ? `data-eq="char:${it.id}"` : ''} style="cursor:${open ? 'pointer' : 'default'}"><div class="ico">${open ? it.icon : '🔒'}</div><div class="nm">${esc(it.name)}</div>
+        <div class="ds">${open ? esc(it.desc) : `Unlock: ${esc(need?.name || '')} (${esc(need?.desc || '')})`}</div></div>`;
+    }).join('')}</div></div>`;
+    const relicBox = `<div class="locker-group"><h3>Relics <span class="hint">(equip up to 3 · bosses drop them)</span></h3>${prog.relics.length ? `<div class="items">${prog.relics.map((r) => {
+      const l = window.UHProg.relicLabel(r);
+      const on = prog.equippedRelics.includes(r.uid);
+      return `<div class="item ${on ? 'equipped' : ''} rel-${r.rarity}" data-relic="${r.uid}" style="cursor:pointer"><div class="ico">${l.icon}</div><div class="nm">${esc(l.name)}</div><div class="ds">${esc(l.desc)}</div><div class="ds">${on ? '✓ Equipped' : 'Click to equip'}</div></div>`;
+    }).join('')}</div>` : '<div class="empty">No relics yet. Kill bosses to find them.</div>'}</div>`;
     $('locker').innerHTML =
-      `<h2>Survivor</h2>${chars}<h2 style="margin-top:20px">Loadout</h2>${group('gun', 'Primary weapon')}${group('perk', 'Starting perk')}
+      `<h2>Survivor</h2>${chars}${relicBox}<h2 style="margin-top:20px">Loadout</h2>${group('gun', 'Primary weapon')}${group('perk', 'Starting perk')}
        <h2 style="margin-top:20px">Character</h2>${group('skin', 'Outfit')}${group('hat', 'Headgear')}${group('tracer', 'Bullet tracers')}
        <div class="hint" style="margin-top:12px">Buy more in the 🛒 Shop with coins earned by surviving waves.</div>`;
   }
   on('locker', 'click', async (e) => {
+    const rel = e.target.closest('[data-relic]');
+    if (rel) {
+      const pr = Data.profile.progress;
+      const u = rel.dataset.relic;
+      let eq = pr.equippedRelics.includes(u) ? pr.equippedRelics.filter((x) => x !== u) : [...pr.equippedRelics, u];
+      if (eq.length > 3) { toast('Only 3 relics at a time.'); return; }
+      try { await Data.equipRelics(eq); } catch { toast('Could not equip that relic.'); }
+      pushEquip(); renderLocker();
+      return;
+    }
     const it = e.target.closest('[data-eq]');
     if (!it) return;
     const [cat, id] = it.dataset.eq.split(':');
@@ -955,6 +1060,11 @@
         if (confirm('Leave the Home Base and return to the lobby?')) { toMenu(); }
         break;
       case 'tune': $('tune-btn').textContent = `🎵 ${data} ▸`; break;
+      case 'achievement': {
+        const a = window.UHProg.ACHIEVEMENTS.find((x) => x.id === data);
+        if (a && await Data.eventAchievement(data)) { toast(`🏅 Achievement: ${a.icon} ${a.name}`); send('sfx|ready'); }
+        break;
+      }
       case 'usebtn': $('t-use').classList.toggle('on', data === '1'); break;
       case 'readybtn': $('t-ready').classList.toggle('on', data === '1'); break;
       case 'haptic': {
@@ -998,6 +1108,18 @@
         $('go-title').textContent = win ? 'VICTORY' : 'YOU DIED';
         $('go-title').classList.toggle('win', win);
         $('earned').textContent = result.coins ? `+🪙 ${result.coins} coins` : '';
+        const cr = result.career;
+        if (cr) {
+          const bits = [`+${cr.xp.toLocaleString()} XP`];
+          if (cr.levelsGained?.length) bits.push(`⬆️ Account level ${cr.levelsGained[cr.levelsGained.length - 1]} (+🪙 ${cr.coins})`);
+          if (cr.relics?.length) bits.push(`🏺 ${cr.relics.length} relic${cr.relics.length > 1 ? 's' : ''} found`);
+          $('earned').textContent += ($('earned').textContent ? ' · ' : '') + bits.join(' · ');
+          const P = window.UHProg;
+          (cr.achievements || []).forEach((id, i) => {
+            const a = P.ACHIEVEMENTS.find((x) => x.id === id);
+            if (a) setTimeout(() => { toast(`🏅 Achievement: ${a.icon} ${a.name}`); send('sfx|ready'); }, 900 + i * 1600);
+          });
+        }
         $('s-wave').textContent = s.wave;
         $('s-level').textContent = s.level;
         $('s-kills').textContent = s.kills;

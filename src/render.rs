@@ -869,7 +869,12 @@ impl Game {
         let rec = v.recoil * 4.0;
         let g0 = p + fwd * (6.0 - rec) + side * 5.0;
         let g1 = p + fwd * (gun.len + 6.0 - rec) + side * 5.0;
-        c.set_stroke_style_str(gun.color);
+        let camo = if v.gun == self.gun && !crate::content::CAMOS[self.camo].is_empty() {
+            crate::content::CAMOS[self.camo]
+        } else {
+            gun.color
+        };
+        c.set_stroke_style_str(camo);
         c.set_line_width(d(gun.width));
         c.set_line_cap("round");
         c.begin_path();

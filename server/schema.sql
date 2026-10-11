@@ -157,3 +157,6 @@ alter table runs add column if not exists map text not null default '';
 create index if not exists runs_outbreak_idx on runs (map, wave desc) where mode = 'outbreak' and not abandoned;
 alter table parties drop constraint if exists parties_mode_check;
 alter table parties add constraint parties_mode_check check (mode in ('infinite','outbreak','siege'));
+
+-- Career progression (account level, achievements, mastery, bestiary, meta upgrades, relics).
+alter table profiles add column if not exists progress jsonb not null default '{}';

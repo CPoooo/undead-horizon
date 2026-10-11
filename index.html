@@ -97,6 +97,7 @@
           <button data-tab="lb" class="on">🏆 Leaderboard</button>
           <button data-tab="shop">🛒 Shop</button>
           <button data-tab="locker">🎒 Locker</button>
+          <button data-tab="career">🏅 Career</button>
           <button data-tab="friends">👥 Friends</button>
           <button data-tab="settings">⚙️ Settings</button>
         </div>
@@ -116,12 +117,17 @@
         </div>
 
         <div class="tab" id="tab-shop">
+          <div id="meta-box"></div>
           <div class="chips" id="shop-cats"></div>
           <div class="items" id="shop-items"></div>
         </div>
 
         <div class="tab" id="tab-locker">
           <div id="locker"></div>
+        </div>
+
+        <div class="tab" id="tab-career">
+          <div id="career"></div>
         </div>
 
         <div class="tab" id="tab-friends">
@@ -267,6 +273,7 @@
     <button data-m="lb"><i>🏆</i>Board</button>
     <button data-m="shop"><i>🛒</i>Shop</button>
     <button data-m="locker"><i>🎒</i>Locker</button>
+    <button data-m="career"><i>🏅</i>Career</button>
     <button data-m="settings"><i>⚙️</i>More</button>
   </nav>
   <div id="invite-pop"></div>
@@ -301,6 +308,7 @@
 
   <script data-trunk src="ui/config.js"></script>
   <script data-trunk src="ui/cloud.js"></script>
+  <script data-trunk src="ui/progression.js"></script>
   <script data-trunk src="ui/app.js"></script>
   <script data-trunk src="ui/coop.js"></script>
   <script data-trunk src="ui/chat.js"></script>

@@ -521,6 +521,13 @@ pub struct Game {
     pub skin: usize,
     pub hat: usize,
     pub tracer: usize,
+    /// permanent upgrades, relic bonuses and gun camo from the profile
+    pub meta: content::Meta,
+    pub relics: content::RelicBonus,
+    pub camo: usize,
+    /// kills per enemy kind and bosses felled this run (achievements, bestiary)
+    pub kind_kills: [u32; 15],
+    pub bosses_killed: u32,
     /// character (content::CHARACTERS) and their ability state
     pub character: usize,
     pub ability_cd: f32,
@@ -665,6 +672,11 @@ impl Game {
             skin: 0,
             hat: 0,
             tracer: 0,
+            meta: content::Meta::default(),
+            relics: content::RelicBonus::default(),
+            camo: 0,
+            kind_kills: [0; 15],
+            bosses_killed: 0,
             character: 0,
             ability_cd: 0.0,
             ability_t: 0.0,
@@ -757,6 +769,9 @@ impl Game {
                 "hat" => self.hat = content::hat_index(v),
                 "tracer" => self.tracer = content::tracer_index(v),
                 "char" => self.character = content::character_index(v),
+                "meta" => self.meta = content::Meta::parse(v),
+                "relics" => self.relics = content::relic_bonus(v),
+                "camo" => self.camo = v.parse::<usize>().unwrap_or(0).min(content::CAMOS.len() - 1),
                 "map" => self.map_id = v.to_string(),
                 "variant" => self.variant = v.to_string(),
                 _ => {}
@@ -821,8 +836,8 @@ impl Game {
         self.ups = Levels::default();
         self.offers.clear();
         self.pending_levels = 0;
-        self.rerolls = 2;
-        self.banishes = 2;
+        self.rerolls = 2 + self.meta.reroll as u32;
+        self.banishes = 2 + self.meta.banish as u32;
         self.skips = 3;
         self.banished.clear();
         self.banish_mode = false;
@@ -844,6 +859,8 @@ impl Game {
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
+        self.kind_kills = [0; 15];
+        self.bosses_killed = 0;
         self.score = 0;
         self.feed.clear();
         self.callout = None;
@@ -875,6 +892,11 @@ impl Game {
             boss_timer: 0.0,
             boss_pending: false,
         };
+        // permanent upgrades and relics
+        let bonus_hp = 5.0 * self.meta.hp as f32 + self.relics.hp;
+        self.player.max_hp += bonus_hp;
+        self.player.hp = self.player.max_hp;
+        self.player.hp_ghost = self.player.hp;
         // starting perk from the loadout
         if let Some(u) = content::perk_upgrade(&self.perk) {
             self.ups.inc(u);
@@ -928,13 +950,16 @@ impl Game {
     }
 
     pub fn dmg_mult(&self) -> f32 {
-        (1.0 + 0.25 * self.ups.f(Up::Damage)) * (1.0 + 0.08 * self.ups.f(Up::Velocity))
+        (1.0 + 0.25 * self.ups.f(Up::Damage))
+            * (1.0 + 0.08 * self.ups.f(Up::Velocity))
+            * (1.0 + 0.02 * self.meta.dmg as f32 + self.relics.dmg / 100.0)
     }
     pub(crate) fn fire_interval(&self) -> f32 {
         let class = if self.kit() == content::Kit::HeatSink { 1.1 } else { 1.0 };
         let heat = if self.kit() == content::Kit::HeatSink && self.ability_t > 0.0 { 2.0 } else { 1.0 };
         let base = 0.30 * GUNS[self.gun].interval
-            / ((1.0 + 0.16 * self.ups.f(Up::FireRate)) * class * heat * self.ob_fire_mult());
+            / ((1.0 + 0.16 * self.ups.f(Up::FireRate)) * class * heat * self.ob_fire_mult()
+                * (1.0 + self.relics.rate / 100.0));
         if self.player.frenzy > 0.0 {
             base * 0.5
         } else {
@@ -943,13 +968,15 @@ impl Game {
     }
     pub(crate) fn move_speed(&self) -> f32 {
         255.0 * (1.0 + 0.09 * self.ups.f(Up::Speed)) * GUNS[self.gun].move_mult * self.ob_speed_mult()
+            * (1.0 + 0.02 * self.meta.spd as f32 + self.relics.speed / 100.0)
     }
     pub fn magnet_r(&self) -> f32 {
         let eng = if self.kit() == content::Kit::Turret { 1.3 } else { 1.0 };
         95.0 * (1.0 + 0.45 * self.ups.f(Up::Magnet)) * eng
+            * (1.0 + 0.06 * self.meta.magnet as f32 + self.relics.magnet / 100.0)
     }
     pub(crate) fn crit_chance(&self) -> f32 {
-        0.05 + 0.10 * self.ups.f(Up::Crit)
+        0.05 + 0.10 * self.ups.f(Up::Crit) + self.relics.crit / 100.0
     }
     pub fn dash_cooldown(&self) -> f32 {
         1.1 * 0.8f32.powi(self.ups.get(Up::DashMaster) as i32)
@@ -1751,7 +1778,7 @@ impl Game {
         let name = self.player_name.replace(['\\', '"'], "");
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\"}}",
+            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{}}}",
             self.net.as_ref().map(|n| n.players()).unwrap_or(1),
             name,
             self.wave.n.max(1),
@@ -1766,7 +1793,14 @@ impl Game {
             GUNS[self.gun].id,
             self.victory_t >= 0.0,
             self.score,
-            self.map_id
+            self.map_id,
+            self.kind_kills.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(","),
+            self.bosses_killed,
+            content::CHARACTERS[self.character].id,
+            self.evolved.len(),
+            self.chests_opened,
+            self.meta.is_pure() && self.relics == content::RelicBonus::default(),
+            if self.victory_t >= 0.0 && self.siege.is_some() { self.siege_stars() } else { 0 }
         )
     }
 

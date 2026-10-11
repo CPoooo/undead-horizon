@@ -63,6 +63,12 @@ impl Game {
     pub fn note_kill(&mut self, killer: u8, kind: ZKind, _pos: V2) {
         let mine = killer == self.my_slot();
         if mine {
+            if let Some(k) = self.kind_kills.get_mut(kind as usize) {
+                *k += 1;
+            }
+            if kind == ZKind::Boss {
+                self.bosses_killed += 1;
+            }
             let pts = (kind.def().xp.max(1) * 10) as f32 * self.score_mult();
             self.score += pts as u64;
             self.multi_n += 1;
