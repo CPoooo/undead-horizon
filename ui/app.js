@@ -652,7 +652,49 @@
       return;
     }
     let mode = 'in';
+    let resetEmail = '';
+    const drawReset = () => {
+      const step2 = mode === 'reset2';
+      $('auth-title').textContent = 'Reset password';
+      body.innerHTML = `<p class="sub">${step2 ? `We emailed a 6-digit code to <b>${esc(resetEmail)}</b>. Check your spam folder too.` : "Enter your account email and we'll send you a reset code."}</p>
+        <form id="reset-form">
+          ${step2
+            ? `<label class="field">Code</label><input type="text" id="reset-otp" inputmode="numeric" maxlength="6" required autocomplete="one-time-code" />
+               <label class="field">New password</label><input type="password" id="reset-pass" minlength="8" required autocomplete="new-password" />`
+            : `<label class="field">Email</label><input type="email" id="reset-email" required autocomplete="email" />`}
+          <div class="err" id="acct-err"></div>
+          <button class="btn" id="reset-go" type="submit">${step2 ? 'Set new password' : 'Send code'}</button>
+        </form>
+        <div class="hint" style="text-align:center;margin-top:12px"><a href="#" id="reset-back" style="color:var(--accent)">Back to sign in</a></div>`;
+      $('reset-back').onclick = (e) => { e.preventDefault(); mode = 'in'; draw(); };
+      $('reset-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = $('reset-go');
+        btn.disabled = true;
+        $('acct-err').textContent = '';
+        try {
+          if (!step2) {
+            resetEmail = $('reset-email').value.trim();
+            await window.UHCloud.requestReset(resetEmail);
+            mode = 'reset2';
+            drawReset();
+          } else {
+            const pass = $('reset-pass').value;
+            await window.UHCloud.resetPassword(resetEmail, $('reset-otp').value.trim(), pass);
+            await window.UHCloud.signIn(resetEmail, pass);
+            await Data.reload();
+            renderAccount();
+            toast('Password updated. Welcome back!');
+            toMenu();
+          }
+        } catch (err) {
+          $('acct-err').textContent = err.message;
+          btn.disabled = false;
+        }
+      };
+    };
     const draw = () => {
+      if (mode === 'reset1' || mode === 'reset2') return drawReset();
       $('auth-title').textContent = mode === 'in' ? 'Sign in' : 'Create account';
       body.innerHTML = `<p class="sub">Save coins, items, campaign progress and runs to the cloud, and compete on the global leaderboard.</p>
         <form id="acct-form">
@@ -663,7 +705,9 @@
           <button class="btn" id="acct-go" type="submit">${mode === 'in' ? 'Sign in' : 'Create account'}</button>
         </form>
         <div class="row"><button class="btn secondary" id="acct-google">Continue with Google</button></div>
-        <div class="hint" style="text-align:center;margin-top:12px">${mode === 'in' ? 'New here?' : 'Have an account?'} <a href="#" id="acct-switch" style="color:var(--accent)">${mode === 'in' ? 'Create an account' : 'Sign in'}</a></div>`;
+        <div class="hint" style="text-align:center;margin-top:12px">${mode === 'in' ? 'New here?' : 'Have an account?'} <a href="#" id="acct-switch" style="color:var(--accent)">${mode === 'in' ? 'Create an account' : 'Sign in'}</a></div>
+        ${mode === 'in' ? '<div class="hint" style="text-align:center;margin-top:6px"><a href="#" id="acct-forgot" style="color:var(--muted)">Forgot password?</a></div>' : ''}`;
+      if (mode === 'in') $('acct-forgot').onclick = (e) => { e.preventDefault(); mode = 'reset1'; draw(); };
       if (mode === 'up' && settings.name) $('acct-name').value = settings.name;
       $('acct-switch').onclick = (e) => { e.preventDefault(); mode = mode === 'in' ? 'up' : 'in'; draw(); };
       $('acct-google').onclick = async () => { try { await window.UHCloud.google(); } catch (err) { $('acct-err').textContent = err.message; } };

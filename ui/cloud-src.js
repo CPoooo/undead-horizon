@@ -51,12 +51,28 @@ if (cfg.apiBase && cfg.authUrl) {
     return json;
   }
 
+  async function authPost(path, body) {
+    const r = await fetch(cfg.authUrl.replace(/\/$/, '') + path, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(errText({ message: j.message || j.code || `HTTP ${r.status}` }));
+    }
+    return r.json().catch(() => ({}));
+  }
+
   const errText = (error) => {
     if (!error) return 'Something went wrong';
     const m = error.message || error.code || String(error);
     if (/invalid.*(email|password)|credentials/i.test(m)) return 'Wrong email or password.';
     if (/already exists|USER_ALREADY_EXISTS/i.test(m)) return 'An account with that email already exists.';
     if (/password.*(short|least)/i.test(m)) return 'Password must be at least 8 characters.';
+    if (/otp|code/i.test(m) && /invalid|expired|incorrect/i.test(m)) return 'That code is invalid or expired.';
+    if (/too many|rate/i.test(m)) return 'Too many attempts. Wait a minute and try again.';
     return m;
   };
 
@@ -89,8 +105,23 @@ if (cfg.apiBase && cfg.authUrl) {
       return this.user;
     },
     async google() {
-      const { error } = await auth.signIn.social({ provider: 'google', callbackURL: location.href.split('#')[0] });
+      // All three URLs must point back at the game. Better Auth otherwise sends
+      // first-time users to the bare origin, which 404s on GitHub Pages.
+      const back = location.origin + location.pathname;
+      const { error } = await auth.signIn.social({
+        provider: 'google',
+        callbackURL: back,
+        newUserCallbackURL: back,
+        errorCallbackURL: back,
+      });
       if (error) throw new Error(errText(error));
+    },
+    /** Email a 6-digit password-reset code (sent via the branch's email provider). */
+    async requestReset(email) {
+      await authPost('/email-otp/request-password-reset', { email });
+    },
+    async resetPassword(email, otp, password) {
+      await authPost('/email-otp/reset-password', { email, otp, password });
     },
     async signOut() {
       await auth.signOut().catch(() => {});

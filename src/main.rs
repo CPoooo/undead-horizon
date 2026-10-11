@@ -88,7 +88,9 @@ fn run() -> Result<(), JsValue> {
                 return;
             }
             let code = e.code();
-            let mut g = g.borrow_mut();
+            let Ok(mut g) = g.try_borrow_mut() else {
+                return;
+            };
             g.audio.unlock();
             let playing = matches!(g.phase, Phase::Playing | Phase::LevelUp | Phase::Paused);
             if playing
@@ -108,7 +110,9 @@ fn run() -> Result<(), JsValue> {
     {
         let g = game.clone();
         listen(&win_t, "keyup", move |e: KeyboardEvent| {
-            set_key(&mut g.borrow_mut(), &e.code(), false);
+            if let Ok(mut g) = g.try_borrow_mut() {
+                set_key(&mut g, &e.code(), false);
+            }
         });
     }
 
@@ -116,7 +120,9 @@ fn run() -> Result<(), JsValue> {
     {
         let g = game.clone();
         listen(&win_t, "mousemove", move |e: MouseEvent| {
-            let mut g = g.borrow_mut();
+            let Ok(mut g) = g.try_borrow_mut() else {
+                return;
+            };
             g.input.mouse = v2(e.client_x() as f32, e.client_y() as f32);
             g.input.mouse_seen = true;
         });
@@ -124,7 +130,9 @@ fn run() -> Result<(), JsValue> {
     {
         let g = game.clone();
         listen(&canvas_t, "mousedown", move |e: MouseEvent| {
-            let mut g = g.borrow_mut();
+            let Ok(mut g) = g.try_borrow_mut() else {
+                return;
+            };
             g.audio.unlock();
             g.input.mouse = v2(e.client_x() as f32, e.client_y() as f32);
             g.input.mouse_seen = true;
@@ -144,7 +152,9 @@ fn run() -> Result<(), JsValue> {
         let g = game.clone();
         listen(&win_t, "mouseup", move |e: MouseEvent| {
             if e.button() == 0 {
-                g.borrow_mut().input.mouse_down = false;
+                if let Ok(mut g) = g.try_borrow_mut() {
+                    g.input.mouse_down = false;
+                }
             }
         });
     }
@@ -154,7 +164,9 @@ fn run() -> Result<(), JsValue> {
     {
         let g = game.clone();
         listen(&win_t, "pointerdown", move |_e: Event| {
-            g.borrow_mut().audio.unlock();
+            if let Ok(mut g) = g.try_borrow_mut() {
+                g.audio.unlock();
+            }
         });
     }
 
@@ -162,7 +174,9 @@ fn run() -> Result<(), JsValue> {
     {
         let g = game.clone();
         listen(&win_t, "blur", move |_e: Event| {
-            let mut g = g.borrow_mut();
+            let Ok(mut g) = g.try_borrow_mut() else {
+                return;
+            };
             g.input = game::Input {
                 is_touch: g.input.is_touch,
                 mouse: g.input.mouse,
@@ -178,7 +192,9 @@ fn run() -> Result<(), JsValue> {
         let doc_t: web_sys::EventTarget = doc.clone().into();
         listen(&doc_t, "visibilitychange", move |_e: Event| {
             if d2.hidden() {
-                g.borrow_mut().pause();
+                if let Ok(mut g) = g.try_borrow_mut() {
+                    g.pause();
+                }
             }
         });
     }
@@ -188,7 +204,9 @@ fn run() -> Result<(), JsValue> {
         let g = game.clone();
         listen(&canvas_t, "touchstart", move |e: TouchEvent| {
             e.prevent_default();
-            let mut g = g.borrow_mut();
+            let Ok(mut g) = g.try_borrow_mut() else {
+                return;
+            };
             g.audio.unlock();
             g.input.is_touch = true;
             let w = window()
@@ -221,7 +239,9 @@ fn run() -> Result<(), JsValue> {
         let g = game.clone();
         listen(&canvas_t, "touchmove", move |e: TouchEvent| {
             e.prevent_default();
-            let mut g = g.borrow_mut();
+            let Ok(mut g) = g.try_borrow_mut() else {
+                return;
+            };
             let list = e.changed_touches();
             for i in 0..list.length() {
                 if let Some(t) = list.item(i) {
@@ -246,7 +266,9 @@ fn run() -> Result<(), JsValue> {
         let g = game.clone();
         listen(&canvas_t, name, move |e: TouchEvent| {
             e.prevent_default();
-            let mut g = g.borrow_mut();
+            let Ok(mut g) = g.try_borrow_mut() else {
+                return;
+            };
             let list = e.changed_touches();
             for i in 0..list.length() {
                 if let Some(t) = list.item(i) {
@@ -283,17 +305,22 @@ fn run() -> Result<(), JsValue> {
             canvas.set_width(pw);
             canvas.set_height(ph);
         }
-        {
-            let mut g = g.borrow_mut();
-            while let Some(cmd) = ui_poll() {
-                handle_cmd(&mut g, &cmd);
+        // Never call back into JS while the game is borrowed: JS handlers can
+        // synchronously trigger DOM events whose Rust listeners need the game.
+        let events = match g.try_borrow_mut() {
+            Ok(mut g) => {
+                while let Some(cmd) = ui_poll() {
+                    handle_cmd(&mut g, &cmd);
+                }
+                g.screen = v2(cw, chh);
+                g.frame(ts);
+                g.render(&ctx, cw, chh, dpr);
+                std::mem::take(&mut g.ui_out)
             }
-            g.screen = v2(cw, chh);
-            g.frame(ts);
-            g.render(&ctx, cw, chh, dpr);
-            for (kind, data) in std::mem::take(&mut g.ui_out) {
-                ui_event(kind, &data);
-            }
+            Err(_) => Vec::new(),
+        };
+        for (kind, data) in events {
+            ui_event(kind, &data);
         }
         let _ = w.request_animation_frame(f.borrow().as_ref().unwrap().as_ref().unchecked_ref());
     }));
