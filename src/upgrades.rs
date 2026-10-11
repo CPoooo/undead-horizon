@@ -1,6 +1,7 @@
 use crate::math::Rng;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
 pub enum Up {
     Damage,
     FireRate,
@@ -168,10 +169,11 @@ impl Levels {
     }
 
     /// Pick up to 3 distinct offers, weighted so superpowers stay exciting but rarer.
-    pub fn roll(&self, rng: &mut Rng, luck: f32) -> Vec<Up> {
+    /// `banned`: banished upgrades that never show up again this run.
+    pub fn roll(&self, rng: &mut Rng, luck: f32, banned: &[Up]) -> Vec<Up> {
         let mut pool: Vec<(Up, f32)> = ALL
             .iter()
-            .filter(|u| !self.maxed(**u))
+            .filter(|u| !self.maxed(**u) && !banned.contains(u))
             .map(|u| {
                 let d = u.def();
                 let mut w = match d.rarity {

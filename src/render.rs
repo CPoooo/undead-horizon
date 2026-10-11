@@ -2383,7 +2383,7 @@ impl Game {
         c.set_text_baseline("middle");
         c.set_stroke_style_str("rgba(0,0,0,0.85)");
         c.set_line_join("round");
-        let ty = rects[0].1 - 54.0;
+        let ty = rects[0].1 - if self.pending_levels > 1 { 70.0 } else { 54.0 };
         let small = w < 640.0;
         c.set_font(&format!("900 {}px {}", if small { 28 } else { 44 }, font));
         c.set_fill_style_str("#ffe27a");
@@ -2447,9 +2447,23 @@ impl Game {
                 c.set_fill_style_canvas_gradient(&g);
             }
             c.fill();
-            c.set_stroke_style_str(if sel { "#ffffff" } else { def.color });
+            let banish = self.banish_mode;
+            c.set_stroke_style_str(if banish {
+                if sel { "#ff8a8a" } else { "#ff4a5a" }
+            } else if sel {
+                "#ffffff"
+            } else {
+                def.color
+            });
             c.set_line_width(if sel { 3.0 } else { 2.0 });
             c.stroke();
+            if banish {
+                c.set_global_alpha(d(0.18 * ck.clamp(0.0, 1.0)));
+                c.set_fill_style_str("#ff2030");
+                round_rect(c, x, yy, cw, ch, 14.0);
+                c.fill();
+                c.set_global_alpha(d(ck.clamp(0.0, 1.0)));
+            }
 
             let (rl, rc) = match def.rarity {
                 2 => ("SUPERPOWER", "#d58cff"),
@@ -2552,6 +2566,42 @@ impl Game {
                 c.set_fill_style_str(if sel { "#111" } else { "#ddd" });
                 text(c, &format!("{}", i + 1), x + cw * 0.5, yy + ch - 23.0);
             }
+            if self.banish_mode {
+                c.set_font(&format!("900 13px {}", font));
+                c.set_fill_style_str("#ff6a7a");
+                c.set_text_align("center");
+                text(c, "🚫 BANISH", x + cw * 0.5, yy - 10.0);
+            }
+        }
+        c.set_global_alpha(1.0);
+
+        // Reroll / Banish / Skip
+        let kb = !self.input.is_touch;
+        let labels = [
+            ("🎲 Reroll", self.rerolls, "R", false),
+            (if self.banish_mode { "✖ Cancel" } else { "🚫 Banish" }, self.banishes, "B", self.banish_mode),
+            ("⏭ Skip +HP", self.skips, "X", false),
+        ];
+        let bk = ease_out(((self.levelup_t - 0.25) / 0.3).clamp(0.0, 1.0));
+        c.set_global_alpha(d(bk));
+        for (r, (label, n, key, active)) in self.levelup_buttons().iter().zip(labels) {
+            round_rect(c, r.0, r.1, r.2, r.3, 10.0);
+            c.set_fill_style_str(if active {
+                "rgba(255,60,80,0.35)"
+            } else if n > 0 {
+                "rgba(255,255,255,0.10)"
+            } else {
+                "rgba(255,255,255,0.03)"
+            });
+            c.fill();
+            c.set_stroke_style_str(if n > 0 { "rgba(255,255,255,0.35)" } else { "rgba(255,255,255,0.1)" });
+            c.set_line_width(1.5);
+            c.stroke();
+            c.set_text_align("center");
+            c.set_font(&format!("800 {}px {}", if r.2 < 110.0 { 12 } else { 14 }, font));
+            c.set_fill_style_str(if n > 0 { "#ffffff" } else { "#6a7080" });
+            let cap = if kb { format!("{} ({}) · {}", label, n, key) } else { format!("{} ({})", label, n) };
+            text(c, &cap, r.0 + r.2 * 0.5, r.1 + r.3 * 0.5 + 1.0);
         }
         c.set_global_alpha(1.0);
     }

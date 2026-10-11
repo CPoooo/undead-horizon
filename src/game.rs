@@ -372,6 +372,13 @@ pub struct Game {
     pub sel: usize,
     pub levelup_t: f32,
     pub pending_levels: u32,
+    /// level-up charges for this run
+    pub rerolls: u32,
+    pub banishes: u32,
+    pub skips: u32,
+    pub banished: Vec<Up>,
+    /// the next card picked is banished instead of taken
+    pub banish_mode: bool,
     pub rng: Rng,
     pub grid: Grid,
     pub audio: Audio,
@@ -497,6 +504,11 @@ impl Game {
             sel: 0,
             levelup_t: 0.0,
             pending_levels: 0,
+            rerolls: 0,
+            banishes: 0,
+            skips: 0,
+            banished: Vec::new(),
+            banish_mode: false,
             rng: Rng::new(seed),
             grid: Grid::new(),
             audio: Audio::new(),
@@ -696,6 +708,11 @@ impl Game {
         self.ups = Levels::default();
         self.offers.clear();
         self.pending_levels = 0;
+        self.rerolls = 2;
+        self.banishes = 2;
+        self.skips = 3;
+        self.banished.clear();
+        self.banish_mode = false;
         self.kills = 0;
         self.score = 0;
         self.feed.clear();
@@ -1114,6 +1131,19 @@ impl Game {
                 }
             }
             if self.levelup_t > 0.45 {
+                let buttons = self.levelup_buttons();
+                for c in clicks.iter() {
+                    for (k, r) in buttons.iter().enumerate() {
+                        if c.x >= r.0 && c.x <= r.0 + r.2 && c.y >= r.1 && c.y <= r.1 + r.3 {
+                            match k {
+                                0 => self.reroll(),
+                                1 => self.toggle_banish(),
+                                _ => self.skip_levelup(),
+                            }
+                            return;
+                        }
+                    }
+                }
                 for c in clicks {
                     for (i, r) in rects.iter().enumerate().take(self.offers.len()) {
                         if c.x >= r.0 && c.x <= r.0 + r.2 && c.y >= r.1 && c.y <= r.1 + r.3 {
@@ -1174,6 +1204,9 @@ impl Game {
                     Action::Pick2 => self.choose(1),
                     Action::Pick3 => self.choose(2),
                     Action::Confirm => self.choose(self.sel),
+                    Action::Reroll => self.reroll(),
+                    Action::Banish => self.toggle_banish(),
+                    Action::Skip => self.skip_levelup(),
                     Action::Prev => {
                         if self.sel > 0 {
                             self.sel -= 1;
@@ -1266,8 +1299,7 @@ impl Game {
     }
 
     pub(crate) fn open_levelup(&mut self) {
-        let luck = (self.wave.n as f32 * 0.01).min(0.25);
-        self.offers = self.ups.roll(&mut self.rng, luck);
+        self.roll_offers();
         if self.offers.is_empty() {
             // everything maxed: just heal
             self.player.hp = self.player.max_hp;
@@ -1280,11 +1312,90 @@ impl Game {
         self.audio.play(Sfx::LevelUp);
     }
 
+    fn roll_offers(&mut self) {
+        let luck = (self.wave.n as f32 * 0.01).min(0.25);
+        self.offers = self.ups.roll(&mut self.rng, luck, &self.banished);
+    }
+
+    /// Level-up buttons under the cards: (x, y, w, h) for Reroll, Banish, Skip.
+    pub fn levelup_buttons(&self) -> [(f32, f32, f32, f32); 3] {
+        let rects = self.card_rects();
+        let last = rects[2];
+        let first = rects[0];
+        let phone = self.screen.x < 600.0;
+        let y = if phone {
+            last.1 + last.3 + 14.0
+        } else {
+            first.1 + first.3 + 22.0
+        };
+        let total_w = if phone { last.2 } else { (last.0 + last.2 - first.0).min(560.0) };
+        let x0 = if phone { last.0 } else { self.screen.x * 0.5 - total_w * 0.5 };
+        let gap = 10.0;
+        let bw = (total_w - gap * 2.0) / 3.0;
+        let bh = if phone { 40.0 } else { 36.0 };
+        [
+            (x0, y, bw, bh),
+            (x0 + bw + gap, y, bw, bh),
+            (x0 + 2.0 * (bw + gap), y, bw, bh),
+        ]
+    }
+
+    pub(crate) fn reroll(&mut self) {
+        if self.rerolls == 0 || self.phase != Phase::LevelUp {
+            self.audio.play(Sfx::UiMove);
+            return;
+        }
+        self.rerolls -= 1;
+        self.banish_mode = false;
+        self.roll_offers();
+        self.sel = 0;
+        self.levelup_t = 0.2;
+        self.audio.play(Sfx::UiSelect);
+    }
+
+    pub(crate) fn toggle_banish(&mut self) {
+        if self.banishes == 0 || self.phase != Phase::LevelUp {
+            self.audio.play(Sfx::UiMove);
+            return;
+        }
+        self.banish_mode = !self.banish_mode;
+        self.audio.play(Sfx::UiMove);
+    }
+
+    pub(crate) fn skip_levelup(&mut self) {
+        if self.skips == 0 || self.phase != Phase::LevelUp {
+            self.audio.play(Sfx::UiMove);
+            return;
+        }
+        self.skips -= 1;
+        self.banish_mode = false;
+        let heal = self.player.max_hp * 0.15;
+        self.player.hp = (self.player.hp + heal).min(self.player.max_hp);
+        let p = self.player.pos;
+        self.text(p, format!("+{}", heal as i32), "#ff5c7a", 18.0);
+        self.audio.play(Sfx::UiSelect);
+        self.finish_pick();
+    }
+
     pub(crate) fn choose(&mut self, i: usize) {
         if i >= self.offers.len() || self.phase != Phase::LevelUp {
             return;
         }
         let u = self.offers[i];
+        if self.banish_mode {
+            // gone for the rest of the run; deal a fresh hand
+            self.banish_mode = false;
+            self.banishes = self.banishes.saturating_sub(1);
+            self.banished.push(u);
+            self.roll_offers();
+            self.sel = 0;
+            self.levelup_t = 0.2;
+            self.audio.play(Sfx::Hurt);
+            if self.offers.is_empty() {
+                self.finish_pick();
+            }
+            return;
+        }
         self.ups.inc(u);
         match u {
             Up::Vitality => {
@@ -1297,6 +1408,11 @@ impl Game {
             _ => {}
         }
         self.audio.play(Sfx::UiSelect);
+        self.finish_pick();
+    }
+
+    /// Close this level-up (or open the next queued one).
+    fn finish_pick(&mut self) {
         self.pending_levels = self.pending_levels.saturating_sub(1);
         if self.pending_levels > 0 {
             self.open_levelup();
@@ -1445,7 +1561,7 @@ impl Game {
         let ups: Vec<String> = self.ups.0.iter().map(|l| l.to_string()).collect();
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={};score={}",
+            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={};score={};charges={},{},{};ban={}",
             SAVE_VERSION,
             self.player_name.replace([';', '=', '|'], ""),
             self.mode.id(),
@@ -1465,7 +1581,15 @@ impl Game {
             self.player.ult,
             self.best_combo,
             self.best_wave,
-            self.score
+            self.score,
+            self.rerolls,
+            self.banishes,
+            self.skips,
+            self.banished
+                .iter()
+                .map(|u| (*u as u8).to_string())
+                .collect::<Vec<_>>()
+                .join(",")
         )
     }
 
@@ -1500,6 +1624,19 @@ impl Game {
                 "ult" => self.player.ult = v.parse().unwrap_or(0.0),
                 "combo" => self.best_combo = v.parse().unwrap_or(0),
                 "score" => self.score = v.parse().unwrap_or(0),
+                "charges" => {
+                    let c: Vec<u32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+                    if c.len() == 3 {
+                        (self.rerolls, self.banishes, self.skips) = (c[0], c[1], c[2]);
+                    }
+                }
+                "ban" => {
+                    self.banished = v
+                        .split(',')
+                        .filter_map(|x| x.parse::<usize>().ok())
+                        .filter_map(|i| crate::upgrades::ALL.get(i).copied())
+                        .collect()
+                }
                 "ups" => {
                     for (i, l) in v.split(',').enumerate().take(self.ups.0.len()) {
                         self.ups.0[i] = l.parse().unwrap_or(0);
@@ -3172,5 +3309,37 @@ mod tests {
         g.tick_callouts(1.0);
         assert_eq!(g.multi_n, 0);
         assert!(g.save_string().contains(&format!("score={}", g.score)));
+    }
+
+    #[test]
+    fn levelup_reroll_banish_skip() {
+        let mut g = Game::new(13);
+        g.start("diff=rookie");
+        g.pending_levels = 2;
+        g.open_levelup();
+        assert_eq!(g.phase, Phase::LevelUp);
+        g.reroll();
+        assert_eq!(g.rerolls, 1);
+        let victim = g.offers[0];
+        g.toggle_banish();
+        g.choose(0);
+        assert_eq!(g.banishes, 1);
+        assert!(g.banished.contains(&victim));
+        assert_eq!(g.ups.get(victim), 0, "banishing doesn't take it");
+        for _ in 0..50 {
+            g.roll_offers();
+            assert!(!g.offers.contains(&victim), "banished never comes back");
+        }
+        g.skip_levelup();
+        assert_eq!(g.skips, 2);
+        assert_eq!(g.phase, Phase::LevelUp, "second queued level-up opens");
+        g.skip_levelup();
+        assert_eq!(g.phase, Phase::Playing);
+        // charges and bans survive a save
+        let s = g.save_string();
+        let mut h = Game::new(14);
+        h.load_save(&s);
+        assert_eq!((h.rerolls, h.banishes, h.skips), (1, 1, 1));
+        assert_eq!(h.banished, vec![victim]);
     }
 }

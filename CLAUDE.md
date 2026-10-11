@@ -152,7 +152,7 @@ Not scheduled yet; design notes for when we pick it up.
 - [x] J7 (S) **Callouts.** Kill feed (co-op aware), multi-kill and headshot-style callouts, and a combo multiplier that feeds score.
 
 ### M2 · Combat depth (survivor-like best practices)
-- [ ] C1 (S) **Level-up options.** Reroll, Banish and Skip with limited charges (meta-upgradable in P2). Extend `Levels::roll` and `draw_levelup`.
+- [x] C1 (S) **Level-up options.** Reroll, Banish and Skip with limited charges (meta-upgradable in P2). Extend `Levels::roll` and `draw_levelup`.
 - [ ] C2 (M) **Evolutions.**
   - A maxed power plus a specific passive evolves at a chest: Blades + Speed → "Reaper Ring", Lightning + Crit → "Storm Crown", and so on (6–8).
   - Evolution table in `upgrades.rs`; render an EVOLVED card.
