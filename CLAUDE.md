@@ -30,8 +30,8 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
 ## Features to be implemented
 
 - [ ] 1. **Co-op mode**: live online, real-time co-op for up to 3 players for now, with the ability to revive a downed teammate. Needs a realtime/websocket server.
-- [ ] 2. **Persistence in Neon DB**: persist everything (player data, runs, progression, save states) in Neon Postgres and make the leaderboard live and global.
-- [ ] 3. **Login / accounts**: users can sign in so their data is saved.
+- [x] 2. **Persistence in Neon DB**: profiles (coins, owned items, equipped loadout and cosmetics, campaign progress, stats), save states and every run are stored in Neon Postgres. The leaderboard is global (each player's best infinite run) and auto-refreshes every 5s while visible.
+- [x] 3. **Login / accounts**: Neon Managed Auth (Better Auth), with email and password sign-up/sign-in and Google sign-in. Sessions persist across reloads and devices. On the first sign-in, offline progress is imported once (coins capped at 5000). Guests can still play offline with browser storage.
 - [x] 4. **Shop & customizations**: coins are earned by clearing waves (scaled by difficulty) plus boss and chapter bonuses. They buy guns, perks, skins, hats and bullet tracers in the 🛒 Shop.
 - [x] 5. **Multiple difficulties**: Rookie, Survivor, Veteran and Nightmare (`content::DIFFICULTIES`). They scale HP, damage, horde size, speed and coin rewards.
 - [x] 6. **Loadouts**: a primary weapon (6 guns with distinct handling, in `content::GUNS`) plus a starting perk, chosen in the 🎒 Locker.
@@ -46,4 +46,15 @@ Also done: the pause screen shows full run stats (HP, XP, damage per shot, fire 
 - Content tables (ids shared with the UI catalog): `src/content.rs`. The shop catalog, prices and story text are in `ui/app.js`.
 - UI to game commands: `start|k=v;...`, `equip|k=v;...`, `save`, `load|<save string>`, `pause`, `resume`, `menu`, `vol|`, `music|`, `autoaim|`.
 - Game to UI events: `ready`, `pause` (run JSON), `resume`, `saved` (save string), `gameover` and `victory` (stats JSON), `autoaim`, `wave`.
-- Player profile, leaderboard and saves currently go through the `Data` backend in `ui/app.js`. It defaults to `LocalBackend` (localStorage). A cloud backend registered as `window.UHCloud` takes over when signed in.
+- Player profile, leaderboard and saves go through `Data` in `ui/app.js`: localStorage when signed out, and the cloud API when signed in (`window.UHCloud`, from `ui/cloud-src.js`).
+
+## Backend (Neon)
+
+- Project `dawn-base-35494450`, branch `production`, region aws-us-east-2. Config is in `neon.ts` (`auth: true`, function `api`). `.neon` and `.env.local` are gitignored.
+- **API**: `server/index.ts` (Hono, `pg`, JWT verified against the Neon Auth JWKS). Prices and coin caps are in `server/catalog.ts` and **must stay in sync** with `ui/app.js` CATALOG and the coin formulas in `src/game.rs` (`wave_cleared`, boss kill, `campaign_victory`).
+- **Server-authoritative**: purchases (price and ownership checks are atomic in SQL), equips (must own the item), run rewards (coins capped by `waveCoins()` for the reported progress), and campaign unlocks.
+- **Schema**: `server/schema.sql` (idempotent), applied with `npm run db:schema`. Tables are `profiles`, `saves` and `runs`; users live in `neon_auth."user"`.
+- **Deploy the API**: `npm run deploy:api` (`neon deploy --env .env.local`). The function URL and auth URL are public and live in `ui/config.js`.
+- **Browser auth client**: `ui/cloud-src.js`, bundled to the committed `ui/cloud.js` with `npm run build:cloud`. Rebuild after editing it.
+- **CORS**: the allowlist is in `server/index.ts`. Auth trusted domains are managed with `neon neon-auth domain list|add` (https://cpoooo.github.io is added; localhost is allowed by default).
+- **Auth emails**: these use Neon's shared SMTP, which is fine for development. Production should configure custom SMTP (https://neon.com/docs/auth/production-checklist.md). Google sign-in uses Neon's shared dev OAuth credentials until you configure your own.

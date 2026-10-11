@@ -1,2 +1,5 @@
 /target
 /dist
+.neon
+.env.local
+node_modules/

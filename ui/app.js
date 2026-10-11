@@ -128,35 +128,119 @@
     return p;
   };
 
-  // Local backend (always available). A cloud backend can replace it when signed in.
-  const LocalBackend = {
-    name: 'local',
-    async loadProfile() { return normalizeProfile(store.get(PROFILE_KEY, null)); },
-    async saveProfile(p) { store.set(PROFILE_KEY, p); },
-    async leaderboard(filter) {
-      let lb = store.get(LB_KEY, []);
-      if (filter && filter !== 'all') lb = lb.filter((e) => (e.diff || 'survivor') === filter);
-      return lb.slice(0, 10);
-    },
-    async submitScore(entry) {
-      const lb = store.get(LB_KEY, []);
-      lb.push(entry);
-      lb.sort(cmpScore);
-      store.set(LB_KEY, lb.slice(0, 100));
-      return lb.indexOf(entry) + 1;
-    },
-  };
   const cmpScore = (a, b) => b.wave - a.wave || b.level - a.level || b.kills - a.kills || a.time - b.time;
+  const localProfile = () => normalizeProfile(store.get(PROFILE_KEY, null));
+  const localBoard = (filter) => {
+    let lb = store.get(LB_KEY, []);
+    if (filter && filter !== 'all') lb = lb.filter((e) => (e.diff || 'survivor') === filter);
+    return lb.slice(0, 10);
+  };
 
-  // window.UHCloud (ui/cloud.js-style module, optional) may register a cloud backend.
+  // Data layer. Signed out it uses browser storage. Signed in (window.UHCloud,
+  // see ui/cloud-src.js), every mutation goes through the server, which checks
+  // prices, ownership and coin rewards.
   const Data = {
-    backend: LocalBackend,
     profile: null,
+    get cloud() { return window.UHCloud && window.UHCloud.user ? window.UHCloud : null; },
+    get globalBoard() { return !!window.UHCloud; },
     async init() {
-      if (window.UHCloud && (await window.UHCloud.restore?.())) this.backend = window.UHCloud;
-      this.profile = await this.backend.loadProfile();
+      if (window.UHCloud) await window.UHCloud.restore();
+      await this.reload();
     },
-    async save() { await this.backend.saveProfile(this.profile); },
+    async reload() {
+      if (this.cloud) {
+        try {
+          let p = await this.cloud.api('/me');
+          if (!p.imported) {
+            // first sign-in on this account: carry over offline progress once
+            const local = localProfile();
+            p = await this.cloud.api('/me/import', { method: 'POST', body: { coins: local.coins, owned: local.owned, campaign: local.campaign } });
+          }
+          this.applyCloud(p);
+          return;
+        } catch (e) {
+          console.warn('cloud profile unavailable, using local', e);
+          toast('Cloud unavailable. Using this browser\'s profile.');
+        }
+      }
+      this.profile = localProfile();
+    },
+    applyCloud(p) {
+      this.profile = normalizeProfile(p);
+      this.profile.name = p.name;
+    },
+    persistLocal() { if (!this.cloud) store.set(PROFILE_KEY, this.profile); },
+    async buy(cat, id, price) {
+      if (this.cloud) return this.applyCloud(await this.cloud.api('/shop/buy', { method: 'POST', body: { cat, id } }));
+      const p = this.profile;
+      const key = `${cat}:${id}`;
+      if (p.owned.includes(key) || p.coins < price) throw new Error('cannot_buy');
+      p.coins -= price;
+      p.owned.push(key);
+      p.equipped[cat] = id;
+      this.persistLocal();
+    },
+    async equip(cat, id) {
+      if (this.cloud) return this.applyCloud(await this.cloud.api('/equip', { method: 'POST', body: { cat, id } }));
+      this.profile.equipped[cat] = id;
+      this.persistLocal();
+    },
+    /** Record a finished (or abandoned) run. Returns { coins, rank, id }. */
+    async finishRun(s, abandoned = false) {
+      if (this.cloud) {
+        const r = await this.cloud.api('/runs', { method: 'POST', body: { ...s, abandoned } });
+        this.applyCloud(r.profile);
+        return { coins: r.coins, rank: r.rank, id: r.id };
+      }
+      const p = this.profile;
+      p.coins += s.coins;
+      p.stats.runs += 1;
+      p.stats.kills += s.kills;
+      let rank = null, id = null;
+      if (s.mode === 'infinite') {
+        p.stats.bestWave = Math.max(p.stats.bestWave || 0, s.wave);
+        if (!abandoned) {
+          const entry = { name: s.name, wave: s.wave, level: s.level, kills: s.kills, time: s.time, diff: s.diff, gun: s.gun, id: String(Date.now() + Math.random()), date: new Date().toISOString() };
+          const lb = store.get(LB_KEY, []);
+          lb.push(entry);
+          lb.sort(cmpScore);
+          store.set(LB_KEY, lb.slice(0, 100));
+          rank = lb.indexOf(entry) + 1;
+          id = entry.id;
+        }
+      } else if (s.victory) {
+        const c = p.campaign;
+        if (!c.cleared.includes(s.chapter)) c.cleared.push(s.chapter);
+        c.unlocked = Math.max(c.unlocked, Math.min(s.chapter + 1, STORY.length - 1));
+      }
+      this.persistLocal();
+      return { coins: s.coins, rank, id };
+    },
+    async putSave(data, summary) {
+      if (this.cloud) {
+        const r = await this.cloud.api('/save', { method: 'PUT', body: { data, summary } });
+        this.profile.save = { summary: r.summary };
+        return;
+      }
+      this.profile.save = { data, summary };
+      this.persistLocal();
+    },
+    /** Returns the save string and removes it (a save resumes once). */
+    async takeSave() {
+      if (this.cloud) {
+        const r = await this.cloud.api('/save/consume', { method: 'POST' });
+        this.profile.save = null;
+        return r.data;
+      }
+      const d = this.profile.save?.data;
+      this.profile.save = null;
+      this.persistLocal();
+      return d;
+    },
+    async leaderboard(filter) {
+      if (window.UHCloud) return window.UHCloud.leaderboard(filter);
+      return localBoard(filter);
+    },
   };
   window.UHData = Data;
 
@@ -243,6 +327,11 @@
     renderMode();
   });
   $('name').addEventListener('input', () => { settings.name = $('name').value; saveSettings(); renderTag(); });
+  $('name').addEventListener('change', async () => {
+    if (!Data.cloud) return;
+    try { Data.applyCloud(await Data.cloud.api('/me/name', { method: 'POST', body: { name: playerName() } })); toast('Name updated'); }
+    catch { toast('Name must be 2-16 letters or numbers.'); $('name').value = Data.profile.name; }
+  });
 
   // tabs
   $('tabs').addEventListener('click', (e) => {
@@ -282,13 +371,14 @@
     const b = e.target.closest('[data-buy]');
     if (!b) return;
     const it = find(shopCat, b.dataset.buy);
-    const p = Data.profile;
-    const key = `${shopCat}:${it.id}`;
-    if (p.owned.includes(key) || p.coins < it.price) return;
-    p.coins -= it.price;
-    p.owned.push(key);
-    p.equipped[shopCat] = it.id; // auto-equip new purchases
-    await Data.save();
+    b.disabled = true;
+    try {
+      await Data.buy(shopCat, it.id, it.price);
+    } catch (err) {
+      toast(err.message === 'cannot_buy' ? 'Not enough coins.' : 'Purchase failed. Try again.');
+      renderShop();
+      return;
+    }
     pushEquip();
     renderShop(); renderCoins(); renderTag();
     toast(`Unlocked ${it.name}! Equipped.`);
@@ -312,8 +402,7 @@
     const it = e.target.closest('[data-eq]');
     if (!it) return;
     const [cat, id] = it.dataset.eq.split(':');
-    Data.profile.equipped[cat] = id;
-    await Data.save();
+    try { await Data.equip(cat, id); } catch { toast('Could not equip that item.'); }
     pushEquip();
     renderLocker(); renderTag();
   });
@@ -329,15 +418,18 @@
   });
   async function renderLB(el, highlightId) {
     let lb = [];
-    try { lb = await Data.backend.leaderboard(el.id === 'lb-menu' ? lbFilter : 'all'); } catch (err) { console.warn(err); lb = await LocalBackend.leaderboard(lbFilter); }
-    $('lb-live').style.display = Data.backend.name === 'cloud' ? '' : 'none';
-    if (!lb.length) { el.innerHTML = '<div class="empty">No runs yet. Be the first legend.</div>'; return; }
+    const filter = el.id === 'lb-menu' ? lbFilter : 'all';
+    try { lb = await Data.leaderboard(filter); } catch (err) { console.warn(err); lb = localBoard(filter); }
+    $('lb-live').style.display = Data.globalBoard ? '' : 'none';
+    const note = Data.globalBoard && !Data.cloud ? '<div class="hint" style="margin-top:10px">🌍 Global board. <a href="#" data-signin style="color:var(--accent)">Sign in</a> to get your runs on it.</div>' : '';
+    if (!lb.length) { el.innerHTML = '<div class="empty">No runs yet. Be the first legend.</div>' + note; return; }
     el.innerHTML = '<table class="lb"><thead><tr><th>#</th><th>Name</th><th>Wave</th><th>Lv</th><th>Kills</th><th>Diff</th></tr></thead><tbody>' +
       lb.map((e, i) => `<tr class="${e.id === highlightId ? 'me' : ''}"><td class="rank">${i + 1}</td><td class="name">${esc(e.name)}</td><td class="wave">${e.wave}</td><td>${e.level}</td><td>${e.kills}</td><td><span class="dtag ${esc(e.diff || 'survivor')}">${esc(DIFF[e.diff || 'survivor']?.name || '')}</span></td></tr>`).join('') +
-      '</tbody></table>';
+      '</tbody></table>' + note;
   }
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-signin]')) { e.preventDefault(); openAccount(); } });
   // Live refresh while the leaderboard is visible on the menu.
-  setInterval(() => { if (state === 'menu' && $('tab-lb').classList.contains('on') && Data.backend.name === 'cloud') renderLB($('lb-menu')); }, 10000);
+  setInterval(() => { if (state === 'menu' && $('tab-lb').classList.contains('on') && Data.globalBoard) renderLB($('lb-menu')); }, 5000);
 
   // ------------------------------------------------------------------ flow
   function toMenu() {
@@ -350,6 +442,7 @@
   }
   function playerName() { return ($('name').value || '').trim().replace(/[|;=]/g, '') || 'Survivor'; }
   async function personalBest(name) {
+    if (Data.cloud) return Data.profile.stats.bestWave || 0;
     const lb = store.get(LB_KEY, []);
     return lb.filter((e) => e.name === name).reduce((m, e) => Math.max(m, e.wave), Data.profile.stats.bestWave || 0);
   }
@@ -397,14 +490,15 @@
   async function continueRun() {
     const sv = Data.profile.save;
     if (!sv) return;
-    Data.profile.save = null; // a save resumes once
-    await Data.save();
+    let data;
+    try { data = await Data.takeSave(); } catch { toast('Could not load the save.'); renderMode(); return; }
+    if (!data) { renderMode(); return; }
     runCtx = { mode: sv.summary.mode, chapter: sv.summary.chapter, diff: sv.summary.diff };
     state = 'playing';
     show(null);
     applySettings();
     pushEquip();
-    send('load|' + sv.data);
+    send('load|' + data);
   }
 
   $('play').addEventListener('click', start);
@@ -416,7 +510,7 @@
   $('save-quit').addEventListener('click', () => { afterSave = 'quit'; send('save'); });
   $('quit').addEventListener('click', async () => {
     if (!confirm('Abandon this run? Coins earned so far are kept, but progress is lost.')) return;
-    if (lastPause) await awardCoins(lastPause.run.coins);
+    if (lastPause) await Data.finishRun(lastPause.run, true).catch((e) => console.warn(e));
     toMenu();
   });
   $('again').addEventListener('click', start);
@@ -431,12 +525,6 @@
     else if (state === 'gameover' && e.key === 'Enter') start();
     else if (state === 'story' && e.key === 'Enter') $('story-go').click();
   });
-
-  async function awardCoins(n) {
-    if (!n) return;
-    Data.profile.coins += n;
-    await Data.save();
-  }
 
   // ------------------------------------------------------------------ pause panel
   let lastPause = null;
@@ -470,8 +558,9 @@
   window.uhEvent = async (kind, data) => {
     switch (kind) {
       case 'ready':
-        await Data.init();
         $('name').value = settings.name || '';
+        await Data.init();
+        renderAccount();
         $('loader').classList.add('hide');
         applySettings();
         toMenu();
@@ -486,11 +575,8 @@
       case 'autoaim': settings.autoaim = data === '1'; applySettings(); break;
       case 'saved': {
         const r = lastPause ? lastPause.run : {};
-        Data.profile.save = {
-          data,
-          summary: { mode: r.mode || runCtx.mode, chapter: r.chapter || 0, diff: r.diff || runCtx.diff, wave: r.wave || 1, level: r.level || 1, date: Date.now() },
-        };
-        await Data.save();
+        const summary = { mode: r.mode || runCtx.mode, chapter: r.chapter || 0, diff: r.diff || runCtx.diff, wave: r.wave || 1, level: r.level || 1, date: Date.now() };
+        try { await Data.putSave(data, summary); } catch (e) { console.warn(e); afterSave = null; toast('Save failed. Check your connection.'); break; }
         if (afterSave === 'quit') { afterSave = null; toast('Game saved'); toMenu(); }
         else { afterSave = null; toast('Game saved 💾'); $('save-hint').textContent = '✓ Saved. Continue it from the main menu any time.'; }
         break;
@@ -499,13 +585,13 @@
       case 'victory': {
         const s = JSON.parse(data);
         const win = kind === 'victory';
-        const p = Data.profile;
-        p.coins += s.coins;
-        p.stats.runs += 1;
-        p.stats.kills += s.kills;
+        let result = { coins: s.coins, rank: null, id: null };
+        const prevBest = s.mode === 'infinite' ? await personalBest(s.name) : 0;
+        const top = s.mode === 'infinite' ? (await Data.leaderboard('all').catch(() => []))[0] : null;
+        try { result = await Data.finishRun(s); } catch (e) { console.warn(e); toast('Could not reach the server; run not recorded.'); }
         $('go-title').textContent = win ? 'VICTORY' : 'YOU DIED';
         $('go-title').classList.toggle('win', win);
-        $('earned').textContent = s.coins ? `+🪙 ${s.coins} coins` : '';
+        $('earned').textContent = result.coins ? `+🪙 ${result.coins} coins` : '';
         $('s-wave').textContent = s.wave;
         $('s-level').textContent = s.level;
         $('s-kills').textContent = s.kills;
@@ -513,32 +599,24 @@
         $('next-ch').style.display = 'none';
         let rec = '';
         if (s.mode === 'infinite') {
-          const prevBest = await personalBest(s.name);
-          const top = (await Data.backend.leaderboard('all').catch(() => []))[0];
-          const entry = { name: s.name, wave: s.wave, level: s.level, kills: s.kills, time: s.time, diff: s.diff, gun: s.gun, id: Date.now() + Math.random(), date: new Date().toISOString() };
-          const rank = await Data.backend.submitScore(entry).catch(() => LocalBackend.submitScore(entry));
-          if (Data.backend !== LocalBackend) await LocalBackend.submitScore({ ...entry });
-          p.stats.bestWave = Math.max(p.stats.bestWave || 0, s.wave);
+          const entry = { wave: s.wave, level: s.level, kills: s.kills, time: s.time };
           if (!top || cmpScore(entry, top) < 0) rec = '👑 NEW WORLD RECORD! 👑';
           else if (s.wave > prevBest) rec = '★ NEW PERSONAL BEST ★';
-          else if (rank && rank <= 10) rec = `Ranked #${rank} on the leaderboard`;
+          else if (result.rank && result.rank <= 10) rec = `Ranked #${result.rank} on the leaderboard`;
+          if (Data.globalBoard && !Data.cloud) rec = (rec ? rec + ' · ' : '') + 'Sign in to post runs globally';
           $('go-lb-wrap').style.display = '';
-          await renderLB($('lb-over'), entry.id);
+          await renderLB($('lb-over'), result.id);
         } else {
           $('go-lb-wrap').style.display = 'none';
           if (win) {
-            const c = p.campaign;
-            if (!c.cleared.includes(s.chapter)) c.cleared.push(s.chapter);
-            c.unlocked = Math.max(c.unlocked, Math.min(s.chapter + 1, STORY.length - 1));
             rec = `Chapter ${s.chapter + 1} cleared!`;
-            await Data.save();
             await showStory(s.chapter, 'outro', 'Continue ▶');
             if (s.chapter + 1 < STORY.length) $('next-ch').style.display = '';
           } else {
             rec = `Chapter ${s.chapter + 1}: ${STORY[s.chapter].title}`;
           }
         }
-        await Data.save();
+        renderCoins();
         $('record').textContent = rec;
         state = 'gameover';
         show('gameover');
@@ -547,11 +625,70 @@
     }
   };
 
-  // ------------------------------------------------------------------ account modal (cloud hooks)
-  $('account-pill').addEventListener('click', () => {
-    if (window.UHCloud) window.UHCloud.openAccount();
-    else { show('auth'); state = 'auth'; $('auth-body').innerHTML = '<p class="sub">Cloud accounts are not configured for this build. Progress is saved in this browser.</p>'; }
-  });
+  // ------------------------------------------------------------------ account
+  function renderAccount() {
+    const signedIn = !!Data.cloud;
+    $('account-name').textContent = signedIn ? Data.profile.name : (window.UHCloud ? 'Sign in' : 'Offline');
+    if (signedIn && Data.profile.name) { $('name').value = Data.profile.name; settings.name = Data.profile.name; }
+  }
+  function openAccount() {
+    state = 'auth';
+    show('auth');
+    const body = $('auth-body');
+    if (!window.UHCloud) {
+      $('auth-title').textContent = 'Account';
+      body.innerHTML = '<p class="sub">Cloud accounts are not configured for this build. Progress is saved in this browser.</p>';
+      return;
+    }
+    if (Data.cloud) {
+      const p = Data.profile, u = Data.cloud.user;
+      $('auth-title').textContent = 'Your account';
+      body.innerHTML = `<p class="sub">Signed in as <b>${esc(p.name)}</b> (${esc(u.email || '')}). Coins, items, campaign progress and saves sync across devices.</p>
+        <div class="kv"><div class="stat"><div class="v">${p.stats.runs}</div><div class="k">Runs</div></div>
+        <div class="stat"><div class="v">${p.stats.kills.toLocaleString()}</div><div class="k">Kills</div></div>
+        <div class="stat"><div class="v">${p.stats.bestWave}</div><div class="k">Best wave</div></div></div>
+        <div class="row"><button class="btn secondary" id="acct-out">Sign out</button></div>`;
+      $('acct-out').onclick = async () => { await Data.cloud.signOut(); await Data.reload(); renderAccount(); toast('Signed out'); toMenu(); };
+      return;
+    }
+    let mode = 'in';
+    const draw = () => {
+      $('auth-title').textContent = mode === 'in' ? 'Sign in' : 'Create account';
+      body.innerHTML = `<p class="sub">Save coins, items, campaign progress and runs to the cloud, and compete on the global leaderboard.</p>
+        <form id="acct-form">
+          ${mode === 'up' ? '<label class="field">Display name</label><input type="text" id="acct-name" maxlength="16" required autocomplete="nickname" />' : ''}
+          <label class="field">Email</label><input type="email" id="acct-email" required autocomplete="email" />
+          <label class="field">Password</label><input type="password" id="acct-pass" required minlength="8" autocomplete="${mode === 'in' ? 'current-password' : 'new-password'}" />
+          <div class="err" id="acct-err"></div>
+          <button class="btn" id="acct-go" type="submit">${mode === 'in' ? 'Sign in' : 'Create account'}</button>
+        </form>
+        <div class="row"><button class="btn secondary" id="acct-google">Continue with Google</button></div>
+        <div class="hint" style="text-align:center;margin-top:12px">${mode === 'in' ? 'New here?' : 'Have an account?'} <a href="#" id="acct-switch" style="color:var(--accent)">${mode === 'in' ? 'Create an account' : 'Sign in'}</a></div>`;
+      if (mode === 'up' && settings.name) $('acct-name').value = settings.name;
+      $('acct-switch').onclick = (e) => { e.preventDefault(); mode = mode === 'in' ? 'up' : 'in'; draw(); };
+      $('acct-google').onclick = async () => { try { await window.UHCloud.google(); } catch (err) { $('acct-err').textContent = err.message; } };
+      $('acct-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = $('acct-go');
+        btn.disabled = true; btn.textContent = 'Please wait…';
+        $('acct-err').textContent = '';
+        try {
+          const email = $('acct-email').value.trim(), pass = $('acct-pass').value;
+          if (mode === 'in') await window.UHCloud.signIn(email, pass);
+          else await window.UHCloud.signUp($('acct-name').value.trim(), email, pass);
+          await Data.reload();
+          renderAccount();
+          toast(`Welcome, ${Data.profile.name}!`);
+          toMenu();
+        } catch (err) {
+          $('acct-err').textContent = err.message;
+          btn.disabled = false; btn.textContent = mode === 'in' ? 'Sign in' : 'Create account';
+        }
+      };
+    };
+    draw();
+  }
+  $('account-pill').addEventListener('click', openAccount);
   $('auth-x').addEventListener('click', () => toMenu());
   window.UHUI = { show, toMenu, toast, renderLB, renderCoins, renderMode, renderTag, pushEquip, state: () => state, setState: (s) => { state = s; } };
 })();

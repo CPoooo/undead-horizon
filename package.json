@@ -1,0 +1,22 @@
+{
+  "dependencies": {
+    "@neon/config": "^1.8.6",
+    "@neon/env": "^1.5.3",
+    "@neon/functions": "^0.11.0",
+    "hono": "^4.13.13",
+    "jose": "^6.2.12",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@neondatabase/auth": "^0.5.0-beta",
+    "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "private": true,
+  "scripts": {
+    "build:cloud": "esbuild ui/cloud-src.js --bundle --format=iife --minify --target=es2020 --outfile=ui/cloud.js",
+    "db:schema": "neon psql production -- -v ON_ERROR_STOP=1 -f server/schema.sql",
+    "deploy:api": "neon deploy --env .env.local"
+  }
+}

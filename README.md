@@ -19,7 +19,8 @@ Your survivor holds the centre of the screen while endless waves of undead close
 - **Shop and Locker**: earn coins by surviving waves, then buy 6 guns, starting perks, outfits, hats and bullet tracers. Build your loadout and see your character in the lobby.
 - **Pause and save**: full run stats when paused. Save a run and continue it later.
 - **Minimap**: a radar showing terrain, zombies, pickups and which directions hordes are coming from.
-- **Leaderboard**: tracks the best wave reached, then level, kills, and time. It is saved in your browser.
+- **Accounts and cloud saves** (Neon): sign in to sync coins, items, campaign progress and saved runs across devices. Guests can play offline.
+- **Live global leaderboard**: each player's best Infinite run, ranked by wave, then level, kills and time.
 - **Mobile support**: a floating virtual joystick, tap to dash, and automatic aiming.
 
 ## Controls
@@ -45,6 +46,17 @@ cargo install trunk
 trunk serve --release   # http://127.0.0.1:8080
 ```
 
+## Backend
+
+Accounts, profiles, saves and the leaderboard run on [Neon](https://neon.com): Managed Auth (Better Auth), Postgres, and a Neon Function API (`server/`). See `CLAUDE.md` for deploy commands.
+
+```bash
+npm install
+npm run db:schema     # apply server/schema.sql
+npm run deploy:api    # deploy neon.ts (auth + api function)
+npm run build:cloud   # rebuild ui/cloud.js after editing ui/cloud-src.js
+```
+
 ## Code layout
 
 | File | Purpose |
@@ -56,4 +68,5 @@ trunk serve --release   # http://127.0.0.1:8080
 | `src/content.rs` | Difficulties, guns, cosmetics, perks, boss variants, campaign chapters |
 | `src/upgrades.rs` | Upgrade and superpower definitions and weighted offer rolls |
 | `src/world.rs` | Infinite deterministic world generation and collision |
+| `server/` | Neon Function API (Hono + Postgres), schema, server-side prices |
 | `index.html`, `ui/` | Lobby, shop, locker, story, pause/save, leaderboard (data layer in `ui/app.js`) |
