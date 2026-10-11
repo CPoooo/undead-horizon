@@ -120,7 +120,7 @@ Not scheduled yet; design notes for when we pick it up.
 
 ### M0 · Foundations (do first; unblocks everything)
 - [x] F1 (M) **Enemy table.** Move `ZKind::base()` stats, colors and behavior flags into `content.rs::ENEMIES` with an `EnemyDef` struct. Add new kinds by data. Done when zombie behavior is unchanged and all tests pass.
-- [ ] F2 (M) **Authored maps.** Add a `Level` trait with `ProceduralWorld` (wraps `world.rs`) and `AuthoredMap`, loaded from `assets/maps/*.json`:
+- [x] F2 (M) **Authored maps.** Add a `Level` trait with `ProceduralWorld` (wraps `world.rs`) and `AuthoredMap`, loaded from `assets/maps/*.json`:
   - contents: walls as rect/polyline, doors with id/cost/linked zones, spawn windows, props, interactables with type and position
   - collision via `resolve`; rendering in `render.rs::draw_obstacle_base` style
   - Done when a test map loads and the player collides with its walls.

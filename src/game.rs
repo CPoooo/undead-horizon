@@ -401,6 +401,8 @@ pub struct Game {
     pub hat: usize,
     pub tracer: usize,
     pub coins: u32,
+    /// authored map id (`start|map=asylum`); empty = the procedural world
+    pub map_id: String,
     pub victory_t: f32,
     pub ult_queued: bool,
     // co-op networking (None in single player)
@@ -503,6 +505,7 @@ impl Game {
             hat: 0,
             tracer: 0,
             coins: 0,
+            map_id: String::new(),
             victory_t: -1.0,
             ult_queued: false,
             net: None,
@@ -573,6 +576,7 @@ impl Game {
                 "skin" => self.skin = content::skin_index(v),
                 "hat" => self.hat = content::hat_index(v),
                 "tracer" => self.tracer = content::tracer_index(v),
+                "map" => self.map_id = v.to_string(),
                 _ => {}
             }
         }
@@ -597,8 +601,15 @@ impl Game {
         self.audio.music_on = true;
         self.audio.set_track(Track::Gameplay);
         self.best_wave = 0;
+        self.map_id.clear();
         self.apply_opts(opts);
         self.player = Game::fresh_player();
+        let map = world::load_builtin(&self.map_id);
+        if let Some(m) = &map {
+            self.player.pos = m.spawn;
+            self.player.prev = m.spawn;
+        }
+        world::use_map(map);
         self.zombies.clear();
         self.bullets.clear();
         self.eshots.clear();
@@ -1115,6 +1126,7 @@ impl Game {
     }
     pub fn to_menu(&mut self) {
         self.phase = Phase::Menu;
+        world::use_map(None);
         self.audio.set_track(Track::Lobby);
         self.audio.music_on = true;
         self.net = None;

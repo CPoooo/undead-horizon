@@ -5,6 +5,7 @@ mod game;
 mod math;
 mod net;
 mod render;
+mod render_map;
 mod upgrades;
 mod world;
 

@@ -113,6 +113,7 @@ enum Draw {
     Player,
     Zombie(usize),
     Ob(Obstacle),
+    Wall(crate::render_map::WallChunk),
 }
 
 impl Game {
@@ -156,7 +157,7 @@ impl Game {
         }
     }
 
-    fn lift(&self, base: V2, h: f32) -> V2 {
+    pub fn lift(&self, base: V2, h: f32) -> V2 {
         base + (base - self.cam) * (h / (CAM_H - h))
     }
 
@@ -193,7 +194,11 @@ impl Game {
         let vmin = self.cam - half - v2(80.0, 80.0);
         let vmax = self.cam + half + v2(80.0, 80.0);
 
-        self.draw_ground(c, vmin, vmax);
+        let map = world::map();
+        match &map {
+            Some(m) => self.draw_map_ground(c, m, vmin, vmax),
+            None => self.draw_ground(c, vmin, vmax),
+        }
         self.draw_decals(c, vmin, vmax);
 
         let mut obs: Vec<Obstacle> = Vec::new();
@@ -228,6 +233,13 @@ impl Game {
         for o in obs.iter() {
             list.push((o.pos.y, Draw::Ob(*o)));
         }
+        if let Some(m) = &map {
+            let mut chunks = Vec::new();
+            self.map_wall_chunks(m, vmin, vmax, &mut chunks);
+            for w in chunks {
+                list.push((w.key, Draw::Wall(w)));
+            }
+        }
         list.sort_unstable_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
 
         self.draw_ghosts(c);
@@ -242,6 +254,11 @@ impl Game {
                 }
                 Draw::Zombie(i) => self.draw_zombie(c, *i, a, t),
                 Draw::Ob(o) => self.draw_obstacle_base(c, o),
+                Draw::Wall(w) => {
+                    if let Some(m) = &map {
+                        self.draw_wall_chunk(c, m, w);
+                    }
+                }
             }
         }
 
@@ -1045,6 +1062,9 @@ impl Game {
     }
 
     fn draw_obstacle_base(&self, c: &Ctx, o: &Obstacle) {
+        if self.draw_map_prop(c, o) {
+            return;
+        }
         match o.kind {
             ObKind::Tree => {
                 // trunk: a tapered quad from ground up to the canopy (perspective-lifted)
@@ -1155,6 +1175,7 @@ impl Game {
                 c.line_to(d(cc.x + 5.0), d(cc.y - 4.0));
                 c.stroke();
             }
+            _ => {}
         }
     }
 
@@ -1945,6 +1966,10 @@ impl Game {
             path_circle(c, m.x, m.y, (o.r * k).max(1.1));
         }
         c.fill();
+
+        if let Some(m) = world::map() {
+            self.draw_map_minimap(c, &m, &to_map, k);
+        }
 
         // visible screen area
         let half = self.screen * (0.5 / self.zoom.max(0.01));

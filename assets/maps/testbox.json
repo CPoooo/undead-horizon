@@ -1,0 +1,19 @@
+{
+  "name": "Test Box",
+  "bounds": [-400, -400, 400, 400],
+  "spawn": [-200, 0],
+  "zones": [
+    { "id": "west", "name": "West Room", "rect": [-400, -400, 0, 400], "floor": "tile", "start": true },
+    { "id": "east", "name": "East Room", "rect": [0, -400, 400, 400], "floor": "wood" }
+  ],
+  "walls": [
+    { "pts": [[0, -400], [0, 100]], "t": 24 },
+    { "pts": [[0, 200], [0, 400]], "t": 24 }
+  ],
+  "doors": [
+    { "id": "east", "a": [0, 100], "b": [0, 200], "cost": 750, "zones": ["east"], "label": "East Room" }
+  ],
+  "windows": [{ "pos": [300, -390], "zone": "east", "dir": [0, 1] }],
+  "props": [{ "kind": "crate", "pos": [-300, 300] }],
+  "interact": [{ "kind": "box", "pos": [-300, -300], "id": "box1", "zone": "west", "cost": 950 }]
+}
