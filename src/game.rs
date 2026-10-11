@@ -384,6 +384,7 @@ pub struct Game {
     pub tracer: usize,
     pub coins: u32,
     pub victory_t: f32,
+    pub ult_queued: bool,
 }
 
 fn xp_for(level: u32) -> f32 {
@@ -476,6 +477,7 @@ impl Game {
             tracer: 0,
             coins: 0,
             victory_t: -1.0,
+            ult_queued: false,
         };
         g.player.pos = v2(0.0, 0.0);
         g
@@ -584,6 +586,7 @@ impl Game {
         self.ult_ready_played = false;
         self.coins = 0;
         self.victory_t = -1.0;
+        self.ult_queued = false;
         self.wave = Wave {
             n: 0,
             total: 0,
@@ -1134,6 +1137,15 @@ impl Game {
             }
             return;
         }
+        // Fire inside the next simulation step, once the spatial grid matches
+        // the zombie list again (between steps the grid holds stale indices).
+        self.ult_queued = true;
+    }
+
+    fn fire_ult(&mut self) {
+        if self.player.ult < 1.0 {
+            return;
+        }
         self.player.ult = 0.0;
         self.ult_uses += 1;
         self.ult_ready_played = false;
@@ -1313,6 +1325,13 @@ impl Game {
         let alive_play = self.phase == Phase::Playing;
 
         self.grid.build(self.player.pos, &self.zombies);
+        if alive_play && self.ult_queued {
+            self.ult_queued = false;
+            self.fire_ult();
+            // the blast may have killed zombies: rebuild so indices stay valid
+            self.zombies.retain(|z| !z.dead);
+            self.grid.build(self.player.pos, &self.zombies);
+        }
         if alive_play {
             self.update_player();
             self.update_weapons();
@@ -2846,5 +2865,57 @@ impl Game {
         });
         self.sfx(Sfx::WaveClear, self.player.pos);
         self.ui_out.push(("wave", format!("{}", self.wave.n)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: the ultimate used to run between simulation steps with a
+    /// spatial grid built before dead zombies were removed, so after bullets
+    /// killed zombies its indices could run past the end of `zombies` (panic,
+    /// seen in the browser as `RuntimeError: unreachable`).
+    #[test]
+    fn ultimate_while_bullets_are_killing_never_uses_stale_grid() {
+        for seed in 1..=20u64 {
+            let mut g = Game::new(seed);
+            g.phase = Phase::Playing;
+            g.wave.intermission = 0.01;
+            g.screen = v2(1280.0, 720.0);
+            g.zoom = 1.2;
+            g.spawn_r = 700.0;
+            g.auto_aim = true;
+            g.ups.0[Up::Multishot.idx()] = 5;
+            g.ups.0[Up::Pierce.idx()] = 5;
+            g.ups.0[Up::FireRate.idx()] = 8;
+            let mut t = 0.0;
+            for frame in 0..2000 {
+                g.player.hp = 1.0e9;
+                g.player.max_hp = 1.0e9;
+                if frame % 9 == 0 {
+                    g.player.ult = 1.0;
+                    g.input.pressed.push("KeyQ".into());
+                }
+                if g.phase == Phase::LevelUp {
+                    g.input.pressed.push("Digit1".into());
+                    g.levelup_t = 1.0;
+                }
+                // a steady horde: some close (bullet kills), some far (survivors)
+                for k in 0..4 {
+                    let a = (frame * 4 + k) as f32 * 0.77;
+                    let r = if k % 2 == 0 { 120.0 } else { 900.0 };
+                    let p = g.player.pos + V2::from_angle(a) * r;
+                    g.spawn_zombie(ZKind::Walker, p);
+                }
+                t += 16.7;
+                g.frame(t);
+            }
+            assert!(
+                g.kills > 500,
+                "seed {seed}: expected lots of kills, got {}",
+                g.kills
+            );
+        }
     }
 }
