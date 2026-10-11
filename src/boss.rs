@@ -29,6 +29,7 @@ pub const ENRAGE_T: f32 = 150.0;
 impl Game {
     pub fn boss_intro(&mut self, var: BossVar) {
         self.boss_intro = Some(BossIntro { var, t: 0.0 });
+        self.haptic(400, 0.8);
         self.banner = None;
         self.zoom_punch = self.zoom_punch.max(0.1);
     }

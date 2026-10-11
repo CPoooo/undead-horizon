@@ -148,7 +148,7 @@ Not scheduled yet; design notes for when we pick it up.
   - Kill-streak stingers.
   - Announcer voice lines ("Multi-kill!", "Max ammo!") via short synthesized vocoder-style sounds or the Web Speech API behind a toggle.
 - [x] J5 (S) **Camera.** Slight aim lookahead (toggle; the player stays roughly centered), zoom punch on ult or boss spawn, slow-mo on boss kill (extend `hitstop`).
-- [ ] J6 (S) **Haptics.** Gamepad `vibrationActuator` and `navigator.vibrate` on hurt, ult and boss, with an intensity setting.
+- [x] J6 (S) **Haptics.** Gamepad `vibrationActuator` and `navigator.vibrate` on hurt, ult and boss, with an intensity setting.
 - [x] J7 (S) **Callouts.** Kill feed (co-op aware), multi-kill and headshot-style callouts, and a combo multiplier that feeds score.
 
 ### M2 · Combat depth (survivor-like best practices)

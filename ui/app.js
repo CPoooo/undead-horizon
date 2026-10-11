@@ -307,6 +307,7 @@
   // kind 'toggle' stores a boolean, 'range' a number; `cmd` sends it to the game.
   const XSETTINGS = [
     { key: 'lookahead', label: 'Camera lookahead (leads your aim)', kind: 'toggle', def: true, cmd: (v) => 'lookahead|' + (v ? 1 : 0) },
+    { key: 'haptics', label: 'Vibration', kind: 'range', min: 0, max: 1, step: 0.1, def: 0.6 },
   ];
   for (const x of XSETTINGS) if (settings[x.key] === undefined) settings[x.key] = x.def;
   function renderXSettings() {
@@ -701,6 +702,16 @@
         break;
       }
       case 'autoaim': settings.autoaim = data === '1'; applySettings(); break;
+      case 'haptic': {
+        const [ms, str] = String(data).split(':').map(Number);
+        const k = settings.haptics ?? 0.6;
+        if (k <= 0) break;
+        try { navigator.vibrate?.(Math.round(ms * k)); } catch {}
+        for (const gp of navigator.getGamepads?.() || []) {
+          gp?.vibrationActuator?.playEffect?.('dual-rumble', { duration: ms, strongMagnitude: str * k, weakMagnitude: Math.min(1, str * k * 1.2) }).catch?.(() => {});
+        }
+        break;
+      }
       case 'netversion': {
         // a teammate runs a different build: leave before the sims desync
         const [mine, theirs] = String(data).split(':').map(Number);

@@ -947,6 +947,13 @@ impl Game {
         }
     }
 
+    /// Rumble the phone / gamepad (ms, 0..1 strength); the UI scales it by the setting.
+    pub fn haptic(&mut self, ms: u32, strength: f32) {
+        if self.ui_out.iter().filter(|e| e.0 == "haptic").count() < 2 {
+            self.ui_out.push(("haptic", format!("{}:{:.2}", ms, strength)));
+        }
+    }
+
     pub fn add_shake(&mut self, amt: f32) {
         self.shake = (self.shake + amt).min(1.0);
     }
@@ -1617,6 +1624,7 @@ impl Game {
         self.hitstop = 0.09;
         self.ult_flash = 1.0;
         self.zoom_punch = 0.12;
+        self.haptic(220, 1.0);
         self.player.iframes = self.player.iframes.max(1.0);
         self.audio.play(Sfx::Ultimate);
     }
@@ -2620,6 +2628,7 @@ impl Game {
         self.hitstop = self.hitstop.max(0.05);
         self.burst(pos, 14, 260.0, "#c0101c", 3.0, 0.6, true, false);
         self.sfx(Sfx::Hurt, pos);
+        self.haptic(70, 0.6);
         self.combo = 0;
         if self.player.hp <= 0.0 && self.net.is_some() {
             self.go_down();

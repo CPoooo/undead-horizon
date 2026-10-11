@@ -105,6 +105,7 @@ impl Game {
         let coins = ((15 + 10 * n as u32) as f32 * self.difficulty().coins) as u32;
         self.coins += coins;
         self.chest = Some(Chest { picks, coins, t: 0.0 });
+        self.haptic(120, 0.5);
         self.levelup_t = 0.0;
         self.phase = Phase::LevelUp;
         self.audio.play(Sfx::UltReady);
