@@ -177,7 +177,7 @@ impl Game {
             ((t * 61.0).sin() + (t * 23.0).sin() * 0.5) * sh,
             ((t * 53.0).cos() + (t * 31.0).cos() * 0.5) * sh,
         );
-        self.cam = self.camera_pos(ppos);
+        self.cam = self.camera_pos(ppos) + self.cam_kick;
 
         let _ = c.set_transform(d(dpr), 0.0, 0.0, d(dpr), 0.0, 0.0);
         c.set_image_smoothing_enabled(true);
@@ -265,6 +265,7 @@ impl Game {
         self.draw_blades(c, ppos, t);
         self.draw_bullets(c, a);
         self.draw_particles(c);
+        self.draw_lights(c);
         self.draw_canopies(c, &obs, ppos);
         if self.phase == Phase::Menu {
             // character showcase: the player model, scaled up on a glowing pedestal
@@ -1337,6 +1338,28 @@ impl Game {
             path_circle(c, p.x, p.y, 6.5);
         }
         c.fill();
+    }
+
+    /// Additive glow pools for transient lights (muzzle flashes, blasts).
+    fn draw_lights(&self, c: &Ctx) {
+        if self.lights.is_empty() {
+            return;
+        }
+        let _ = c.set_global_composite_operation("lighter");
+        for l in self.lights.iter() {
+            let k = (l.life / l.max).clamp(0.0, 1.0);
+            if let Ok(g) =
+                c.create_radial_gradient(d(l.pos.x), d(l.pos.y), 0.0, d(l.pos.x), d(l.pos.y), d(l.r))
+            {
+                let _ = g.add_color_stop(0.0, l.color);
+                let _ = g.add_color_stop(1.0, "rgba(0,0,0,0)");
+                c.set_global_alpha(d(0.35 * k));
+                c.set_fill_style_canvas_gradient(&g);
+                c.fill_rect(d(l.pos.x - l.r), d(l.pos.y - l.r), d(l.r * 2.0), d(l.r * 2.0));
+            }
+        }
+        c.set_global_alpha(1.0);
+        let _ = c.set_global_composite_operation("source-over");
     }
 
     fn draw_particles(&self, c: &Ctx) {

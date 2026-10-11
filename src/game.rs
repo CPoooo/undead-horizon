@@ -220,6 +220,15 @@ pub struct Bolt {
     pub life: f32,
 }
 
+/// A short-lived point light (muzzle flashes, explosions, novas).
+pub struct Light {
+    pub pos: V2,
+    pub r: f32,
+    pub life: f32,
+    pub max: f32,
+    pub color: &'static str,
+}
+
 pub struct Ghost {
     pub pos: V2,
     pub life: f32,
@@ -349,6 +358,7 @@ pub struct Game {
     pub rings: Vec<Ring>,
     pub bolts: Vec<Bolt>,
     pub ghosts: Vec<Ghost>,
+    pub lights: Vec<Light>,
     pub banner: Option<Banner>,
     pub toast: Option<(String, f32)>,
     pub wave: Wave,
@@ -375,6 +385,8 @@ pub struct Game {
     pub menu_t: f32,
     // camera / screen
     pub shake: f32,
+    /// recoil camera offset, decays back to zero
+    pub cam_kick: V2,
     pub screen: V2,
     pub dpr: f32,
     pub zoom: f32,
@@ -451,6 +463,7 @@ impl Game {
             rings: Vec::new(),
             bolts: Vec::new(),
             ghosts: Vec::new(),
+            lights: Vec::new(),
             banner: None,
             toast: None,
             wave: Wave {
@@ -483,6 +496,7 @@ impl Game {
             dying_t: 0.0,
             menu_t: 0.0,
             shake: 0.0,
+            cam_kick: V2::ZERO,
             screen: v2(1280.0, 720.0),
             dpr: 1.0,
             zoom: 1.0,
@@ -854,6 +868,18 @@ impl Game {
         });
     }
 
+    pub fn light(&mut self, pos: V2, r: f32, life: f32, color: &'static str) {
+        if self.lights.len() < 64 {
+            self.lights.push(Light {
+                pos,
+                r,
+                life,
+                max: life,
+                color,
+            });
+        }
+    }
+
     pub(crate) fn nearest_zombie(&self, p: V2, max_d: f32, exclude: u32) -> Option<usize> {
         let mut best = None;
         let mut bd = max_d * max_d;
@@ -977,6 +1003,11 @@ impl Game {
             }
         }
         self.ult_flash = (self.ult_flash - real_dt * 2.5).max(0.0);
+        self.cam_kick = self.cam_kick * (1.0 - damp(16.0, real_dt));
+        for l in self.lights.iter_mut() {
+            l.life -= real_dt;
+        }
+        self.lights.retain(|l| l.life > 0.0);
 
         // music intensity follows the action
         let alive = self.alive() as f32;
@@ -1761,6 +1792,7 @@ impl Game {
                     }
                 }
                 self.ring(ppos, r, 0.5, "#a8f4ff", 10.0);
+                self.light(ppos, r * 1.6, 0.4, "#a8f4ff");
                 self.burst(ppos, 30, r * 2.2, "#d8fbff", 3.0, 0.45, false, true);
                 self.sfx(Sfx::Nova, ppos);
             }
@@ -1883,6 +1915,27 @@ impl Game {
         self.player.recoil = 1.0;
         self.player.shots = self.player.shots.wrapping_add(1);
         let muzzle = ppos + V2::from_angle(aim) * (gun.len + 4.0);
+        self.cam_kick -= V2::from_angle(aim) * gun.kick;
+        self.light(muzzle, gun.flash, 0.06, "#ffd890");
+        if !gun.casing.is_empty() && self.particles.len() < 1800 {
+            // brass flies out the right side of the gun and bounces
+            let side = V2::from_angle(aim).perp();
+            let l = self.rng.range(0.7, 1.1);
+            self.particles.push(Particle {
+                pos: ppos + V2::from_angle(aim) * (gun.len * 0.4),
+                vel: side * self.rng.range(90.0, 170.0) - V2::from_angle(aim) * 30.0
+                    + self.player.vel * 0.5,
+                z: 14.0,
+                vz: self.rng.range(120.0, 220.0),
+                life: l,
+                max: l,
+                size: if gun.pellets > 1 { 2.6 } else { 1.8 },
+                color: gun.casing,
+                grav: true,
+                glow: false,
+                drag: 1.2,
+            });
+        }
         let flash_n = if gun.heavy { 7 } else { 3 };
         for _ in 0..flash_n {
             if self.particles.len() < 1800 {
@@ -2140,6 +2193,7 @@ impl Game {
             });
         }
         self.ring(pos, radius, 0.35, "#ffb24a", 8.0);
+        self.light(pos, radius * 2.4, 0.35, "#ffb060");
         self.burst(pos, 26, 520.0, "#ffb24a", 4.0, 0.45, false, true);
         self.burst(pos, 14, 300.0, "#5a5a5a", 6.0, 0.9, true, false);
         self.sfx(Sfx::Explosion, pos);
@@ -2620,6 +2674,7 @@ impl Game {
             }
         }
         self.ring(pos, r, 0.22, "#ff9a3a", 4.0);
+        self.light(pos, r * 2.2, 0.18, "#ffa050");
         self.burst(pos, 6, 260.0, "#ffa040", 3.0, 0.25, false, true);
         self.sfx(Sfx::Explosion, pos);
         self.add_shake(0.04);
@@ -3012,5 +3067,17 @@ mod tests {
         assert_eq!(h.player.level, 4);
         assert_eq!(h.kills, 77);
         assert_eq!(h.diff, 2);
+    }
+
+    #[test]
+    fn firing_kicks_camera_and_ejects_brass() {
+        let mut g = Game::new(9);
+        g.start("gun=shotgun");
+        g.player.aim = 0.0;
+        g.particles.clear();
+        g.fire();
+        assert!(g.cam_kick.x < 0.0, "camera recoils against the aim");
+        assert_eq!(g.lights.len(), 1);
+        assert!(g.particles.iter().any(|p| p.color == GUNS[g.gun].casing));
     }
 }

@@ -134,7 +134,7 @@ Not scheduled yet; design notes for when we pick it up.
 - [x] F6 (M) **Action map.** All input goes through `Action` enums (`Move`, `Aim`, `Dash`, `Ult`, `Interact`, `Ping`, `Pause`, `Ability`) bound from a settings table. Key handlers in `main.rs` map codes to actions. Prerequisite for A1 and A2.
 
 ### M1 · Modern feel (quick wins, high impact)
-- [ ] J1 (S) **Weapon feel.** Per-gun recoil camera kick, shell-casing particles, muzzle light flash.
+- [x] J1 (S) **Weapon feel.** Per-gun recoil camera kick, shell-casing particles, muzzle light flash.
   - These go in the `GUNS` table (`content.rs`) and `fire()`.
 - [ ] J2 (M) **Hit reactions.**
   - Squash and stretch on hit, plus directional knockback tilt.
