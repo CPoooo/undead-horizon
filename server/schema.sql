@@ -167,3 +167,6 @@ alter table runs add column if not exists mutated boolean not null default false
 alter table runs add column if not exists pure boolean not null default false;
 create index if not exists runs_daily_idx on runs (daily, created_at) where daily <> '';
 alter table profiles add column if not exists last_bonus timestamptz;
+
+-- Settings sync across devices (A6).
+alter table profiles add column if not exists settings jsonb not null default '{}';

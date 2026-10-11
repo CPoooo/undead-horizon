@@ -190,10 +190,26 @@ async function profileJson(userId: string) {
     friendCode: p.friend_code,
     saves,
     progress: Prog.normalize(p.progress),
+    settings: p.settings ?? {},
   };
 }
 
 app.get("/me", async (c) => c.json(await profileJson(c.get("userId"))));
+
+// settings follow the account across devices (small, flat JSON)
+app.put("/me/settings", async (c) => {
+  const uid = c.get("userId");
+  const body = await c.req.json().catch(() => ({}));
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(body ?? {}).slice(0, 80)) {
+    if (!/^[a-zA-Z]{1,24}$/.test(k)) continue;
+    if (typeof v === "number" || typeof v === "boolean") clean[k] = v;
+    else if (typeof v === "string") clean[k] = v.slice(0, 400);
+    else if (Array.isArray(v)) clean[k] = v.slice(0, 20).map((x) => String(x).slice(0, 40));
+  }
+  await pool.query("update profiles set settings = $2 where user_id = $1", [uid, clean]);
+  return c.json({ ok: true });
+});
 
 // ---------------------------------------------------------------- TURN relay
 // Players whose networks block direct WebRTC (cellular CGNAT, Wi-Fi client

@@ -231,6 +231,13 @@
       this.profile = localProfile();
     },
     applyCloud(p) {
+      // pull settings saved from another device (first load of this session only)
+      if (p.settings && !this.settingsPulled) {
+        this.settingsPulled = true;
+        for (const [k, v] of Object.entries(p.settings)) if (!LOCAL_ONLY.includes(k)) settings[k] = v;
+        store.set(SET_KEY, settings);
+        setTimeout(() => applySettings(), 0);
+      }
       this.profile = normalizeProfile(p);
       this.profile.name = p.name;
     },
@@ -370,7 +377,18 @@
 
   // ------------------------------------------------------------------ settings
   const settings = Object.assign({ vol: 0.7, music: 0.5, autoaim: false, name: '', mode: 'infinite', diff: 'survivor', chapter: 0 }, store.get(SET_KEY, {}));
-  const saveSettings = () => store.set(SET_KEY, settings);
+  // per-device keys stay local; everything else syncs to the account
+  const LOCAL_ONLY = ['name', 'lastSeen', 'iosHint', 'char'];
+  let syncT = 0;
+  const saveSettings = () => {
+    store.set(SET_KEY, settings);
+    if (!window.UHData?.cloud) return;
+    clearTimeout(syncT);
+    syncT = setTimeout(() => {
+      const out = Object.fromEntries(Object.entries(settings).filter(([k, v]) => !LOCAL_ONLY.includes(k) && (typeof v !== 'object' || Array.isArray(v))));
+      window.UHData.cloud.api('/me/settings', { method: 'PUT', body: out }).catch(() => {});
+    }, 1500);
+  };
   // Extra settings, rendered into every `.xsettings` box from this table.
   // kind 'toggle' stores a boolean, 'range' a number; `cmd` sends it to the game.
   const XSETTINGS = [
