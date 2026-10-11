@@ -330,6 +330,20 @@ body.touch.playing #pause-btn { display: block; }
   #invite-pop.show { transform: translateY(0); }
 }
 #invite-pop:not(.show) { visibility: hidden; }
+button.pm.invite-slot { width: 100%; font: inherit; font-size: 13px; font-weight: 700; color: var(--accent); cursor: pointer; text-align: left; }
+button.pm.invite-slot:hover { border-color: var(--accent); background: rgba(255,255,255,.04); }
+#invite-picker { position: fixed; inset: 0; z-index: 45; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(5,6,12,.72); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); opacity: 0; pointer-events: none; transition: opacity .2s; }
+#invite-picker.show { opacity: 1; pointer-events: auto; }
+#invite-picker .ip-card { width: min(420px, 100%); max-height: min(560px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 10px;
+  background: linear-gradient(var(--panel), var(--panel)), var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+#invite-picker .ip-head { display: flex; align-items: center; gap: 10px; font-size: 16px; }
+#invite-picker .ip-head b { flex: 1; }
+#invite-picker .x { background: none; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 4px; }
+#invite-picker .ip-list { overflow-y: auto; min-height: 60px; }
+#invite-picker .ip-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+#invite-picker .ip-foot .btn { width: auto; }
+#invite-picker .frow .btn { width: auto; }
 
 /* ---------------- co-op loading screen ---------------- */
 #coop-load {

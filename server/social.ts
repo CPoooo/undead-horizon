@@ -108,7 +108,7 @@ async function deliver(uid: string, p: any) {
     case "start":
       return sendUser(uid, { t: "party.start", party: await partyState(uid) });
     case "invite":
-      sendUser(uid, { t: "invite", partyId: p.partyId, fromName: p.fromName });
+      sendUser(uid, { t: "invite", partyId: p.partyId, fromName: p.fromName, inGame: !!p.inGame });
       return sendUser(uid, { t: "social", ...(await socialState(uid)) });
     case "signal":
       return sendUser(uid, { t: "signal", from: p.from, data: p.data });
@@ -368,7 +368,7 @@ async function handle(uid: string, msg: any): Promise<void> {
     case "party.invite": {
       const pa = await partyOf(uid);
       if (!pa) throw new Error("Create a party first.");
-      if (pa.status !== "open") throw new Error("The game has already started.");
+      if (!["open", "in_game"].includes(pa.status)) throw new Error("That party is no longer open.");
       const id = String(msg.id ?? "");
       const fr = await pool.query(
         "select 1 from friends where user_id = $1 and friend_id = $2 and status = 'accepted'",
@@ -382,7 +382,7 @@ async function handle(uid: string, msg: any): Promise<void> {
         [pa.id, uid, id],
       );
       const me = await ensureProfile(uid);
-      await notify([id], { k: "invite", partyId: String(pa.id), fromName: me.display_name });
+      await notify([id], { k: "invite", partyId: String(pa.id), fromName: me.display_name, inGame: pa.status === "in_game" });
       return;
     }
     case "party.join": {

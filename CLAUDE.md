@@ -127,6 +127,7 @@ Legend:
 | Co-op | TURN relay | ✅ (Metered free plan caps live credentials at 10; see §2) |
 | Co-op | 4-player parties, co-op Outbreak/Siege/Campaign mode picker | 🟡 (game supports 4 and all modes; server still caps parties at 3 and accepts only the old mode set) |
 | Co-op | Rejoin a running match after a drop | ✅ |
+| Co-op | Invite friends from anywhere: lobby picker + open party slots, friends list (auto-creates a party), pause menu in game | ✅ (inviting from inside a running co-op match 🟡) |
 | Co-op | A new friend joining a match in progress | 🟡 (server must allow `party.join` into `in_game` parties) |
 | Co-op | Public parties, squad browser, Quick Play | 🟡 |
 | Home Base | Walkable hub, vendor stalls, firing range + DPS meter, Hall of Survivors, mission terminal | ✅ |
@@ -157,6 +158,7 @@ Legend:
    - event candy in `/runs`
    - the leaderboard test-account filter
    - Outbreak + Siege save slots (`saves_slot_check` widened; `PUT /save` accepts the four types)
+   - `party.invite` into `in_game` parties (inviting from inside a co-op match; the `invite` notice carries `inGame`)
 2. **AI vendors**: add `ANTHROPIC_API_KEY` to `.env.local` before deploying (`neon.ts` already passes it). Without it, vendors use canned lines.
 3. **TURN**: Metered's free plan allows 10 live credentials (4h expiry), and the server mints one per isolate when `METERED_API_KEY` is unset. If friends can't connect and `/turn` logs "Maximum credential limit reached", either set `METERED_API_KEY` or make `/turn` reuse an existing credential (`GET https://<app>.metered.live/api/v2/turn/credentials?secretKey=`).
 4. **Real iPhone pass** (Safari + home-screen PWA):
@@ -187,7 +189,7 @@ npm run build:cloud                                # after editing ui/cloud-src.
 
 **End-to-end (Playwright, real Chromium):**
 - First serve `dist/` on :8765 with `cd dist && python3 -m http.server 8765`, then run `npm run e2e`.
-- Suites, in order: `turn`, `coop`, `chat-voice`, `outbreak`, `hub`, `career`, `photo`, `nemesis`, `event`, `mobile-hud`, `saves`. Shared helpers are in `tests/e2e/lib.mjs`. Screenshots go to `tests/e2e/out/`.
+- Suites, in order: `turn`, `coop`, `chat-voice`, `outbreak`, `hub`, `career`, `photo`, `nemesis`, `event`, `mobile-hud`, `saves`, `invite`. Shared helpers are in `tests/e2e/lib.mjs`. Screenshots go to `tests/e2e/out/`.
 - `coop`, `chat-voice` and `turn` sign up fresh accounts (`uh-test-<name>-<ts>@example.com`) against the live Neon Auth and social server.
 - Suites fail only on page errors. Failed fetches (e.g. routes not deployed yet) are logged but tolerated.
 - WSL without system libnss3: extract the `libnss3`/`libnspr4` debs into `~/.cache/uh-libs` (or set `UH_LIBS`). `UH_CHROME` overrides the Chromium path.
@@ -389,6 +391,7 @@ npm run build:cloud                                # after editing ui/cloud-src.
 - [x] 10. **CoD/Fortnite-style lobby**:
   - Friends (codes, requests, presence).
   - Parties: up to 4 (server deploy pending; 3 live), ready checks, host-set difficulty and mode, and a shareable invite link via the native share sheet on phones.
+  - Invites (`ui/coop.js` `inviteFriend`/`openPicker`): the "＋ Invite friends" button and open party slots open a friend picker; the friends list invites any online friend; the pause menu has "👥 Invite friends" (the note says what happens next: drop in after the wave in co-op, wait in the party after a solo run). Without a party one is created and queued invites go out when it exists. Accepting an invite into a running match auto-sends `joinreq`. E2E: `invite.mjs`.
   - Party members stand in your lobby.
 - [x] 11. **Save slots: one per game type.** Infinite, Campaign, Outbreak and Siege each have their own slot, and they coexist.
   - **Overwriting:** saving a type (Save, or Save & quit, in the pause menu) replaces that type's save only. Starting a new run of a type discards that type's save. Tooltips on Play and Save say which save would be overwritten.

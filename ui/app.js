@@ -1354,6 +1354,7 @@
       case 'pause':
         state = 'paused';
         $('photo-btn').style.display = window.UHCoop?.inGame ? 'none' : ''; // co-op never really pauses
+        $('invite-btn').style.display = window.UHCoop?.canInvite?.() ? '' : 'none';
         try { renderPause(JSON.parse(data)); } catch (e) { console.warn(e); }
         // every solo game type can be saved (one slot each); the Home Base and co-op can't
         for (const id of ['save', 'save-quit']) $(id).disabled = !SAVE_SLOTS.includes(runCtx.mode) || !!window.UHCoop?.inGame;
@@ -1661,6 +1662,13 @@
     draw();
   }
   on('account-pill', 'click', openAccount);
+  // invite from inside a run: a co-op match takes them in after the wave; otherwise they wait in the party
+  on('invite-btn', 'click', () => {
+    const note = window.UHCoop?.inGame ? "They'll drop into this match once the current wave is cleared."
+      : runCtx?.mode === 'hub' ? "They'll join your party and walk the Home Base with you."
+      : "They'll join your party. Finish or quit this run, then start co-op together from the lobby.";
+    window.UHCoop?.openInvites(note);
+  });
   on('auth-x', 'click', () => toMenu());
   // ---------------------------------------------------------------- phone lobby nav
   // On narrow screens the lobby shows one panel at a time (CSS), picked here.

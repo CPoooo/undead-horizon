@@ -30,6 +30,10 @@
     inGame: false,
     mySlot: 0,
     roster: null,
+    // invites: friends we asked to join (id -> time), ones waiting for our party to exist
+    invited: new Map(),
+    pendingInvites: new Set(),
+    picker: null, // open invite picker: { note }
   };
 
   // after a host migration (M3) the host is whoever took over, not slot 0;
@@ -134,7 +138,8 @@
           const l = look();
           if (mine && (mine.look?.skin !== l.skin || mine.look?.hat !== l.hat || mine.look?.gun !== l.gun)) wsSend({ t: 'party.look', look: l });
         }
-        if (!was && S.party) { if (!S.qpJoin) UI().toast('You\'re in a party. Invite friends or share the link!'); iceServers(); S.publicList = null; }
+        if (!was && S.party) { if (!S.qpJoin && !S.pendingInvites.size) UI().toast('You\'re in a party. Invite friends or share the link!'); iceServers(); S.publicList = null; }
+        if (S.party) { for (const id of S.pendingInvites) wsSend({ t: 'party.invite', id }); S.pendingInvites.clear(); }
         // joined a public squad mid-match (Quick Play / browser): ask to drop in
         if (S.qpJoin && p && p.hostId !== S.me?.id && p.members.length > 1) {
           S.qpJoin = false;
@@ -150,7 +155,7 @@
         if (S.party?.status === 'in_game') beginNetGame().catch((e) => { console.error('[coop] start', e); abortLoading(); UI().toast('Couldn\'t start the match.'); });
         break;
       case 'invite':
-        showInvite(m.partyId, m.fromName);
+        showInvite(m.partyId, m.fromName, !!m.inGame);
         break;
       case 'parties':
         S.publicList = Array.isArray(m.list) ? m.list : [];
@@ -187,6 +192,7 @@
         UI().toast(m.msg);
         break;
       case 'error':
+        S.pendingInvites.clear();
         UI().toast(m.msg);
         break;
     }
@@ -198,6 +204,7 @@
   function render() {
     renderParty();
     renderFriends();
+    renderPicker();
     renderLobbyMates();
     emit('render');
   }
@@ -266,12 +273,14 @@
     if (!S.party) {
       const list = S.publicList;
       box.innerHTML = `<div class="party empty-party"><b>👥 Co-op</b><span>Play with up to 3 friends, or squad up with anyone.</span>
-        <div class="row"><button class="btn small blue" id="party-create">Create party</button>
+        <button class="btn small blue" id="party-invite">＋ Invite friends</button>
+        <div class="row"><button class="btn small secondary" id="party-create">Create party</button>
         <button class="btn small gold" id="quickplay" title="Join the fullest public squad with room, or host one">⚡ Quick Play</button></div>
         <button class="btn small secondary" id="party-browse">🌐 Browse public squads</button>
         ${list ? `<div class="pub-list">${list.length ? list.map((x) => `<div class="pub"><span><b>${esc(x.host)}</b> · ${MODE_LABEL[x.mode] || esc(x.mode)}${x.mode === 'campaign' ? ` ch.${x.chapter + 1}` : ''} · ${esc(window.UHDiffName?.(x.diff) || x.diff)}${x.status === 'in_game' ? ' · ⚔ in match' : ''}</span><span class="n">${x.n}/4</span><button class="btn small" data-pjoin="${esc(x.id)}">Join</button></div>`).join('') : '<div class="hint">No public squads right now. Quick Play hosts one for you.</div>'}</div>` : ''}
       </div>`;
       $('party-create').onclick = () => wsSend({ t: 'party.create', look: look() });
+      $('party-invite').onclick = () => { send('sfx|click'); openPicker(); };
       $('quickplay').onclick = () => { send('sfx|click'); S.qpJoin = true; wsSend({ t: 'quickplay', look: look() }); UI().toast('Finding a squad…'); };
       $('party-browse').onclick = () => { send('sfx|click'); wsSend({ t: 'party.list' }); };
       box.querySelectorAll('[data-pjoin]').forEach((b) => (b.onclick = () => { S.qpJoin = true; wsSend({ t: 'party.join', partyId: b.dataset.pjoin, look: look() }); }));
@@ -283,7 +292,7 @@
     const allReady = p.members.every((m) => m.ready);
     const slots = [0, 1, 2, 3].map((i) => {
       const m = p.members[i];
-      if (!m) return `<div class="pm empty">Open slot<span>invite a friend</span></div>`;
+      if (!m) return `<button class="pm empty invite-slot" data-addinvite>＋ Invite a friend<span>open slot</span></button>`;
       return `<div class="pm ${m.online ? '' : 'offline'}">
         <span class="dot ${m.online ? 'on' : ''}"></span>
         <b ${m.id !== S.me?.id ? `data-pmenu="${esc(m.id)}" data-pname="${esc(m.name)}" class="clickable"` : ''} data-voice-uid="${esc(m.id)}">${m.voice ? '<span class="vic" title="In voice">🎙</span>' : ''}${esc(m.name)}${m.id === p.hostId ? ' 👑' : ''}${m.id === S.me?.id ? ' (you)' : ''}</b>
@@ -310,6 +319,7 @@
         : `<button class="btn ${me?.ready ? 'secondary' : ''}" id="party-ready" style="margin-top:10px">${me?.ready ? 'Not ready' : '✔ Ready up'}</button>`}
     </div>`;
     $('party-link').onclick = () => shareInvite();
+    box.querySelectorAll('[data-addinvite]').forEach((b) => (b.onclick = () => { send('sfx|click'); openPicker(); }));
     $('party-leave').onclick = () => wsSend({ t: 'party.leave' });
     box.querySelectorAll('[data-pmode]').forEach((b) => (b.onclick = () => { if (amHost) wsSend({ t: 'party.mode', mode: b.dataset.pmode, chapter: p.chapter || 0 }); }));
     if ($('party-public')) $('party-public').onchange = (e) => wsSend({ t: 'party.public', on: e.target.checked });
@@ -332,7 +342,6 @@
     if (!signedIn()) { el.innerHTML = '<div class="empty">Sign in to add friends and play co-op.<br><br><button class="btn small blue" data-signin>Sign in</button></div>'; return; }
     if (S.status !== 'online' || !S.me) { el.innerHTML = '<div class="empty">⏳ Connecting to the lobby server…</div>'; return; }
     const s = S.social;
-    const inParty = !!S.party;
     const partyIds = new Set((S.party?.members || []).map((m) => m.id));
     el.innerHTML = `
       <div class="fcode">Your friend code <b id="my-code">${esc(S.me?.code || '…')}</b><button class="btn small secondary" id="copy-code">Copy</button></div>
@@ -345,7 +354,7 @@
       <h3>Friends (${s.friends.length})</h3>
       ${s.friends.length ? s.friends.map((f) => `<div class="frow ${f.online ? '' : 'offline'}">
         <span><span class="dot ${f.online ? 'on' : ''}"></span>${esc(f.name)} ${partyIds.has(f.id) ? '<span class="tag">in your party</span>' : f.partyId ? '<span class="tag">in a party</span>' : ''}</span>
-        <span>${inParty && !partyIds.has(f.id) && f.online ? `<button class="btn small blue" data-invite="${esc(f.id)}">Invite</button>` : ''}
+        <span>${inviteBtn(f)}
         <button class="btn small secondary" data-remove="${esc(f.id)}" title="Remove friend">✕</button></span></div>`).join('')
         : '<div class="empty" style="padding:8px">No friends yet. Share your code, or create a party and send the invite link.</div>'}
       ${s.blocked?.length ? `<h3>Blocked</h3>${s.blocked.map((f) => `<div class="frow offline"><span>${esc(f.name)}</span>
@@ -355,19 +364,103 @@
     $('fadd').onsubmit = (e) => { e.preventDefault(); const c = $('fadd-code').value.trim(); if (c) { wsSend({ t: 'friends.add', code: c }); $('fadd-code').value = ''; } };
     el.querySelectorAll('[data-accept]').forEach((b) => (b.onclick = () => wsSend({ t: 'friends.accept', id: b.dataset.accept })));
     el.querySelectorAll('[data-remove]').forEach((b) => (b.onclick = () => wsSend({ t: 'friends.remove', id: b.dataset.remove })));
-    el.querySelectorAll('[data-invite]').forEach((b) => (b.onclick = () => { wsSend({ t: 'party.invite', id: b.dataset.invite }); UI().toast('Invite sent'); }));
-    el.querySelectorAll('[data-join]').forEach((b) => (b.onclick = () => wsSend({ t: 'party.join', partyId: b.dataset.join, look: look() })));
+    bindInvites(el);
+    el.querySelectorAll('[data-join]').forEach((b) => (b.onclick = () => acceptInvite(b.dataset.join)));
     el.querySelectorAll('[data-unblock]').forEach((b) => (b.onclick = () => wsSend({ t: 'unblock', id: b.dataset.unblock })));
     el.querySelectorAll('[data-decline]').forEach((b) => (b.onclick = () => wsSend({ t: 'party.decline', partyId: b.dataset.decline })));
   }
 
-  function showInvite(partyId, fromName) {
+  // ------------------------------------------------------------------ invites
+  // Friends can be invited from the friends list, the lobby's party slots and
+  // the in-game pause menu. With no party yet one is created first, and the
+  // invites go out as soon as it exists.
+  const partyFull = () => (S.party?.members.length || 0) >= 4;
+  const justInvited = (id) => Date.now() - (S.invited.get(id) || 0) < 30000;
+
+  function inviteFriend(id) {
+    if (!signedIn() || S.status !== 'online' || !S.me) return UI().toast('Not connected to the lobby server yet');
+    if (partyFull()) return UI().toast('Party is full (max 4).');
+    const f = S.social.friends.find((x) => x.id === id);
+    S.invited.set(id, Date.now());
+    if (S.party) wsSend({ t: 'party.invite', id });
+    else {
+      if (!S.pendingInvites.size) wsSend({ t: 'party.create', look: look() });
+      S.pendingInvites.add(id);
+    }
+    send('sfx|click');
+    UI().toast(`Invite sent to ${f?.name || 'your friend'} 🧟`);
+    render();
+    setTimeout(render, 30500); // the "Invited" mark expires
+  }
+
+  function inviteBtn(f) {
+    if (!f.online || (S.party?.members || []).some((m) => m.id === f.id)) return '';
+    if (justInvited(f.id)) return '<button class="btn small secondary" disabled>✓ Invited</button>';
+    return `<button class="btn small blue" data-invite="${esc(f.id)}" ${partyFull() ? 'disabled title="Party is full"' : ''}>Invite</button>`;
+  }
+  const bindInvites = (el) => el.querySelectorAll('[data-invite]').forEach((b) => (b.onclick = () => inviteFriend(b.dataset.invite)));
+
+  // a picker over whatever is on screen (lobby or pause menu)
+  function openPicker(note = '') {
+    if (!signedIn()) return UI().toast('Sign in to invite friends');
+    let el = $('invite-picker');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'invite-picker';
+      el.onclick = (e) => { if (e.target === el) closePicker(); };
+      document.body.appendChild(el);
+    }
+    S.picker = { note };
+    renderPicker();
+    el.classList.add('show');
+  }
+  function closePicker() {
+    S.picker = null;
+    $('invite-picker')?.classList.remove('show');
+  }
+  // Esc closes the picker before the game sees it
+  window.addEventListener('keydown', (e) => {
+    if (S.picker && e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); closePicker(); }
+  }, true);
+
+  function renderPicker() {
+    const el = $('invite-picker');
+    if (!el || !S.picker) return;
+    const online = S.status === 'online' && S.me;
+    const friends = [...S.social.friends].sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name));
+    const inParty = new Set((S.party?.members || []).map((m) => m.id));
+    const n = S.party?.members.length || 1;
+    el.innerHTML = `<div class="ip-card" role="dialog" aria-label="Invite friends">
+      <div class="ip-head"><b>👥 Invite friends</b><span class="hint">Party ${n}/4</span><button class="x" id="ip-x" title="Close">×</button></div>
+      ${S.picker.note ? `<div class="hint ip-note">${esc(S.picker.note)}</div>` : ''}
+      <div class="ip-list">${!online ? '<div class="empty">⏳ Connecting to the lobby server…</div>'
+        : friends.length ? friends.map((f) => `<div class="frow ${f.online ? '' : 'offline'}">
+            <span><span class="dot ${f.online ? 'on' : ''}"></span>${esc(f.name)} ${inParty.has(f.id) ? '<span class="tag">in your party</span>' : !f.online ? '<span class="tag">offline</span>' : f.partyId ? '<span class="tag">in a party</span>' : ''}</span>
+            <span>${inviteBtn(f)}</span></div>`).join('')
+        : '<div class="empty" style="padding:8px">No friends yet. Share your friend code or an invite link.</div>'}</div>
+      <div class="ip-foot">
+        <span class="hint">Your code <b>${esc(S.me?.code || '…')}</b></span>
+        ${S.party ? `<button class="btn small secondary" id="ip-link">${canShare() ? '📤 Share invite link' : '🔗 Copy invite link'}</button>` : ''}
+      </div>
+    </div>`;
+    $('ip-x').onclick = closePicker;
+    if ($('ip-link')) $('ip-link').onclick = () => shareInvite();
+    bindInvites(el);
+  }
+
+  // accepting an invite into a running match drops us in once we're in the party
+  function acceptInvite(partyId) {
+    S.qpJoin = true;
+    wsSend({ t: 'party.join', partyId, look: look() });
+  }
+
+  function showInvite(partyId, fromName, inGame) {
     const pop = $('invite-pop');
     if (!pop) return;
-    pop.innerHTML = `<b>🎉 ${esc(fromName)}</b> invited you to their party
+    pop.innerHTML = `<b>🎉 ${esc(fromName)}</b> invited you to their ${inGame ? 'match' : 'party'}
       <span><button class="btn small" id="inv-join">Join</button> <button class="btn small secondary" id="inv-no">Later</button></span>`;
     pop.classList.add('show');
-    $('inv-join').onclick = () => { wsSend({ t: 'party.join', partyId, look: look() }); pop.classList.remove('show'); };
+    $('inv-join').onclick = () => { acceptInvite(partyId); pop.classList.remove('show'); };
     $('inv-no').onclick = () => pop.classList.remove('show');
     setTimeout(() => pop.classList.remove('show'), 20000);
   }
@@ -962,6 +1055,9 @@
     /** for tests/debugging */
     get debug() { return { hostSlot: S.hostSlot || 0, migrations: S.migrations || 0, late: !!S.late, restarts: S.restarts || 0, restart: (slot) => { const p = S.peers.get(slot); if (p) { p.troubleAt = Date.now(); restartIce(p); } }, slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
     inviteLink,
+    /** open the invite-friends picker (lobby, pause menu); `note` explains what happens next */
+    openInvites: (note) => openPicker(note),
+    canInvite: () => signedIn() && S.status === 'online' && !!S.me,
     /** Home Base: share our position with the party, and read theirs */
     hubPos(x, y, aim) { S.hubAt = { x, y, aim }; if (S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },
     get hubInstance() { return S.hubInstance || 0; },
