@@ -405,6 +405,7 @@
     { key: 'toggleuse', label: 'Tap interact to toggle (instead of hold)', kind: 'toggle', def: false },
     { key: 'uiscale', label: 'Menu text size', kind: 'range', min: 0.8, max: 1.4, step: 0.05, def: 1 },
     { key: 'contrast', label: 'High-contrast text', kind: 'toggle', def: false },
+    { key: 'lang', label: 'Language', kind: 'select', def: (navigator.language || 'en').slice(0, 2) === 'es' ? 'es' : 'en', options: [['en', 'English'], ['es', 'Español']] },
   ];
   for (const x of XSETTINGS) if (settings[x.key] === undefined) settings[x.key] = x.def;
   function renderXSettings() {
@@ -430,6 +431,7 @@
     send(`access|shake=${settings.shake};flash=${settings.flash};motion=${settings.motion ? 1 : 0};assist=${settings.assist};cb=${settings.cb};toggleuse=${settings.toggleuse ? 1 : 0}`);
     document.documentElement.style.setProperty('--ui-scale', settings.uiscale || 1);
     document.body.classList.toggle('hc', !!settings.contrast);
+    window.UHI18n?.setLang(settings.lang || 'en');
     document.body.classList.toggle('reduce-motion', !!settings.motion);
     send('bind|' + (settings.binds || '?'));
     for (const id of ['vol', 'vol2']) $(id).value = settings.vol;

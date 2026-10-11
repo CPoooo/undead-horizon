@@ -291,7 +291,7 @@ Original design notes:
 - [x] A5 (S) **Onboarding.** First-run interactive tutorial (move, dash, level-up, revive), contextual tips, and loading tips.
 - [x] A6 (S) **Settings sync.** Sync settings to the cloud profile.
 - [x] A7 (S) **Balance telemetry.** Privacy-light: run summaries (mode, wave, build, cause of death) to Neon, plus a SQL view for balancing.
-- [ ] A8 (S) **Localization.** i18n string table framework (en first).
+- [x] A8 (S) **Localization.** i18n string table framework (en first).
 - [x] A9 (S) **Error reporting.** The panic hook and `window.onerror` post to `/errors` (rate-limited) for live debugging.
 
 ### Suggested order
