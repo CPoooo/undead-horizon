@@ -2,6 +2,7 @@ mod audio;
 mod content;
 mod coop;
 mod game;
+mod input;
 mod math;
 mod modes;
 mod net;
@@ -385,16 +386,23 @@ fn run() -> Result<(), JsValue> {
 }
 
 fn set_key(g: &mut Game, code: &str, down: bool) {
-    let i = &mut g.input;
-    match code {
-        "KeyW" | "ArrowUp" | "KeyZ" => i.up = down,
-        "KeyS" | "ArrowDown" => i.down = down,
-        "KeyA" | "ArrowLeft" => i.left = down,
-        "KeyD" | "ArrowRight" => i.right = down,
-        _ => return,
+    let mut moved = false;
+    for a in g.bindings.actions(code).to_vec() {
+        if !a.is_held() {
+            continue;
+        }
+        let i = &mut g.input;
+        match a {
+            input::Action::Up => i.up = down,
+            input::Action::Down => i.down = down,
+            input::Action::Left => i.left = down,
+            input::Action::Right => i.right = down,
+            _ => continue,
+        }
+        moved = true;
     }
-    if down {
-        i.is_touch = false;
+    if down && moved {
+        g.input.is_touch = false;
     }
 }
 
@@ -440,6 +448,22 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
         "dash" => g.input.dash_req = true,
         "ult" => g.input.ult_req = true,
         "touch" => g.input.is_touch = a == "1",
+        // rebind keys: action=Code,Code;...  (empty = reset to defaults)
+        "bind" => {
+            if a.is_empty() {
+                g.bindings = input::Bindings::default();
+            } else {
+                g.bindings.apply(a);
+            }
+            let spec = g.bindings.to_spec();
+            g.ui_out.push(("bindings", spec));
+        }
+        // a one-shot action from a gamepad or an on-screen button
+        "act" => {
+            if let Some(act) = input::Action::from_id(a) {
+                g.input.actions.push(act);
+            }
+        }
         // one-shot UI sounds from the HTML layer (party lobby)
         "sfx" => {
             g.audio.unlock();

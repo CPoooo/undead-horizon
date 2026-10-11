@@ -131,7 +131,7 @@ Not scheduled yet; design notes for when we pick it up.
 - [x] F4 (S) **Version fields.** Add `v` to save strings (`save_string`/`load_save`) and to net messages (a hello with protocol version, rejecting mismatches with a toast).
 - [x] F5 (S) **Committed tests.** Move the Playwright scripts (solo, co-op two-browser, mobile) into `tests/e2e/` with an `npm run e2e` script. Document the local NSS-lib workaround.
   - Done: `npm run e2e` (serve `dist/` on :8765 first: `cd dist && python3 -m http.server 8765`). In WSL without system libnss3, extract the `libnss3`/`libnspr4` debs into `~/.cache/uh-libs` (or set `UH_LIBS`); `UH_CHROME` overrides the Chromium path. Screenshots go to `tests/e2e/out/`.
-- [ ] F6 (M) **Action map.** All input goes through `Action` enums (`Move`, `Aim`, `Dash`, `Ult`, `Interact`, `Ping`, `Pause`, `Ability`) bound from a settings table. Key handlers in `main.rs` map codes to actions. Prerequisite for A1 and A2.
+- [x] F6 (M) **Action map.** All input goes through `Action` enums (`Move`, `Aim`, `Dash`, `Ult`, `Interact`, `Ping`, `Pause`, `Ability`) bound from a settings table. Key handlers in `main.rs` map codes to actions. Prerequisite for A1 and A2.
 
 ### M1 · Modern feel (quick wins, high impact)
 - [ ] J1 (S) **Weapon feel.** Per-gun recoil camera kick, shell-casing particles, muzzle light flash.

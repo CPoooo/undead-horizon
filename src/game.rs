@@ -1,6 +1,7 @@
 use crate::audio::{Audio, Sfx, Track};
 use crate::content::{self, BossVar, CHAPTERS, DIFFICULTIES, GUNS};
 use crate::math::*;
+use crate::input::{Action, Bindings};
 use crate::modes::Mode;
 use crate::net::{self, Net};
 use crate::upgrades::{Levels, Up};
@@ -251,7 +252,10 @@ pub struct Input {
     pub mouse: V2,
     pub mouse_down: bool,
     pub mouse_seen: bool,
+    /// key codes pressed this frame (mapped through `Game::bindings`)
     pub pressed: Vec<String>,
+    /// actions pushed directly (gamepad, touch buttons, tests)
+    pub actions: Vec<Action>,
     pub clicks: Vec<V2>,
     pub touch_move: V2,
     pub touch_active: bool,
@@ -357,6 +361,7 @@ pub struct Game {
     pub grid: Grid,
     pub audio: Audio,
     pub input: Input,
+    pub bindings: Bindings,
     pub pending_sfx: Vec<(Sfx, V2)>,
     pub ui_out: Vec<(&'static str, String)>,
     // time
@@ -466,6 +471,7 @@ impl Game {
             grid: Grid::new(),
             audio: Audio::new(),
             input: Input::default(),
+            bindings: Bindings::default(),
             pending_sfx: Vec::new(),
             ui_out: Vec::new(),
             time: 0.0,
@@ -987,91 +993,27 @@ impl Game {
     pub(crate) fn handle_input(&mut self, _dt: f32) {
         let pressed = std::mem::take(&mut self.input.pressed);
         let clicks = std::mem::take(&mut self.input.clicks);
-        for code in pressed.iter() {
-            let c = code.as_str();
-            match self.phase {
-                Phase::Playing => match c {
-                    "Escape" | "KeyP" => self.pause(),
-                    "Space" | "ShiftLeft" | "ShiftRight" => self.player.dash_buf = 0.18,
-                    "KeyQ" | "KeyE" => self.try_ult(),
-                    "KeyF" => {
-                        self.auto_aim = !self.auto_aim;
-                        let msg = if self.auto_aim {
-                            "Auto-aim ON"
-                        } else {
-                            "Auto-aim OFF (mouse aim)"
-                        };
-                        self.toast = Some((msg.into(), 1.6));
-                        self.audio.play(Sfx::UiMove);
-                        self.ui_out.push((
-                            "autoaim",
-                            if self.auto_aim {
-                                "1".into()
-                            } else {
-                                "0".into()
-                            },
-                        ));
-                    }
-                    "KeyM" => {
-                        let v = if self.audio.music_volume > 0.0 {
-                            0.0
-                        } else {
-                            0.5
-                        };
-                        self.audio.set_music_volume(v);
-                        self.toast = Some((
-                            if v > 0.0 {
-                                "Music ON".into()
-                            } else {
-                                "Music OFF".into()
-                            },
-                            1.2,
-                        ));
-                    }
-                    "Backquote" => self.show_fps = !self.show_fps,
-                    "KeyN" => {
-                        self.show_minimap = !self.show_minimap;
-                        let msg = if self.show_minimap {
-                            "Minimap ON"
-                        } else {
-                            "Minimap OFF"
-                        };
-                        self.toast = Some((msg.into(), 1.0));
-                        self.audio.play(Sfx::UiMove);
-                    }
-                    _ => {}
-                },
-                Phase::Paused => {
-                    if c == "Escape" || c == "KeyP" {
-                        self.resume();
-                    }
+        let direct = std::mem::take(&mut self.input.actions);
+        // each key's actions in priority order: the first one that applies wins
+        // in co-op the match runs during level-up, so movement keys keep moving
+        let coop_pick = self.net.is_some() && self.phase == Phase::LevelUp;
+        let mut groups: Vec<Vec<Action>> = pressed
+            .iter()
+            .map(|c| {
+                let acts = self.bindings.actions(c);
+                if coop_pick && acts.iter().any(|a| a.is_held()) {
+                    Vec::new()
+                } else {
+                    acts.to_vec()
                 }
-                Phase::LevelUp => {
-                    if self.levelup_t < 0.35 {
-                        continue;
-                    }
-                    match c {
-                        "Digit1" | "Numpad1" => self.choose(0),
-                        "Digit2" | "Numpad2" => self.choose(1),
-                        "Digit3" | "Numpad3" => self.choose(2),
-                        "KeyA" | "KeyD" if self.net.is_some() => {}
-                        "ArrowLeft" | "KeyA" => {
-                            if self.sel > 0 {
-                                self.sel -= 1;
-                                self.audio.play(Sfx::UiMove);
-                            }
-                        }
-                        "ArrowRight" | "KeyD" => {
-                            if self.sel + 1 < self.offers.len() {
-                                self.sel += 1;
-                                self.audio.play(Sfx::UiMove);
-                            }
-                        }
-                        "Enter" | "Space" => self.choose(self.sel),
-                        _ => {}
-                    }
+            })
+            .collect();
+        groups.extend(direct.into_iter().map(|a| vec![a]));
+        for group in groups {
+            for a in group {
+                if self.on_action(a) {
+                    break;
                 }
-                _ => {}
             }
         }
         if self.input.dash_req {
@@ -1113,6 +1055,80 @@ impl Game {
                 }
             }
         }
+    }
+
+    /// Handle one pressed action; returns true if it did something.
+    pub(crate) fn on_action(&mut self, a: Action) -> bool {
+        match self.phase {
+            Phase::Playing => match a {
+                Action::Pause => self.pause(),
+                Action::Dash => self.player.dash_buf = 0.18,
+                Action::Interact => return self.try_interact(),
+                Action::Ult => self.try_ult(),
+                Action::AutoAim => {
+                    self.auto_aim = !self.auto_aim;
+                    let msg = if self.auto_aim {
+                        "Auto-aim ON"
+                    } else {
+                        "Auto-aim OFF (mouse aim)"
+                    };
+                    self.toast = Some((msg.into(), 1.6));
+                    self.audio.play(Sfx::UiMove);
+                    self.ui_out
+                        .push(("autoaim", if self.auto_aim { "1" } else { "0" }.into()));
+                }
+                Action::Music => {
+                    let v = if self.audio.music_volume > 0.0 { 0.0 } else { 0.5 };
+                    self.audio.set_music_volume(v);
+                    let msg = if v > 0.0 { "Music ON" } else { "Music OFF" };
+                    self.toast = Some((msg.into(), 1.2));
+                }
+                Action::Fps => self.show_fps = !self.show_fps,
+                Action::Minimap => {
+                    self.show_minimap = !self.show_minimap;
+                    let msg = if self.show_minimap { "Minimap ON" } else { "Minimap OFF" };
+                    self.toast = Some((msg.into(), 1.0));
+                    self.audio.play(Sfx::UiMove);
+                }
+                _ => return false,
+            },
+            Phase::Paused => match a {
+                Action::Pause => self.resume(),
+                _ => return false,
+            },
+            Phase::LevelUp => {
+                if self.levelup_t < 0.35 {
+                    return true;
+                }
+                match a {
+                    Action::Pick1 => self.choose(0),
+                    Action::Pick2 => self.choose(1),
+                    Action::Pick3 => self.choose(2),
+                    Action::Confirm => self.choose(self.sel),
+                    Action::Prev => {
+                        if self.sel > 0 {
+                            self.sel -= 1;
+                            self.audio.play(Sfx::UiMove);
+                        }
+                    }
+                    Action::Next => {
+                        if self.sel + 1 < self.offers.len() {
+                            self.sel += 1;
+                            self.audio.play(Sfx::UiMove);
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Use whatever interactable is in reach (doors, machines...). Modes with
+    /// authored maps fill this in; returns false when there is nothing to use.
+    pub(crate) fn try_interact(&mut self) -> bool {
+        false
     }
 
     pub fn pause(&mut self) {
@@ -2907,10 +2923,10 @@ mod tests {
                 g.player.max_hp = 1.0e9;
                 if frame % 9 == 0 {
                     g.player.ult = 1.0;
-                    g.input.pressed.push("KeyQ".into());
+                    g.input.actions.push(Action::Ult);
                 }
                 if g.phase == Phase::LevelUp {
-                    g.input.pressed.push("Digit1".into());
+                    g.input.actions.push(Action::Pick1);
                     g.levelup_t = 1.0;
                 }
                 // a steady horde: some close (bullet kills), some far (survivors)
