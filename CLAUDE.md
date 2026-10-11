@@ -7,6 +7,90 @@ _Last full status update: 2026-10-11 (latest commit at that time: `e1beb25`)._
 
 ---
 
+## 0. Resume here (handoff for the next session)
+
+_Written 2026-10-11 at commit `83f1dea` (plus this doc update). Read this section first, then §1 (status) and §2 (owner to-do)._
+
+### How we work (owner's standing instructions)
+- **Autonomy:**
+  - Build roadmap items and new "AAA" features without asking.
+  - Commit **one feature per commit** when the tests pass, then **push to `main`** right away. GitHub Pages deploys it and the owner tests on their phone.
+  - Be creative: research features from big games (Destiny, L4D, Shadow of Mordor, CoD Zombies, Apex…) and adapt them.
+- **The owner runs deploys:**
+  - Claude must not run `npm run db:schema` / `npm run deploy:api` (production deploy) or read secrets (`.env.local`, TURN/Metered credential code).
+  - Instead, append server changes to `server/schema.sql`/`server/*.ts` and list them in §2 item 1.
+  - Read-only SQL against the Neon project (`dawn-base-35494450`) is fine for checking things; destructive SQL needs the owner's OK.
+- **Verify before reporting:**
+  - Build, run native tests, and run the relevant e2e.
+  - For UI work, take Playwright screenshots (desktop and phone: portrait 390×844, landscape 844×390, small 360×640) and look at them.
+  - Report honestly what is live vs waiting on deploy.
+
+### What's been completed (full history: `git log`, 88 commits)
+1. **Foundations and v1:**
+   - core game, accounts, shop, campaign, 2-player co-op, social lobby, save slots, mobile layout
+   - fixes: site not loading after deploys, lobby not connecting, autofill crash
+2. **Roadmap v2, all milestones** (`F1`… through `V6`):
+   - M0 foundations, M1 feel, M2 combat depth, M3 Outbreak, M4 Siege, M5 progression, M6 live features, M8 world, M9 platform/accessibility
+   - each item is its own commit named after its id (e.g. `C7: Boss 2.0 …`)
+3. **Home Base:**
+   - walkable hub with AI vendors (Claude), firing range, mission terminal
+   - later: the Outskirts free roam + Supply Drops, emotes, proximity voice, 16-player instances with strangers
+4. **M7 multiplayer hardening:**
+   - 4 players, pings/emotes, squad scoreboard
+   - ICE restart + reconnect grace, rejoin / join in progress, host migration
+   - public parties + Quick Play, campaign co-op
+5. **Beyond v2:** AI Director, Photo mode, Nemesis system, Hollow Night limited-time event, death recap.
+6. **Quality and ops:**
+   - leaderboards hide e2e test accounts
+   - phone HUD redesign (health stack, thumb cluster, a landscape crash fixed)
+   - **one save per game type** (Infinite / Campaign / Outbreak / Siege)
+   - this CLAUDE.md: status, code map, protocols, application state, scaling plan
+
+### Next up (in priority order)
+1. **Owner:**
+   - Deploy the server (§2 item 1); a lot of signed-in functionality waits on it.
+   - Then re-run `npm run e2e` against the live API and fix anything that breaks. Expect follow-ups in the routes that have never run in production: `/vendor`, `/hub/reward`, `quickplay`, `hub.pos` instances, Outbreak/Siege save slots.
+2. **Owner:** add `ANTHROPIC_API_KEY` to `.env.local` (AI vendors), and fix the TURN credential cap if friends can't connect (§2 item 3).
+3. **Owner:** a real-device iPhone pass (§2 item 4). Fix whatever it finds, especially phone HUD spacing with the notch and home bar, and the share sheets.
+4. **Claude (small, known gaps):**
+   - a Settings toggle for touch controls (Auto / On / Off)
+   - hub mates keyed by user id instead of display name
+   - Nemesis attribution when killed from far away
+5. **Claude (backlog, §7.5):**
+   - kill cam / "Play of the Run"
+   - weapon attachments
+   - more limited-time events
+   - hub loot caches and more public event types
+   - inviting a stranger by walking up to them in the hub
+6. **When players grow:** start with Tier 1 of the scaling plan (§10).
+
+### Quick start for a new session
+```bash
+cd ~/undead-horizon && git pull && git log --oneline -5
+cargo build --target wasm32-unknown-unknown --release 2>&1 | grep -E "^(warning|error)"   # must print nothing
+cargo test --release                                     # 55 tests
+for f in ui/*.js; do node --check "$f"; done
+trunk build --release                                    # writes dist/
+(cd dist && python3 -m http.server 8765 &)               # serve for e2e
+node tests/e2e/<suite>.mjs                               # or: npm run e2e (all 13 suites)
+```
+- The handy all-in-one check, as a shell function: wasm build (no warnings) → `cargo test --release` → `node --check ui/*.js` → `trunk build --release`. **If tests fail it stops before rebuilding `dist/`, so e2e would run against a stale build.**
+- **Phone layout checks:** `tests/e2e/mobile-hud.mjs` (three phone sizes, screenshots in `tests/e2e/out/mobile-hud-*.png`).
+- **Dev commands** for staging scenes are in §3 (`dev|tank`, `dev|boss=N`, `dev|horde`, `dev|drop`, `dev|tp=x,y`, …). Start modes through the real UI (click `[data-mode="siege"]` then `#play`) so body classes and touch UI match real play.
+
+### Gotchas learned the hard way
+- **`f32::clamp(min, max)` panics if min > max:** in wasm it shows as `unreachable`. Screen-relative bounds must use `.max(lo).min(hi.max(lo))`. Short landscape phones hit this.
+- **Duplicate format strings in `game.rs`:** `stats_json` and `save_string` both contain `self.mode.id(), self.chapter(),`. Scripted edits must target the right one (anchor on the function first).
+- **`neon_auth."user".id` is a uuid;** compare with `id::text` against `user_id` columns.
+- **Tests share the world map:** `world::map()` is global per thread; native tests that load maps run on separate threads, so it's fine, but don't assume one map across tests.
+- **Overlay visibility in Playwright:** overlays hide with opacity, so `isVisible` stays true. Check the `.show` class instead.
+- **Headless Chromium has no emoji font** (boxes in screenshots). That's cosmetic, not a bug.
+- **E2E accounts hit the live social server and auth** (`uh-test-*@example.com`). Party joins occasionally time out, so rerun once before debugging. Suites fail only on page errors (404s from undeployed routes are tolerated).
+- **The level-up screen freezes the sim:** don't let the Home Base drop XP (it doesn't: `spawn_gem` is a no-op in the hub). Tests that farm kills must pick cards (`Digit1`).
+- **The UI → game command queue runs before net messages each frame,** so a `coop|…late=1` start lands before the late-join sync.
+- **CLUSTER sizes:** `CLUSTER_W`/`CLUSTER_H` in `src/hud_layout.rs` must match the `#touch-ui` box in `ui/style.css`.
+- **Bump `PROTOCOL` (net) / `SAVE_VERSION` (saves)** whenever their formats change. They are 14 and 3 now.
+
 ## 1. Status at a glance
 
 Legend:
