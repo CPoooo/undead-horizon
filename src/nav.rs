@@ -164,6 +164,29 @@ impl FlowField {
         best.1.map(|(nx, ny)| (self.center(nx, ny) - p).norm())
     }
 
+    /// Mark circles (placed defenses) as solid.
+    pub fn add_solids(&mut self, solids: &[(V2, f32)]) {
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let c = self.center(x, y);
+                if solids.iter().any(|(p, r)| p.dist(c) < r + 14.0) {
+                    let i = self.idx(x, y);
+                    self.solid[i] = true;
+                }
+            }
+        }
+    }
+
+    /// Reachable from `p` (or a cell next to it, for spawn points on walls).
+    pub fn reachable_from(&self, p: V2) -> bool {
+        (-1..=1).any(|dy| {
+            (-1..=1).any(|dx| {
+                let q = p + v2(dx as f32 * NAV_CELL, dy as f32 * NAV_CELL);
+                self.cell(q).map(|(x, y)| self.dist[self.idx(x, y)] != FAR).unwrap_or(false)
+            })
+        })
+    }
+
     #[cfg(test)]
     pub fn reachable(&self, p: V2) -> bool {
         self.cell(p).map(|(x, y)| self.dist[self.idx(x, y)] != FAR).unwrap_or(false)

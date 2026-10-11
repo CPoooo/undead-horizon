@@ -394,6 +394,7 @@
     $('map-box').style.display = settings.mode === 'outbreak' ? '' : 'none';
     for (const b of $('map-seg').children) b.classList.toggle('on', b.dataset.map === (settings.map || 'asylum'));
     $('mode-hint').textContent = camp ? 'Story chapters with unique boss fights.'
+      : settings.mode === 'siege' ? 'The Last Keep: build towers, traps and barricades with mana, then hold the crystal for 15 waves. 1-6 to build, E to upgrade, X to sell.'
       : settings.mode === 'outbreak' ? 'Rounds, boarded windows, points, doors, wall guns, a mystery box, perks, traps and an upgrade machine.'
       : 'Endless waves. Bosses every 5 waves. Ranked on the leaderboard.';
     if (camp) {
@@ -413,7 +414,7 @@
     $('continues').innerHTML = ['infinite', 'campaign'].filter((m) => saves[m]).map((m) =>
       `<button class="btn blue" data-continue="${m}" style="margin-top:12px">⏯ Continue ${m === 'campaign' ? 'Campaign' : 'Infinite'} run</button>
        <div class="hint" style="text-align:center">${esc(describe(saves[m]))}</div>`).join('');
-    const existing = settings.mode === 'outbreak' ? null : saves[settings.mode];
+    const existing = ['outbreak', 'siege'].includes(settings.mode) ? null : saves[settings.mode];
     const sameChapter = existing && (settings.mode !== 'campaign' || existing.summary.chapter === settings.chapter);
     const warn = existing
       ? `⚠ Starting a new ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run overwrites your saved ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run (${describe(existing)}).${!sameChapter ? ' It\'s from a different chapter.' : ''}`
@@ -644,6 +645,7 @@
   on('pause-btn', 'click', () => send('pause'));
   const tap = (id, cmd) => $(id).addEventListener('touchstart', (e) => { e.preventDefault(); send(cmd); }, { passive: false });
   tap('t-dash', 'dash'); tap('t-ult', 'ult'); tap('t-abil', 'act|ability');
+  tap('t-ready', 'act|confirm');
   $('t-use').addEventListener('touchstart', (e) => { e.preventDefault(); send('use|1'); }, { passive: false });
   $('t-use').addEventListener('touchend', (e) => { e.preventDefault(); send('use|0'); }, { passive: false });
 
@@ -707,7 +709,7 @@
         state = 'paused';
         try { renderPause(JSON.parse(data)); } catch (e) { console.warn(e); }
         // Outbreak runs can't be saved mid-match (yet)
-        for (const id of ['save', 'save-quit']) $(id).disabled = runCtx.mode === 'outbreak' || !!window.UHCoop?.inGame;
+        for (const id of ['save', 'save-quit']) $(id).disabled = ['outbreak', 'siege'].includes(runCtx.mode) || !!window.UHCoop?.inGame;
         applySettings();
         show('pause');
         break;
@@ -736,6 +738,7 @@
         break;
       }
       case 'usebtn': $('t-use').classList.toggle('on', data === '1'); break;
+      case 'readybtn': $('t-ready').classList.toggle('on', data === '1'); break;
       case 'haptic': {
         const [ms, str] = String(data).split(':').map(Number);
         const k = settings.haptics ?? 0.6;

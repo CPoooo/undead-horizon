@@ -6,6 +6,7 @@ pub mod campaign;
 pub mod horde;
 pub mod infinite;
 pub mod outbreak;
+pub mod siege;
 
 use crate::game::{Game, ZKind};
 use crate::math::V2;
@@ -35,6 +36,7 @@ impl Mode {
         match self {
             Mode::Campaign(_) => &campaign::Campaign,
             Mode::Outbreak => &outbreak::Outbreak,
+            Mode::Siege => &siege::Siege,
             _ => &infinite::Infinite,
         }
     }

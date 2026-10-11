@@ -317,6 +317,17 @@ impl Game {
         }
     }
 
+    /// The run is lost for everyone (the Siege crystal shattered).
+    pub fn check_team_wipe_forced(&mut self) {
+        if let Some(net) = &mut self.net {
+            if !net.game_over_sent {
+                net.game_over_sent = true;
+                net.event(|w| w.u8(E_GAMEOVER));
+            }
+        }
+        self.enter_dying();
+    }
+
     /// Camera target: ourselves, or a living teammate while spectating.
     pub fn camera_pos(&self, own: V2) -> V2 {
         if !self.player.dead {
@@ -655,6 +666,16 @@ impl Game {
                         .push(("netversion", format!("{}:{}", PROTOCOL, theirs)));
                 }
             }
+            MSG_BUILD if host => {
+                let (Some(k), Some(p)) = (r.u8(), r.v2()) else { return };
+                if let Some(kind) = crate::modes::siege::DefKind::from_u8(k) {
+                    self.add_defense(kind, p, 1);
+                }
+            }
+            MSG_DEFENSE if host => {
+                let (Some(k), Some(uid)) = (r.u8(), r.u32()) else { return };
+                self.siege_world_pub(k, uid);
+            }
             MSG_WORLD if host => {
                 let (Some(kind), Some(idx)) = (r.u8(), r.u8()) else { return };
                 self.world_change(kind, idx);
@@ -907,6 +928,7 @@ impl Game {
             let prev = self.gems.get(i as usize).map(|g| g.pos).unwrap_or(p);
             let prev = if prev.dist(p) < 80.0 { prev } else { p };
             gems.push(Gem {
+                mana: false,
                 pos: p,
                 prev,
                 vel: V2::ZERO,
@@ -1055,6 +1077,34 @@ impl Game {
                 E_WORLD => {
                     let (Some(kind), Some(idx)) = (r.u8(), r.u8()) else { return };
                     self.apply_world(kind, idx);
+                }
+                E_MANA => {
+                    let (Some(slot), Some(v)) = (r.u8(), r.u32()) else { return };
+                    if slot == me {
+                        self.gain_mana(v.min(10_000));
+                    }
+                }
+                E_DEFENSE => {
+                    let (Some(uid), Some(k), Some(p), Some(tier)) = (r.u32(), r.u8(), r.v2(), r.u8()) else { return };
+                    if let (Some(kind), Some(s)) = (crate::modes::siege::DefKind::from_u8(k), self.siege.as_mut()) {
+                        if !s.defenses.iter().any(|d| d.uid == uid) {
+                            let hp = kind.base_hp() * (1.0 + 0.6 * (tier as f32 - 1.0));
+                            s.defenses.push(crate::modes::siege::Defense { kind, pos: p, tier, hp, max_hp: hp, cd: 0.5, aim: 0.0, flash: 0.0, uid });
+                        }
+                    }
+                }
+                E_DEFCHANGE => {
+                    let (Some(k), Some(uid)) = (r.u8(), r.u32()) else { return };
+                    self.apply_defense_change(k, uid);
+                }
+                E_CRYSTAL => {
+                    let Some(hp) = r.f32() else { return };
+                    if let Some(s) = self.siege.as_mut() {
+                        if hp < s.crystal_hp {
+                            s.crystal_flash = 1.0;
+                        }
+                        s.crystal_hp = hp;
+                    }
                 }
                 E_GAMEOVER => self.enter_dying(),
                 E_BLAST => {

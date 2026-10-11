@@ -200,10 +200,10 @@ Not scheduled yet; design notes for when we pick it up.
 - [x] O13 (M) **Second map.** "Ashfall Refinery", plus an Outbreak leaderboard (round reached, per map, by player count).
 
 ### M4 · Siege mode (Dungeon Defenders homage)
-- [ ] S1 (M) **Crystal.** Crystal entity with HP and a lose condition. Authored map with lanes and spawn portals. New `src/modes/siege.rs`. Depends on F2 and F3.
-- [ ] S2 (S) **Phases.** Build phase (timer or "Ready" vote in co-op) alternates with combat waves; phase HUD and wave preview (enemy icons per lane).
-- [ ] S3 (S) **Mana.** Drops from kills and is collected like gems (reuse `Gem` with a kind field). Shared team pool vs per-player: per-player.
-- [ ] S4 (L, split) **Defenses:**
+- [x] S1 (M) **Crystal.** Crystal entity with HP and a lose condition. Authored map with lanes and spawn portals. New `src/modes/siege.rs`. Depends on F2 and F3.
+- [x] S2 (S) **Phases.** Build phase (timer or "Ready" vote in co-op) alternates with combat waves; phase HUD and wave preview (enemy icons per lane).
+- [x] S3 (S) **Mana.** Drops from kills and is collected like gems (reuse `Gem` with a kind field). Shared team pool vs per-player: per-player.
+- [x] S4 (L, split) **Defenses:**
   - S4a (M) placement system: grid snap, ghost preview, range ring, valid/invalid tint, mana cost, sell and upgrade menu
   - S4b (M) 6 defenses:
     - arrow tower
@@ -214,12 +214,12 @@ Not scheduled yet; design notes for when we pick it up.
     - healing totem
     - Each has 3 upgrade tiers.
   - S4c (S) the Engineer class (C8) gets +defense stats, and towers scale with hero level
-- [ ] S5 (M) **Pathfinding.**
+- [x] S5 (M) **Pathfinding.**
   - Flow-field (BFS on a coarse grid) to the crystal, recomputed when defenses change.
   - Enemies attack blockers in their way.
   - Flyers ignore the grid.
   - Add a native test for path recompute.
-- [ ] S6 (S) **Siege enemies.** Siege-only types: goblin sapper (targets towers), ogre (high HP), archer (outranges towers).
+- [x] S6 (S) **Siege enemies.** Siege-only types: goblin sapper (targets towers), ogre (high HP), archer (outranges towers).
 - [ ] S7 (M) **Maps and ratings.** 3 Siege maps with star ratings (crystal HP left), first-clear rewards, and Siege-specific challenge variants.
 - [ ] S8 (M) **Co-op replication.** Host-authoritative defense placement and build-phase ready-vote via the party and net events.
 

@@ -17,6 +17,7 @@ mod outbreak_interact;
 mod render;
 mod render_light;
 mod render_outbreak;
+mod render_siege;
 mod render_map;
 mod secrets;
 mod status;
@@ -266,6 +267,10 @@ fn run() -> Result<(), JsValue> {
                     if g.phase == Phase::LevelUp {
                         g.input.clicks.push(p);
                         continue;
+                    }
+                    // Siege: taps pick from the build bar or place the selected defense
+                    if g.siege.is_some() && g.phase == Phase::Playing && (p.y > g.screen.y - 260.0 || (g.siege.as_ref().is_some_and(|s| s.build_sel.is_some()) && p.x >= w * 0.5)) {
+                        g.input.clicks.push(p);
                     }
                     if p.x < w * 0.5 && g.input.joy_id.is_none() {
                         g.input.joy_id = Some(t.identifier());

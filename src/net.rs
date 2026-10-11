@@ -15,7 +15,7 @@ pub const MAX_PLAYERS: usize = 3;
 
 /// Bump whenever the wire format or sim rules change in a way that would
 /// desync peers running different builds.
-pub const PROTOCOL: u16 = 7;
+pub const PROTOCOL: u16 = 8;
 
 pub const MSG_PSTATE: u8 = 1; // client -> host (unreliable): own player state
 pub const MSG_HITS: u8 = 2; // client -> host (reliable): damage dealt to zombies
@@ -24,6 +24,8 @@ pub const MSG_GEMS: u8 = 4; // host -> clients (unreliable): xp gem positions
 pub const MSG_EVENTS: u8 = 5; // host -> clients (reliable): discrete events
 pub const MSG_HELLO: u8 = 6; // everyone (reliable), once per match: protocol version
 pub const MSG_WORLD: u8 = 7; // client -> host (reliable): bought a door / flipped the power
+pub const MSG_BUILD: u8 = 8; // client -> host: place a Siege defense (kind, pos)
+pub const MSG_DEFENSE: u8 = 9; // client -> host: upgrade / sell a defense (B_*, uid)
 
 // events
 pub const E_HURT: u8 = 1;
@@ -41,6 +43,15 @@ pub const E_PULL: u8 = 12; // slot, velocity: the Butcher hooked that player
 pub const E_POWERUP: u8 = 13; // kind: everyone gets the power-up
 pub const E_BOARDS: u8 = 14; // window, boards
 pub const E_WORLD: u8 = 15; // kind, index: a door opened / the power came on
+pub const E_DEFENSE: u8 = 16; // uid, kind, pos, tier: a defense was built
+pub const E_DEFCHANGE: u8 = 17; // B_*, uid
+pub const E_MANA: u8 = 18; // slot, amount
+pub const E_CRYSTAL: u8 = 19; // crystal hp (f32)
+
+// defense changes
+pub const B_UPGRADE: u8 = 1;
+pub const B_SELL: u8 = 2;
+pub const B_DESTROY: u8 = 3;
 
 // player flags
 pub const PF_DOWNED: u8 = 1;

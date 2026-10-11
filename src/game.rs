@@ -39,10 +39,13 @@ pub enum ZKind {
     Bat,
     Burrower,
     Hound,
+    Sapper,
+    Ogre,
+    Archer,
 }
 
 impl ZKind {
-    pub const ALL: [ZKind; 12] = [
+    pub const ALL: [ZKind; 15] = [
         ZKind::Walker,
         ZKind::Runner,
         ZKind::Brute,
@@ -55,6 +58,9 @@ impl ZKind {
         ZKind::Bat,
         ZKind::Burrower,
         ZKind::Hound,
+        ZKind::Sapper,
+        ZKind::Ogre,
+        ZKind::Archer,
     ];
 
     pub fn def(self) -> &'static content::EnemyDef {
@@ -187,6 +193,8 @@ pub struct Gem {
     pub t: f32,
     pub magnet: bool,
     pub dead: bool,
+    /// Siege mana orb instead of XP
+    pub mana: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -442,8 +450,10 @@ pub struct Game {
     pub nuke_pending: bool,
     /// Outbreak traps, buildables and the easter egg
     pub secrets: Option<Box<crate::secrets::Secrets>>,
+    pub siege: Option<Box<crate::modes::siege::SiegeState>>,
     /// the touch USE button is visible
     pub use_shown: bool,
+    pub ready_shown: bool,
     pub boss_intro: Option<crate::boss::BossIntro>,
     /// chests picked up while another overlay was open
     pub pending_chests: u32,
@@ -592,7 +602,9 @@ impl Game {
             flow: None,
             nuke_pending: false,
             secrets: None,
+            siege: None,
             use_shown: false,
+            ready_shown: false,
             boss_intro: None,
             pending_chests: 0,
             rng: Rng::new(seed),
@@ -817,6 +829,7 @@ impl Game {
         self.flow = None;
         self.nuke_pending = false;
         self.secrets = None;
+        self.siege = None;
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -1250,8 +1263,21 @@ impl Game {
     }
 
     pub(crate) fn handle_input(&mut self, _dt: f32) {
-        let pressed = std::mem::take(&mut self.input.pressed);
-        let clicks = std::mem::take(&mut self.input.clicks);
+        let mut pressed = std::mem::take(&mut self.input.pressed);
+        let mut clicks = std::mem::take(&mut self.input.clicks);
+        // Siege build hotkeys 1-6 and build clicks
+        if self.siege.is_some() && self.phase == Phase::Playing {
+            pressed.retain(|c| match c.strip_prefix("Digit").and_then(|d| d.parse::<usize>().ok()) {
+                Some(d) if (1..=6).contains(&d) => {
+                    self.select_build(d - 1);
+                    false
+                }
+                _ => true,
+            });
+            for c in std::mem::take(&mut clicks) {
+                self.siege_click(c);
+            }
+        }
         let direct = std::mem::take(&mut self.input.actions);
         // each key's actions in priority order: the first one that applies wins
         // in co-op the match runs during level-up, so movement keys keep moving
@@ -1337,12 +1363,19 @@ impl Game {
     pub(crate) fn on_action(&mut self, a: Action) -> bool {
         match self.phase {
             Phase::Playing => match a {
+                Action::Pause if self.siege.as_ref().is_some_and(|s| s.build_sel.is_some()) => {
+                    if let Some(s) = self.siege.as_mut() {
+                        s.build_sel = None;
+                    }
+                }
                 Action::Pause => self.pause(),
                 Action::Dash => self.player.dash_buf = 0.18,
                 Action::Interact => return self.try_interact(),
                 Action::Ult => self.try_ult(),
                 Action::Ability => return self.try_ability(),
                 Action::Reload if self.ob.is_some() => self.start_reload(),
+                Action::Confirm if self.siege.is_some() => return self.ready_up(),
+                Action::Swap if self.siege.is_some() => return self.sell_defense(),
                 Action::Swap if self.ob.is_some() => return self.swap_weapon(None),
                 Action::Pick1 if self.ob.is_some() => return self.swap_weapon(Some(0)),
                 Action::Pick2 if self.ob.is_some() => return self.swap_weapon(Some(1)),
@@ -1422,6 +1455,9 @@ impl Game {
         if self.ob.is_some() {
             return self.ob_interact();
         }
+        if self.siege.is_some() {
+            return self.siege_interact();
+        }
         false
     }
 
@@ -1446,6 +1482,7 @@ impl Game {
         world::use_map(None);
         self.ob = None;
         self.flow = None;
+        self.siege = None;
         self.audio.set_track(Track::Lobby);
         self.audio.music_on = true;
         self.net = None;
@@ -1939,7 +1976,13 @@ impl Game {
                 self.update_windows();
                 self.update_traps();
             }
+            if self.siege.is_some() {
+                self.update_siege_flow();
+            }
             self.update_zombies();
+            if self.siege.is_some() {
+                self.update_defenses();
+            }
             self.update_status();
             self.update_elites();
             self.update_volatile();
@@ -2575,6 +2618,7 @@ impl Game {
             }
             return;
         }
+        self.siege_drop(pos, xp);
         let bonus = self.wave.n / 4;
         let mut drops = if big { 4 + (r / 10.0) as u32 } else { 1 };
         if kind == ZKind::Boss {
@@ -2669,6 +2713,7 @@ impl Game {
             t: 0.0,
             magnet: false,
             dead: false,
+            mana: false,
         });
     }
 
@@ -2750,6 +2795,13 @@ impl Game {
         let mut boss_summons: Vec<(V2, ZKind, u32)> = Vec::new();
         let mut blasts: Vec<V2> = Vec::new();
         let mut screams: Vec<V2> = Vec::new();
+        let siege_on = self.siege.is_some();
+        let siege_defs: Vec<V2> = self
+            .siege
+            .as_ref()
+            .map(|s| s.defenses.iter().map(|d| d.pos).collect())
+            .unwrap_or_default();
+        let mut volleys: Vec<(V2, f32)> = Vec::new();
         let mut eruptions: Vec<(V2, f32)> = Vec::new();
         let relocate_r = self.spawn_r * 1.7;
         let playing = self.phase == Phase::Playing
@@ -2791,11 +2843,37 @@ impl Game {
                 V2::from_angle(z.face + 0.5)
             };
             let mut accel = 7.0;
+            let aggro = if siege_on { 220.0 } else { 90.0 };
             if let Some(flow) = &self.flow {
-                if dist > 90.0 && z.kind != ZKind::Bat && playing {
+                if dist > aggro && z.kind != ZKind::Bat && playing {
                     if let Some(fd) = flow.dir(z.pos) {
                         want = fd;
                     }
+                }
+            }
+            if siege_on && playing {
+                match z.kind {
+                    ZKind::Sapper => {
+                        if let Some(dp) = siege_defs
+                            .iter()
+                            .filter(|d| d.dist(z.pos) < 700.0)
+                            .min_by(|a, b| a.dist2(z.pos).partial_cmp(&b.dist2(z.pos)).unwrap_or(std::cmp::Ordering::Equal))
+                        {
+                            want = (*dp - z.pos).norm();
+                        }
+                    }
+                    ZKind::Archer => {
+                        let near = siege_defs.iter().any(|d| d.dist(z.pos) < 380.0) || dist < 380.0;
+                        if near {
+                            spd *= 0.15;
+                            z.timer -= DT;
+                            if z.timer <= 0.0 {
+                                z.timer = 1.8 + self.rng.range(0.0, 0.6);
+                                volleys.push((z.pos, z.dmg));
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -3115,6 +3193,11 @@ impl Game {
                 self.burst(p, 6, 120.0, "#4a3a2a", 4.0, 0.5, true, false);
             }
         }
+        for (at, dmg) in volleys {
+            if self.archer_volley(at, dmg) {
+                self.sfx(Sfx::Blade, at);
+            }
+        }
         for at in screams {
             let mut n = 0;
             for z in self.zombies.iter_mut() {
@@ -3392,10 +3475,11 @@ impl Game {
         let mr = self.magnet_r();
         let mut gained = 0.0;
         let mut picked = 0;
+        let mut mana: Vec<(u8, u32)> = Vec::new();
         for g in self.gems.iter_mut() {
             g.prev = g.pos;
             g.t += DT;
-            let ppos = Game::nearest_target(&targets, g.pos).1;
+            let (gslot, ppos, _) = Game::nearest_target(&targets, g.pos);
             let d = ppos - g.pos;
             let l = d.len();
             if !g.magnet && l < mr && g.t > 0.15 {
@@ -3411,8 +3495,24 @@ impl Game {
             g.pos += g.vel * DT;
             if l < PR + 10.0 {
                 g.dead = true;
-                gained += g.value as f32;
-                picked += 1;
+                if g.mana {
+                    mana.push((gslot, g.value));
+                } else {
+                    gained += g.value as f32;
+                    picked += 1;
+                }
+            }
+        }
+        // mana is per player: the collector gets it
+        for (slot, v) in mana {
+            if slot == self.my_slot() {
+                self.gain_mana(v);
+            } else if let Some(net) = &mut self.net {
+                net.event(|w| {
+                    w.u8(net::E_MANA);
+                    w.u8(slot);
+                    w.u32(v);
+                });
             }
         }
         let ppos = self.player.pos;
@@ -4247,5 +4347,48 @@ mod tests {
         g.check_egg();
         assert!(g.secrets.as_ref().unwrap().egg_done);
         assert_eq!(g.ob.as_ref().unwrap().perks.len(), 4);
+    }
+
+    #[test]
+    fn siege_loop() {
+        use crate::modes::siege::{DefKind, SiegePhase};
+        let mut g = Game::new(30);
+        g.start("mode=siege;diff=rookie");
+        assert_eq!(g.mode, Mode::Siege);
+        let s = g.siege.as_ref().unwrap();
+        assert_eq!(s.phase, SiegePhase::Build);
+        let crystal = s.crystal;
+        // placement rules
+        assert!(g.can_place(DefKind::Tower, crystal).is_err(), "not on the crystal");
+        let spot = g.player.pos + v2(-120.0, 80.0);
+        let spot = v2((spot.x / 40.0).round() * 40.0, (spot.y / 40.0).round() * 40.0);
+        assert!(g.place_defense(DefKind::Tower, spot));
+        assert_eq!(g.siege.as_ref().unwrap().defenses.len(), 1);
+        assert!(!g.place_defense(DefKind::Tower, spot), "occupied");
+        // ready up: the wave pours out of the portal and heads for the crystal
+        g.ready_up();
+        g.player.hp = 1.0e9;
+        g.player.max_hp = 1.0e9;
+        g.player.pos = v2(0.0, 900.0); // stay out of the way
+        let mut t = 0.0;
+        let mut closest = f32::MAX;
+        for _ in 0..1500 {
+            t += 16.7;
+            g.player.pos = v2(0.0, 900.0);
+            g.frame(t);
+            for z in g.zombies.iter() {
+                closest = closest.min(z.pos.dist(crystal));
+            }
+        }
+        assert!(g.wave.n >= 1, "the first wave started");
+        assert!(closest < 600.0, "enemies path toward the crystal, got {closest}");
+        assert!(g.kills > 0, "the tower and the player fight back");
+        // the crystal can fall
+        g.siege.as_mut().unwrap().crystal_hp = 0.1;
+        g.spawn_zombie(ZKind::Walker, crystal + v2(40.0, 0.0));
+        g.zombies.last_mut().unwrap().attack_cd = 0.0;
+        g.grid.build(g.player.pos, &g.zombies);
+        g.update_defenses();
+        assert_eq!(g.phase, Phase::Dying);
     }
 }

@@ -218,6 +218,7 @@ impl Game {
 
         self.draw_shadows(c, a, &obs);
         self.draw_outbreak_world(c, t);
+        self.draw_siege_world(c, t);
         self.draw_gems(c, a, t);
         self.draw_telegraphs(c, a, t);
         self.draw_rings(c);
@@ -375,12 +376,22 @@ impl Game {
         if self.coop() && !matches!(self.phase, Phase::Menu) {
             self.draw_coop_hud(c, w, h, t);
         }
+        if self.siege.is_some() && matches!(self.phase, Phase::Playing | Phase::Paused) {
+            self.draw_siege_hud(c, w, h, cy, t);
+        }
         if self.ob.is_some() && matches!(self.phase, Phase::Playing | Phase::Paused) {
             self.draw_outbreak_hud(c, w, h, t);
             self.draw_outbreak_prompt(c, w, h, cy);
         }
         // the touch USE button follows the prompt
-        let show_use = self.ob.is_some() && self.phase == Phase::Playing && self.ob_prompt().is_some();
+        let show_use = self.phase == Phase::Playing
+            && ((self.ob.is_some() && self.ob_prompt().is_some()) || (self.siege.is_some() && self.defense_in_reach().is_some()));
+        let show_ready = self.phase == Phase::Playing
+            && self.siege.as_ref().is_some_and(|s| s.phase == crate::modes::siege::SiegePhase::Build);
+        if show_ready != self.ready_shown {
+            self.ready_shown = show_ready;
+            self.ui_out.push(("readybtn", if show_ready { "1".into() } else { "0".into() }));
+        }
         if show_use != self.use_shown {
             self.use_shown = show_use;
             self.ui_out.push(("usebtn", if show_use { "1".into() } else { "0".into() }));

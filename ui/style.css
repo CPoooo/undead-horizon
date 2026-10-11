@@ -212,6 +212,8 @@ body.touch.playing #touch-ui { display: flex; }
 .tbtn.ult { width: 62px; height: 62px; margin-bottom: 70px; border-color: rgba(255,211,106,.5); }
 .tbtn.use { display: none; width: 70px; height: 70px; margin-bottom: 0; border-color: rgba(255,211,106,.8); background: rgba(80,60,20,.7); }
 .tbtn.use.on { display: grid; }
+.tbtn.ready { display: none; width: 70px; height: 70px; border-color: rgba(122,255,176,.8); background: rgba(20,70,40,.7); font-size: 12px; }
+.tbtn.ready.on { display: grid; }
 .tbtn.abil { width: 56px; height: 56px; margin-bottom: 140px; border-color: rgba(122,215,255,.5); }
 .items.chars { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .items.chars .ico { font-size: 30px; }
