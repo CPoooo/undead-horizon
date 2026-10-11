@@ -1040,6 +1040,29 @@
     send(`start|mode=hub;name=${playerName()};diff=${settings.diff};${equipString()}`);
   }
   on('hub-btn', 'click', enterHub);
+  // ------------------------------------------------------------------ PWA: offline play + install
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('[sw]', e));
+  }
+  let installPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    $('install-btn').style.display = '';
+  });
+  on('install-btn', 'click', async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice.catch(() => null);
+    installPrompt = null;
+    $('install-btn').style.display = 'none';
+  });
+  const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+  if (iOS && !standalone && !settings.iosHint) {
+    settings.iosHint = true; saveSettings();
+    setTimeout(() => toast('📲 Tip: tap Share → "Add to Home Screen" to play full-screen'), 4000);
+  }
   // lobby music picker (tunes live in src/audio.rs LOBBY_TUNES)
   on('tune-btn', 'click', () => { settings.tune = ((settings.tune || 0) + 1) % 4; saveSettings(); send('tune|' + settings.tune); });
   // party members walking around the hub, and their chat as speech bubbles

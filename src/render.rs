@@ -176,8 +176,11 @@ impl Game {
         self.dpr = dpr;
         // constant visible area regardless of window size
         let base_zoom = ((w * h).sqrt() / 960.0).clamp(0.45, 2.2);
-        self.spawn_r = (v2(w, h) * (0.5 / base_zoom)).len() + 70.0;
-        self.zoom = base_zoom * (1.0 + self.zoom_punch);
+        let portrait_k = if h > w * 1.25 { 0.85 } else { 1.0 };
+        self.spawn_r = (v2(w, h) * (0.5 / (base_zoom * portrait_k))).len() + 70.0;
+        // phones held upright see a narrow strip: pull the camera back a little
+        let portrait = if h > w * 1.25 { 0.85 } else { 1.0 };
+        self.zoom = base_zoom * portrait * (1.0 + self.zoom_punch);
         let half = v2(w, h) * (0.5 / self.zoom);
 
         let a = self.alpha;

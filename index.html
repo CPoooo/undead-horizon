@@ -11,6 +11,16 @@
   <link data-trunk rel="rust" data-wasm-opt="3" />
   <link data-trunk rel="css" href="ui/style.css" />
   <link data-trunk rel="copy-file" href="assets/favicon.svg" />
+  <link data-trunk rel="copy-file" href="assets/manifest.webmanifest" />
+  <link data-trunk rel="copy-file" href="assets/sw.js" />
+  <link data-trunk rel="copy-file" href="assets/icon-192.png" />
+  <link data-trunk rel="copy-file" href="assets/icon-512.png" />
+  <link data-trunk rel="copy-file" href="assets/icon-180.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
 </head>
 <body>
@@ -83,6 +93,7 @@
 
         <span class="tip-wrap"><button id="play" class="btn play-big">▶ PLAY</button><span class="tip" id="play-tip" role="tooltip"></span></span>
         <button id="hub-btn" class="btn secondary" style="margin-top:10px">🏠 Enter Home Base</button>
+        <button id="install-btn" class="btn small secondary" style="margin-top:8px;display:none">📲 Install the game</button>
         <button id="tune-btn" class="btn small secondary" style="margin-top:8px" title="Change the lobby music">🎵 Graveyard Shuffle ▸</button>
         <div class="hint" id="play-warn" style="text-align:center;color:#ffb070"></div>
         <div id="continues"></div>
