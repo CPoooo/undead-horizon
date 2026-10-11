@@ -369,6 +369,9 @@ impl Game {
             self.zombies[j].dead = true;
             self.predicted.push((uid, self.real_time));
             self.kill_effects(pos, kind, r);
+            if crit {
+                self.headshot(pos);
+            }
         }
         dead
     }
@@ -906,6 +909,7 @@ impl Game {
                     if killer == me {
                         self.credit_kill();
                     }
+                    self.note_kill(killer, kind, pos);
                     if kind == ZKind::Boss {
                         let bonus = (50.0 * self.difficulty().coins) as u32;
                         self.coins += bonus;

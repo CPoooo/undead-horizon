@@ -201,6 +201,7 @@ impl Game {
             self.player.hp = (self.player.hp + heal).min(self.player.max_hp);
         }
         let earned = ((10 + 5 * self.scale_n()) as f32 * self.difficulty().coins) as u32;
+        self.score += 100 * self.wave.n as u64;
         self.coins += earned;
         if let Some(net) = &mut self.net {
             let n = self.wave.n;

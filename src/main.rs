@@ -1,4 +1,5 @@
 mod audio;
+mod callouts;
 mod content;
 mod coop;
 mod game;

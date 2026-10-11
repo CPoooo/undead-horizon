@@ -695,6 +695,7 @@
         $('s-wave').textContent = s.wave;
         $('s-level').textContent = s.level;
         $('s-kills').textContent = s.kills;
+        $('s-score').textContent = (s.score || 0).toLocaleString();
         $('s-time').textContent = fmtTime(s.time);
         $('next-ch').style.display = 'none';
         let rec = '';

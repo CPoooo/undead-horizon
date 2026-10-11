@@ -1725,6 +1725,43 @@ impl Game {
             c.set_fill_style_str(col);
             outlined(c, &format!("{}× STREAK", self.combo), w - 18.0, 126.0, 4.0);
         }
+        // score + streak multiplier
+        c.set_font(&format!("800 {}px {}", if small { 12 } else { 14 }, font));
+        c.set_fill_style_str("#e8f0ff");
+        let mult = self.score_mult();
+        let score_line = if mult > 1.04 {
+            format!("{} pts · x{:.1}", self.score, mult)
+        } else {
+            format!("{} pts", self.score)
+        };
+        outlined(c, &score_line, w - 18.0, if self.combo >= 5 { 146.0 } else { 118.0 }, 3.0);
+
+        // multi-kill callout
+        if let Some(co) = &self.callout {
+            let k = co.t;
+            let pop = if k < 0.12 { 0.6 + k / 0.12 * 0.55 } else { 1.15 - ((k - 0.12) * 0.4).min(0.15) };
+            let alpha = if k > 1.0 { (1.4 - k) / 0.4 } else { 1.0 };
+            c.set_global_alpha(d(alpha.clamp(0.0, 1.0)));
+            c.set_text_align("center");
+            c.set_font(&format!("italic 900 {}px {}", ((if small { 30.0 } else { 44.0 }) * pop).round(), font));
+            c.set_fill_style_str(co.color);
+            outlined(c, co.text, w * 0.5, h * 0.3, 7.0);
+            c.set_global_alpha(1.0);
+            c.set_text_align("right");
+        }
+
+        // kill feed (top-left, under the health bar)
+        if !self.feed.is_empty() {
+            c.set_text_align("left");
+            c.set_font(&format!("700 {}px {}", if small { 11 } else { 13 }, font));
+            for (i, f) in self.feed.iter().enumerate() {
+                c.set_global_alpha(d(f.life.min(1.0)));
+                c.set_fill_style_str(f.color);
+                outlined(c, &f.text, 18.0, 84.0 + i as f32 * 18.0, 3.0);
+            }
+            c.set_global_alpha(1.0);
+            c.set_text_align("right");
+        }
 
         // boss bar
         if let Some(b) = self.zombies.iter().find(|z| z.kind == ZKind::Boss) {

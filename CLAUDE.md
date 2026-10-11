@@ -149,7 +149,7 @@ Not scheduled yet; design notes for when we pick it up.
   - Announcer voice lines ("Multi-kill!", "Max ammo!") via short synthesized vocoder-style sounds or the Web Speech API behind a toggle.
 - [x] J5 (S) **Camera.** Slight aim lookahead (toggle; the player stays roughly centered), zoom punch on ult or boss spawn, slow-mo on boss kill (extend `hitstop`).
 - [ ] J6 (S) **Haptics.** Gamepad `vibrationActuator` and `navigator.vibrate` on hurt, ult and boss, with an intensity setting.
-- [ ] J7 (S) **Callouts.** Kill feed (co-op aware), multi-kill and headshot-style callouts, and a combo multiplier that feeds score.
+- [x] J7 (S) **Callouts.** Kill feed (co-op aware), multi-kill and headshot-style callouts, and a combo multiplier that feeds score.
 
 ### M2 · Combat depth (survivor-like best practices)
 - [ ] C1 (S) **Level-up options.** Reroll, Banish and Skip with limited charges (meta-upgradable in P2). Extend `Levels::roll` and `draw_levelup`.

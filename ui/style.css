@@ -157,7 +157,7 @@ input[type=range] { flex: 1; accent-color: #7fd65a; }
 .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--muted); font-weight: 600; }
 .toggle input { width: 18px; height: 18px; accent-color: #7fd65a; }
 
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0 6px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 10px; margin: 16px 0 6px; }
 @media (max-width: 560px) { .stats { grid-template-columns: repeat(2, 1fr); } }
 .stat { background: rgba(0,0,0,.3); border: 1px solid var(--line); border-radius: 14px; padding: 12px; text-align: center; }
 .stat .v { font-size: 26px; font-weight: 900; }

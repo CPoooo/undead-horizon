@@ -360,6 +360,11 @@ pub struct Game {
     pub ghosts: Vec<Ghost>,
     pub lights: Vec<Light>,
     pub banner: Option<Banner>,
+    pub feed: Vec<crate::callouts::FeedItem>,
+    pub callout: Option<crate::callouts::Callout>,
+    pub multi_n: u32,
+    pub multi_t: f32,
+    pub score: u64,
     pub toast: Option<(String, f32)>,
     pub wave: Wave,
     pub ups: Levels,
@@ -472,6 +477,11 @@ impl Game {
             ghosts: Vec::new(),
             lights: Vec::new(),
             banner: None,
+            feed: Vec::new(),
+            callout: None,
+            multi_n: 0,
+            multi_t: 0.0,
+            score: 0,
             toast: None,
             wave: Wave {
                 n: 0,
@@ -687,6 +697,10 @@ impl Game {
         self.offers.clear();
         self.pending_levels = 0;
         self.kills = 0;
+        self.score = 0;
+        self.feed.clear();
+        self.callout = None;
+        self.multi_n = 0;
         self.combo = 0;
         self.best_combo = 0;
         self.damage_dealt = 0.0;
@@ -1021,6 +1035,7 @@ impl Game {
         self.ult_flash = (self.ult_flash - real_dt * 2.5).max(0.0);
         self.cam_kick = self.cam_kick * (1.0 - damp(16.0, real_dt));
         self.zoom_punch = (self.zoom_punch - real_dt * 0.6).max(0.0);
+        self.tick_callouts(real_dt);
         let look = if matches!(self.phase, Phase::Playing) && !self.player.downed {
             V2::from_angle(self.player.aim) * (55.0 * self.lookahead)
         } else {
@@ -1364,7 +1379,7 @@ impl Game {
         let name = self.player_name.replace(['\\', '"'], "");
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{}}}",
+            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{}}}",
             self.net.as_ref().map(|n| n.players()).unwrap_or(1),
             name,
             self.wave.n.max(1),
@@ -1377,7 +1392,8 @@ impl Game {
             self.chapter(),
             diff,
             GUNS[self.gun].id,
-            self.victory_t >= 0.0
+            self.victory_t >= 0.0,
+            self.score
         )
     }
 
@@ -1429,7 +1445,7 @@ impl Game {
         let ups: Vec<String> = self.ups.0.iter().map(|l| l.to_string()).collect();
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={}",
+            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={};score={}",
             SAVE_VERSION,
             self.player_name.replace([';', '=', '|'], ""),
             self.mode.id(),
@@ -1448,7 +1464,8 @@ impl Game {
             self.time,
             self.player.ult,
             self.best_combo,
-            self.best_wave
+            self.best_wave,
+            self.score
         )
     }
 
@@ -1482,6 +1499,7 @@ impl Game {
                 "time" => self.time = v.parse().unwrap_or(0.0),
                 "ult" => self.player.ult = v.parse().unwrap_or(0.0),
                 "combo" => self.best_combo = v.parse().unwrap_or(0),
+                "score" => self.score = v.parse().unwrap_or(0),
                 "ups" => {
                     for (i, l) in v.split(',').enumerate().take(self.ups.0.len()) {
                         self.ups.0[i] = l.parse().unwrap_or(0);
@@ -2008,6 +2026,9 @@ impl Game {
         z.vel += dir * knock * z.kind.def().knock;
         let pos = z.pos;
         let dead = z.hp <= 0.0;
+        if dead && crit && hit_slot == self.my_slot() {
+            self.headshot(pos);
+        }
         self.damage_dealt += dmg as f64;
         let (col, size) = if crit {
             ("#ffcf3a", 20.0)
@@ -2075,6 +2096,7 @@ impl Game {
                 w.u8(killer);
             });
         }
+        self.note_kill(if fuse_done { 255 } else { killer }, kind, pos);
         self.kill_effects(pos, kind, r);
         let big = kind.def().big;
         self.drop_loot(pos, kind, xp, r, big);
@@ -3125,5 +3147,30 @@ mod tests {
             g.frame(t);
         }
         assert!(g.slowmo <= 0.0, "slow motion wears off");
+    }
+
+    #[test]
+    fn multikills_streaks_and_score() {
+        let mut g = Game::new(12);
+        g.start("diff=rookie");
+        for k in 0..6 {
+            g.spawn_zombie(ZKind::Walker, v2(100.0 + k as f32 * 40.0, 0.0));
+        }
+        g.grid.build(g.player.pos, &g.zombies);
+        for j in 0..3 {
+            g.damage_zombie(j, 1.0e6, v2(1.0, 0.0), 0.0, false);
+        }
+        assert_eq!(g.callout.as_ref().map(|c| c.text), Some("TRIPLE KILL"));
+        let after3 = g.score;
+        assert!(after3 > 30, "kills plus the multi-kill bonus");
+        // streak multiplier grows the per-kill value
+        g.combo = 60;
+        let before = g.score;
+        g.damage_zombie(3, 1.0e6, v2(1.0, 0.0), 0.0, false);
+        assert!(g.score - before >= 40, "x4 multiplier at a 60 streak");
+        // the chain expires
+        g.tick_callouts(1.0);
+        assert_eq!(g.multi_n, 0);
+        assert!(g.save_string().contains(&format!("score={}", g.score)));
     }
 }
