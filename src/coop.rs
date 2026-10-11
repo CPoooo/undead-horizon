@@ -981,14 +981,7 @@ impl Game {
 }
 
 fn zkind_from(k: u8) -> ZKind {
-    match k {
-        1 => ZKind::Runner,
-        2 => ZKind::Brute,
-        3 => ZKind::Spitter,
-        4 => ZKind::Exploder,
-        5 => ZKind::Boss,
-        _ => ZKind::Walker,
-    }
+    ZKind::from_u8(k)
 }
 
 fn boss_from(v: u8) -> BossVar {
@@ -1004,7 +997,8 @@ fn boss_from(v: u8) -> BossVar {
 
 /// A client-side zombie built from a snapshot entry.
 fn replica(uid: u32, kind: ZKind, var: BossVar, pos: V2) -> Zombie {
-    let (hp, speed, r, dmg, xp) = kind.base();
+    let def = kind.def();
+    let (hp, speed, r, dmg, xp) = (def.hp, def.speed, def.r, def.dmg, def.xp);
     let r = if kind == ZKind::Boss {
         var.stats().1
     } else {

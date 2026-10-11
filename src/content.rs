@@ -56,6 +56,148 @@ pub fn difficulty_index(id: &str) -> usize {
     }
 }
 
+// ------------------------------------------------------------------ enemies
+
+/// Data for one zombie archetype, indexed by `ZKind as usize`. Behavior that
+/// can't be expressed as numbers (spitting, fuses, boss specials) still lives
+/// in `game.rs::update_zombies`, keyed on the kind.
+pub struct EnemyDef {
+    #[allow(dead_code)] // shown by the kill feed and bestiary
+    pub name: &'static str,
+    pub hp: f32,
+    pub speed: f32,
+    pub r: f32,
+    pub dmg: f32,
+    pub xp: u32,
+    /// multiplier on knockback taken (1 = full, 0 = immovable)
+    pub knock: f32,
+    /// first scaled wave it can spawn on; 0 = never spawns from the wave pool
+    pub min_wave: u32,
+    /// spawn weight: `base + per_wave * n`, capped at `cap`
+    pub weight: (f32, f32, f32),
+    /// clothing palette (one picked by tint), skin, dark outline
+    pub cloth: &'static [&'static str],
+    pub skin: &'static str,
+    pub dark: &'static str,
+    pub gore: &'static str,
+    pub decal: &'static str,
+    /// drops a gem shower, shakes the screen and gets a hitstop on death
+    pub big: bool,
+    /// draws an overhead health bar once damaged
+    pub hp_bar: bool,
+}
+
+pub const ENEMIES: [EnemyDef; 6] = [
+    EnemyDef {
+        name: "Walker",
+        hp: 20.0,
+        speed: 72.0,
+        r: 15.0,
+        dmg: 10.0,
+        xp: 1,
+        knock: 1.0,
+        min_wave: 1,
+        weight: (10.0, 0.0, 10.0),
+        cloth: &["#4b5a7a", "#6a4b3a", "#5a5a5a", "#3e5f4a"],
+        skin: "#7f9c5a",
+        dark: "#2e3a22",
+        gore: "#6f8f4e",
+        decal: "#4a0a0e",
+        big: false,
+        hp_bar: false,
+    },
+    EnemyDef {
+        name: "Runner",
+        hp: 12.0,
+        speed: 150.0,
+        r: 13.0,
+        dmg: 8.0,
+        xp: 1,
+        knock: 1.0,
+        min_wave: 2,
+        weight: (2.0, 0.4, 8.0),
+        cloth: &["#8a3b3b"],
+        skin: "#a3ad66",
+        dark: "#3a2020",
+        gore: "#9aa25a",
+        decal: "#4a0a0e",
+        big: false,
+        hp_bar: false,
+    },
+    EnemyDef {
+        name: "Brute",
+        hp: 150.0,
+        speed: 54.0,
+        r: 26.0,
+        dmg: 22.0,
+        xp: 6,
+        knock: 0.35,
+        min_wave: 4,
+        weight: (0.8, 0.12, 3.5),
+        cloth: &["#3a3f4a"],
+        skin: "#5f7f45",
+        dark: "#1d2418",
+        gore: "#4f6b3a",
+        decal: "#4a0a0e",
+        big: true,
+        hp_bar: true,
+    },
+    EnemyDef {
+        name: "Spitter",
+        hp: 26.0,
+        speed: 82.0,
+        r: 15.0,
+        dmg: 10.0,
+        xp: 3,
+        knock: 1.0,
+        min_wave: 6,
+        weight: (1.2, 0.1, 3.0),
+        cloth: &["#4a6b2a"],
+        skin: "#9fd04f",
+        dark: "#2a3d14",
+        gore: "#7fb04a",
+        decal: "#3e6b1f",
+        big: false,
+        hp_bar: true,
+    },
+    EnemyDef {
+        name: "Exploder",
+        hp: 18.0,
+        speed: 112.0,
+        r: 16.0,
+        dmg: 8.0,
+        xp: 2,
+        knock: 1.0,
+        min_wave: 3,
+        weight: (1.2, 0.15, 4.0),
+        cloth: &["#a3501c"],
+        skin: "#d0904a",
+        dark: "#4a200a",
+        gore: "#c9772f",
+        decal: "#4a0a0e",
+        big: false,
+        hp_bar: false,
+    },
+    EnemyDef {
+        name: "Boss",
+        hp: 1700.0,
+        speed: 74.0,
+        r: 46.0,
+        dmg: 30.0,
+        xp: 60,
+        knock: 0.06,
+        min_wave: 0,
+        weight: (0.0, 0.0, 0.0),
+        cloth: &["#5a3b5e"],
+        skin: "#5a3b5e",
+        dark: "#2a1a2e",
+        gore: "#5a3b5e",
+        decal: "#4a0a0e",
+        big: true,
+        hp_bar: false,
+    },
+];
+
 // ------------------------------------------------------------------ guns
 
 #[derive(Clone, Copy)]

@@ -119,7 +119,7 @@ Not scheduled yet; design notes for when we pick it up.
 - **Server changes:** append to `server/schema.sql` (idempotent), then `npm run db:schema` and `npm run deploy:api`. After any edit to `ui/cloud-src.js`, run `npm run build:cloud` (CI also does this).
 
 ### M0 · Foundations (do first; unblocks everything)
-- [ ] F1 (M) **Enemy table.** Move `ZKind::base()` stats, colors and behavior flags into `content.rs::ENEMIES` with an `EnemyDef` struct. Add new kinds by data. Done when zombie behavior is unchanged and all tests pass.
+- [x] F1 (M) **Enemy table.** Move `ZKind::base()` stats, colors and behavior flags into `content.rs::ENEMIES` with an `EnemyDef` struct. Add new kinds by data. Done when zombie behavior is unchanged and all tests pass.
 - [ ] F2 (M) **Authored maps.** Add a `Level` trait with `ProceduralWorld` (wraps `world.rs`) and `AuthoredMap`, loaded from `assets/maps/*.json`:
   - contents: walls as rect/polyline, doors with id/cost/linked zones, spawn windows, props, interactables with type and position
   - collision via `resolve`; rendering in `render.rs::draw_obstacle_base` style

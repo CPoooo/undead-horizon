@@ -31,16 +31,22 @@ pub enum ZKind {
 }
 
 impl ZKind {
-    /// (hp, speed, radius, contact damage, xp)
-    pub fn base(self) -> (f32, f32, f32, f32, u32) {
-        match self {
-            ZKind::Walker => (20.0, 72.0, 15.0, 10.0, 1),
-            ZKind::Runner => (12.0, 150.0, 13.0, 8.0, 1),
-            ZKind::Brute => (150.0, 54.0, 26.0, 22.0, 6),
-            ZKind::Spitter => (26.0, 82.0, 15.0, 10.0, 3),
-            ZKind::Exploder => (18.0, 112.0, 16.0, 8.0, 2),
-            ZKind::Boss => (1700.0, 74.0, 46.0, 30.0, 60),
-        }
+    pub const ALL: [ZKind; 6] = [
+        ZKind::Walker,
+        ZKind::Runner,
+        ZKind::Brute,
+        ZKind::Spitter,
+        ZKind::Exploder,
+        ZKind::Boss,
+    ];
+
+    pub fn def(self) -> &'static content::EnemyDef {
+        &content::ENEMIES[self as usize]
+    }
+
+    /// Wire / save id back to a kind (unknown ids become walkers).
+    pub fn from_u8(k: u8) -> ZKind {
+        ZKind::ALL.get(k as usize).copied().unwrap_or(ZKind::Walker)
     }
 }
 
@@ -1869,12 +1875,7 @@ impl Game {
         z.last_hitter = hit_slot;
         z.hp -= dmg;
         z.flash = 1.0;
-        let kres = match z.kind {
-            ZKind::Brute => 0.35,
-            ZKind::Boss => 0.06,
-            _ => 1.0,
-        };
-        z.vel += dir * knock * kres;
+        z.vel += dir * knock * z.kind.def().knock;
         let pos = z.pos;
         let dead = z.hp <= 0.0;
         self.damage_dealt += dmg as f64;
@@ -1945,21 +1946,15 @@ impl Game {
             });
         }
         self.kill_effects(pos, kind, r);
-        let big = matches!(kind, ZKind::Brute | ZKind::Boss);
+        let big = kind.def().big;
         self.drop_loot(pos, kind, xp, r, big);
         self.kill_aftermath(j, pos, kind, fuse_done);
     }
 
     /// Gore, decal and death sound (also used for client-side predicted kills).
     pub fn kill_effects(&mut self, pos: V2, kind: ZKind, r: f32) {
-        let skin = match kind {
-            ZKind::Walker => "#6f8f4e",
-            ZKind::Runner => "#9aa25a",
-            ZKind::Brute => "#4f6b3a",
-            ZKind::Spitter => "#7fb04a",
-            ZKind::Exploder => "#c9772f",
-            ZKind::Boss => "#5a3b5e",
-        };
+        let def = kind.def();
+        let skin = def.gore;
         let n = (6.0 + r * 0.5) as usize;
         self.burst(pos, n, 260.0 + r * 4.0, "#8a1018", 3.0, 0.7, true, false);
         self.burst(pos, n / 2, 220.0, skin, 4.0, 0.8, true, false);
@@ -1971,11 +1966,7 @@ impl Game {
             pos,
             r: r * self.rng.range(1.1, 1.7),
             life: 22.0,
-            color: if kind == ZKind::Spitter {
-                "#3e6b1f"
-            } else {
-                "#4a0a0e"
-            },
+            color: def.decal,
             seed,
         });
         match kind {
@@ -2890,24 +2881,19 @@ impl Game {
 
     fn pick_kind(&mut self) -> ZKind {
         let n = self.scale_n() as f32;
-        let mut opts: Vec<(ZKind, f32)> = vec![(ZKind::Walker, 10.0)];
-        if n >= 2.0 {
-            opts.push((ZKind::Runner, (2.0 + n * 0.4).min(8.0)));
-        }
-        if n >= 3.0 {
-            opts.push((ZKind::Exploder, (1.2 + n * 0.15).min(4.0)));
-        }
-        if n >= 4.0 {
-            opts.push((ZKind::Brute, (0.8 + n * 0.12).min(3.5)));
-        }
-        if n >= 6.0 {
-            opts.push((ZKind::Spitter, (1.2 + n * 0.1).min(3.0)));
-        }
-        let total: f32 = opts.iter().map(|o| o.1).sum();
+        let weight = |k: ZKind| {
+            let d = k.def();
+            if d.min_wave == 0 || n < d.min_wave as f32 {
+                0.0
+            } else {
+                (d.weight.0 + d.weight.1 * n).min(d.weight.2)
+            }
+        };
+        let total: f32 = ZKind::ALL.iter().map(|k| weight(*k)).sum();
         let mut r = self.rng.f() * total;
-        for (k, w) in opts {
-            r -= w;
-            if r <= 0.0 {
+        for k in ZKind::ALL {
+            r -= weight(k);
+            if r <= 0.0 && weight(k) > 0.0 {
                 return k;
             }
         }
@@ -2915,7 +2901,8 @@ impl Game {
     }
 
     fn spawn_zombie(&mut self, kind: ZKind, pos: V2) {
-        let (hp, speed, r, dmg, xp) = kind.base();
+        let def = kind.def();
+        let (hp, speed, r, dmg, xp) = (def.hp, def.speed, def.r, def.dmg, def.xp);
         let n = self.scale_n();
         let df = self.difficulty();
         let (dhp, dspeed, ddmg) = (df.hp, df.speed, df.dmg);
@@ -3130,6 +3117,31 @@ mod tests {
                 "seed {seed}: expected lots of kills, got {}",
                 g.kills
             );
+        }
+    }
+
+    #[test]
+    fn enemy_table_drives_spawns() {
+        let mut g = Game::new(7);
+        g.phase = Phase::Playing;
+        // wave 1 only spawns walkers; later waves unlock kinds by `min_wave`
+        g.wave.n = 1;
+        for _ in 0..200 {
+            assert_eq!(g.pick_kind(), ZKind::Walker);
+        }
+        g.wave.n = 12;
+        let mut seen = [false; 6];
+        for _ in 0..4000 {
+            seen[g.pick_kind() as usize] = true;
+        }
+        assert!(seen[..5].iter().all(|s| *s), "all wave kinds spawn by wave 12");
+        assert!(!seen[ZKind::Boss as usize], "bosses never come from the pool");
+        // stats come from the table
+        for k in ZKind::ALL {
+            g.zombies.clear();
+            g.spawn_zombie(k, v2(500.0, 0.0));
+            assert_eq!(g.zombies[0].r, k.def().r);
+            assert_eq!(ZKind::from_u8(k as u8), k);
         }
     }
 }

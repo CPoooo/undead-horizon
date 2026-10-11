@@ -919,16 +919,12 @@ impl Game {
         let bob = (z.anim * 2.0).sin() * r * 0.08;
         let sway = (z.anim * 1.3).sin() * 0.25;
 
-        let (cloth, skin, dark) = match z.kind {
-            ZKind::Walker => {
-                let cl = ["#4b5a7a", "#6a4b3a", "#5a5a5a", "#3e5f4a"];
-                (cl[(z.tint * 3.99) as usize], "#7f9c5a", "#2e3a22")
-            }
-            ZKind::Runner => ("#8a3b3b", "#a3ad66", "#3a2020"),
-            ZKind::Brute => ("#3a3f4a", "#5f7f45", "#1d2418"),
-            ZKind::Spitter => ("#4a6b2a", "#9fd04f", "#2a3d14"),
-            ZKind::Exploder => ("#a3501c", "#d0904a", "#4a200a"),
-            ZKind::Boss => z.boss_var.colors(),
+        let def = z.kind.def();
+        let (cloth, skin, dark) = if z.kind == ZKind::Boss {
+            z.boss_var.colors()
+        } else {
+            let n = def.cloth.len();
+            (def.cloth[((z.tint * n as f32) as usize).min(n - 1)], def.skin, def.dark)
         };
 
         // arms reaching toward the player
@@ -1038,7 +1034,7 @@ impl Game {
             circle(c, head.x, head.y, hr);
             c.set_global_alpha(1.0);
         }
-        if z.hp < z.max_hp && matches!(z.kind, ZKind::Brute | ZKind::Spitter) {
+        if z.hp < z.max_hp && def.hp_bar {
             let bw = r * 2.0;
             let k = (z.hp / z.max_hp).max(0.0);
             c.set_fill_style_str("rgba(0,0,0,0.6)");
