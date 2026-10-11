@@ -887,7 +887,7 @@
     if (!list?.length) { box.style.display = 'none'; return; }
     box.style.display = '';
     for (const p of list) {
-      box.innerHTML = `<div class="sp" style="background:${p.bg}"><div class="sp-art">${p.art.replace(/\\n/g, '<br>')}</div><div class="sp-cap">${esc(p.cap)}</div></div>`;
+      box.innerHTML = `<div class="sp" style="background:${p.bg}"><div class="sp-art">${p.art.replace(/\n/g, '<br>')}</div><div class="sp-cap">${esc(p.cap)}</div></div>`;
       await new Promise((res) => {
         const t = setTimeout(res, 2600);
         box.onclick = () => { clearTimeout(t); res(); };
