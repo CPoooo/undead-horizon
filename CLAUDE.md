@@ -264,7 +264,7 @@ Original design notes:
 - [x] M5 (S) **Ping and quick chat.**
   - Ping wheel: "Here", "Enemy", "Need revive", "Box here".
   - World markers and minimap pings, plus quick-chat emotes.
-- [ ] M6 (S) **End-of-match scoreboard.** Kills, downs, revives, points, damage, MVP; per-player stats via events.
+- [x] M6 (S) **End-of-match scoreboard.** Kills, downs, revives, points, damage, MVP; per-player stats via events.
 - [ ] M7 (M) **Public parties and Quick Play.** Opt-in public parties listed via the social server; auto-fill to 3–4.
 - [x] M8 (S) **Lobby text chat.** Rate limit, length cap, a basic profanity filter, and block/report (server table).
 - [ ] M9 (S) **Co-op modes.** Campaign co-op: the host's chapter, with progress credited to all who have it unlocked.

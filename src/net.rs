@@ -15,7 +15,7 @@ pub const MAX_PLAYERS: usize = 3;
 
 /// Bump whenever the wire format or sim rules change in a way that would
 /// desync peers running different builds.
-pub const PROTOCOL: u16 = 10;
+pub const PROTOCOL: u16 = 11;
 
 pub const MSG_PSTATE: u8 = 1; // client -> host (unreliable): own player state
 pub const MSG_HITS: u8 = 2; // client -> host (reliable): damage dealt to zombies
@@ -89,6 +89,11 @@ pub struct NetPlayer {
     pub hat: u8,
     pub tracer: u8,
     pub gun: u8,
+    /// running match stats for the end-of-match scoreboard
+    pub kills: u32,
+    pub score: u32,
+    pub downs: u8,
+    pub dmg: u32,
 }
 
 impl NetPlayer {
@@ -272,6 +277,10 @@ pub fn write_player(w: &mut W, p: &NetPlayer) {
     w.u8(p.hat);
     w.u8(p.tracer);
     w.u8(p.gun);
+    w.u32(p.kills);
+    w.u32(p.score);
+    w.u8(p.downs);
+    w.u32(p.dmg);
 }
 
 pub fn read_player(r: &mut R) -> Option<NetPlayer> {
@@ -290,6 +299,10 @@ pub fn read_player(r: &mut R) -> Option<NetPlayer> {
         hat: r.u8()?,
         tracer: r.u8()?,
         gun: r.u8()?,
+        kills: r.u32()?,
+        score: r.u32()?,
+        downs: r.u8()?,
+        dmg: r.u32()?,
     })
 }
 
@@ -314,6 +327,7 @@ mod tests {
             hat: 6,
             tracer: 2,
             gun: 4,
+            ..Default::default()
         };
         let mut w = W::new();
         write_player(&mut w, &p);

@@ -460,3 +460,6 @@ body.reduce-motion *, body.reduce-motion *::before { transition: none !important
 #story-panel .sp-cap { position: absolute; left: 12px; bottom: 10px; right: 12px; background: #f6efd8; color: #1a1408; font-weight: 800; font-size: 14px; padding: 6px 10px; border-radius: 4px; box-shadow: 3px 3px 0 #0b0e14; }
 @keyframes kenburns { from { transform: scale(1.12) translateY(8px); opacity: .3; } to { transform: scale(1) translateY(0); opacity: 1; } }
 .story-text .pt { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-style: normal; margin-right: 6px; vertical-align: middle; font-size: 15px; }
+
+#go-squad table.squad { margin: 10px 0; }
+#go-squad .tag { background: #ffd36a; color: #1a1206; border-radius: 4px; padding: 0 5px; font-size: 10px; font-weight: 900; }

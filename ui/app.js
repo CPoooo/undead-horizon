@@ -1378,6 +1378,15 @@
         $('s-level').textContent = s.level;
         $('s-kills').textContent = s.kills;
         $('s-score').textContent = (s.score || 0).toLocaleString();
+        // co-op: squad scoreboard with an MVP
+        const squad = Array.isArray(s.squad) ? s.squad : [];
+        if (squad.length > 1) {
+          const mvp = squad.reduce((a, b) => (b.score > a.score ? b : a));
+          $('go-squad').innerHTML = `<table class="lb squad"><thead><tr><th></th><th>Squad</th><th>Kills</th><th>Score</th><th>Damage</th><th>Downs</th></tr></thead><tbody>${squad
+            .sort((a, b) => b.score - a.score)
+            .map((m) => `<tr class="${m.me ? 'me' : ''}"><td>${m === mvp ? '👑' : ''}</td><td class="name">${esc(m.name)}${m === mvp ? ' <span class="tag">MVP</span>' : ''}</td><td>${m.kills}</td><td>${(m.score || 0).toLocaleString()}</td><td>${(m.dmg || 0).toLocaleString()}</td><td>${m.downs}</td></tr>`)
+            .join('')}</tbody></table>`;
+        } else $('go-squad').innerHTML = '';
         $('s-time').textContent = fmtTime(s.time);
         $('next-ch').style.display = 'none';
         let rec = '';

@@ -463,6 +463,8 @@ pub struct Game {
     pub weather: crate::weather::Weather,
     pub biome: Option<world::Biome>,
     pub pings: Vec<crate::ping::Ping>,
+    /// times downed this match (co-op scoreboard)
+    pub downs: u32,
     /// the touch USE button is visible
     pub use_shown: bool,
     /// render big hordes with cheap zombies
@@ -644,6 +646,7 @@ impl Game {
             weather: crate::weather::Weather::new(),
             biome: None,
             pings: Vec::new(),
+            downs: 0,
             use_shown: false,
             lod: false,
             ready_shown: false,
@@ -915,6 +918,7 @@ impl Game {
         self.weather = crate::weather::Weather::new();
         self.biome = None;
         self.pings.clear();
+        self.downs = 0;
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -1910,7 +1914,7 @@ impl Game {
         let name = self.player_name.replace(['\\', '"'], "");
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{},\"mutated\":{},\"daily\":\"{}\",\"cause\":\"{}\",\"build\":\"{}\"}}",
+            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{},\"mutated\":{},\"daily\":\"{}\",\"cause\":\"{}\",\"build\":\"{}\",\"squad\":[{}]}}",
             self.net.as_ref().map(|n| n.players()).unwrap_or(1),
             name,
             self.wave.n.max(1),
@@ -1936,8 +1940,30 @@ impl Game {
             self.mutators.any(),
             self.daily,
             self.death_cause.replace('"', ""),
-            self.ups.0.iter().enumerate().filter(|(_, l)| **l > 0).map(|(i, l)| format!("{}:{}", i, l)).collect::<Vec<_>>().join(",")
+            self.ups.0.iter().enumerate().filter(|(_, l)| **l > 0).map(|(i, l)| format!("{}:{}", i, l)).collect::<Vec<_>>().join(","),
+            self.squad_json()
         )
+    }
+
+    /// Everyone in the match, for the end-of-match scoreboard.
+    fn squad_json(&self) -> String {
+        let Some(n) = &self.net else { return String::new() };
+        let row = |name: &str, k: u32, s: u64, d: u32, dmg: f64, me: bool| {
+            format!(
+                "{{\"name\":\"{}\",\"kills\":{},\"score\":{},\"downs\":{},\"dmg\":{},\"me\":{}}}",
+                name.replace(['"', '\\'], ""),
+                k,
+                s,
+                d,
+                dmg as u64,
+                me
+            )
+        };
+        let mut rows = vec![row(&self.player_name, self.kills, self.score, self.downs, self.damage_dealt, true)];
+        for r in n.remotes.iter().filter(|r| r.present) {
+            rows.push(row(&r.name, r.state.kills, r.state.score as u64, r.state.downs as u32, r.state.dmg as f64, false));
+        }
+        rows.join(",")
     }
 
     /// Detailed snapshot for the pause screen's stats panel.

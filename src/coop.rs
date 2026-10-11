@@ -230,6 +230,7 @@ impl Game {
     // ------------------------------------------------------------ downed / revive
     pub fn go_down(&mut self) {
         self.lose_perks();
+        self.downs += 1;
         let p = &mut self.player;
         p.hp = 0.0;
         p.downed = true;
@@ -532,6 +533,10 @@ impl Game {
             hat: self.hat as u8,
             tracer: self.tracer as u8,
             gun: self.gun as u8,
+            kills: self.kills,
+            score: self.score.min(u32::MAX as u64) as u32,
+            downs: self.downs.min(255) as u8,
+            dmg: self.damage_dealt.min(u32::MAX as f64) as u32,
         }
     }
 
@@ -1361,5 +1366,17 @@ mod tests {
         host.try_ping();
         pump(&mut host, &mut client, &mut t, 5, |_, _, _| {});
         assert!(client.pings.iter().any(|p| p.slot == 0), "client sees the host's ping");
+    }
+
+    #[test]
+    fn scoreboard_has_everyone() {
+        let (mut host, mut client) = pair();
+        let mut t = 0.0;
+        client.kills = 42;
+        client.score = 1234;
+        pump(&mut host, &mut client, &mut t, 10, |_, _, _| {});
+        let js = host.stats_json();
+        assert!(js.contains("\"kills\":42") && js.contains("\"score\":1234"), "{js}");
+        assert!(js.contains("\"me\":true"));
     }
 }
