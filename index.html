@@ -31,6 +31,7 @@
 
       <!-- left: play setup -->
       <div class="side">
+        <div id="party-box"></div>
         <label class="field" for="name">Survivor name</label>
         <input id="name" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off" spellcheck="false" />
 
@@ -74,6 +75,7 @@
           <button data-tab="lb" class="on">🏆 Leaderboard</button>
           <button data-tab="shop">🛒 Shop</button>
           <button data-tab="locker">🎒 Locker</button>
+          <button data-tab="friends">👥 Friends</button>
           <button data-tab="settings">⚙️ Settings</button>
         </div>
 
@@ -96,6 +98,10 @@
 
         <div class="tab" id="tab-locker">
           <div id="locker"></div>
+        </div>
+
+        <div class="tab" id="tab-friends">
+          <div id="friends"></div>
         </div>
 
         <div class="tab" id="tab-settings">
@@ -209,6 +215,7 @@
     </div>
   </div>
 
+  <div id="invite-pop"></div>
   <button id="pause-btn" aria-label="Pause">II</button>
   <div id="touch-ui">
     <button class="tbtn ult" id="t-ult">☢️</button>
@@ -218,5 +225,6 @@
   <script data-trunk src="ui/config.js"></script>
   <script data-trunk src="ui/cloud.js"></script>
   <script data-trunk src="ui/app.js"></script>
+  <script data-trunk src="ui/coop.js"></script>
 </body>
 </html>

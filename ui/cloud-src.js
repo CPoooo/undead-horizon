@@ -80,6 +80,9 @@ if (cfg.apiBase && cfg.authUrl) {
     name: 'cloud',
     user: null,
     api,
+    /** Fresh Neon Auth JWT (used for the social WebSocket). */
+    token: () => getToken(),
+    wsUrl: API.replace(/^http/, 'ws') + '/ws',
     /** Leaderboard is public: works signed in or out. */
     leaderboard: (diff) => api('/leaderboard' + (diff && diff !== 'all' ? '?diff=' + encodeURIComponent(diff) : ''), { authed: false }),
     async restore() {

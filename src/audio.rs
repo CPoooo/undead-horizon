@@ -112,6 +112,10 @@ impl Audio {
 
     /// Must be called from a user gesture (browser autoplay policy).
     pub fn unlock(&mut self) {
+        // native unit tests have no WebAudio
+        if cfg!(not(target_arch = "wasm32")) {
+            return;
+        }
         if self.ctx.is_none() {
             let _ = self.init();
         }

@@ -1,6 +1,7 @@
 use crate::audio::{Audio, Sfx, Track};
 use crate::content::{self, BossVar, CHAPTERS, DIFFICULTIES, GUNS};
 use crate::math::*;
+use crate::net::{self, Net};
 use crate::upgrades::{Levels, Up};
 use crate::world;
 use std::f32::consts::{PI, TAU};
@@ -31,7 +32,7 @@ pub enum ZKind {
 
 impl ZKind {
     /// (hp, speed, radius, contact damage, xp)
-    fn base(self) -> (f32, f32, f32, f32, u32) {
+    pub fn base(self) -> (f32, f32, f32, f32, u32) {
         match self {
             ZKind::Walker => (20.0, 72.0, 15.0, 10.0, 1),
             ZKind::Runner => (12.0, 150.0, 13.0, 8.0, 1),
@@ -70,6 +71,12 @@ pub struct Player {
     pub nova_t: f32,
     pub bolt_t: f32,
     pub ghost_t: f32,
+    // co-op
+    pub downed: bool,
+    pub dead: bool,
+    pub revive: f32,
+    pub bleed: f32,
+    pub shots: u8,
 }
 
 pub struct Zombie {
@@ -100,6 +107,8 @@ pub struct Zombie {
     pub tint: f32,
     pub boss_var: BossVar,
     pub special_t: f32,
+    /// slot of the player who last damaged it (kill credit in co-op)
+    pub last_hitter: u8,
 }
 
 pub struct Bullet {
@@ -116,6 +125,9 @@ pub struct Bullet {
     pub dead: bool,
     pub blast: f32,
     pub knock: f32,
+    /// a teammate's shot: drawn locally, damage is dealt on their client
+    pub cosmetic: bool,
+    pub tracer: u8,
 }
 
 pub struct EShot {
@@ -385,6 +397,15 @@ pub struct Game {
     pub coins: u32,
     pub victory_t: f32,
     pub ult_queued: bool,
+    // co-op networking (None in single player)
+    pub net: Option<Net>,
+    pub net_in: Vec<(u8, Vec<u8>)>,
+    pub net_out: Vec<(u8, bool, Vec<u8>)>,
+    pub net_remaining: u32,
+    pub predicted: Vec<(u32, f64)>,
+    pub hit_slot: u8,
+    /// party members shown next to us in the lobby: (name, skin, hat, gun)
+    pub lobby_mates: Vec<(String, usize, usize, usize)>,
 }
 
 fn xp_for(level: u32) -> f32 {
@@ -478,6 +499,13 @@ impl Game {
             coins: 0,
             victory_t: -1.0,
             ult_queued: false,
+            net: None,
+            net_in: Vec::new(),
+            net_out: Vec::new(),
+            net_remaining: 0,
+            predicted: Vec::new(),
+            hit_slot: 0,
+            lobby_mates: Vec::new(),
         };
         g.player.pos = v2(0.0, 0.0);
         g
@@ -511,6 +539,11 @@ impl Game {
             nova_t: 2.0,
             bolt_t: 1.0,
             ghost_t: 0.0,
+            downed: false,
+            dead: false,
+            revive: 0.0,
+            bleed: 0.0,
+            shots: 0,
         }
     }
 
@@ -588,6 +621,11 @@ impl Game {
         self.coins = 0;
         self.victory_t = -1.0;
         self.ult_queued = false;
+        self.net = None;
+        self.net_in.clear();
+        self.net_out.clear();
+        self.predicted.clear();
+        self.hit_slot = 0;
         self.wave = Wave {
             n: 0,
             total: 0,
@@ -677,12 +715,22 @@ impl Game {
         self.zombies.iter().filter(|z| !z.dead).count() as u32
     }
     pub fn remaining(&self) -> u32 {
+        if self.is_client() {
+            return self.net_remaining;
+        }
         self.wave.total.saturating_sub(self.wave.spawned)
             + self.alive()
             + if self.wave.boss_pending { 1 } else { 0 }
     }
 
     // ---------------------------------------------------------------- helpers
+    pub fn push_sfx(&mut self, s: Sfx, at: V2) {
+        self.sfx(s, at);
+    }
+    pub fn push_text(&mut self, pos: V2, s: String, color: &'static str, size: f32) {
+        self.text(pos, s, color, size);
+    }
+
     fn sfx(&mut self, s: Sfx, at: V2) {
         if self.pending_sfx.len() < 48 {
             self.pending_sfx.push((s, at));
@@ -706,7 +754,7 @@ impl Game {
         }
     }
 
-    fn add_shake(&mut self, amt: f32) {
+    pub fn add_shake(&mut self, amt: f32) {
         self.shake = (self.shake + amt).min(1.0);
     }
 
@@ -764,7 +812,7 @@ impl Game {
         }
     }
 
-    fn ring(&mut self, pos: V2, max_r: f32, life: f32, color: &'static str, width: f32) {
+    pub fn ring(&mut self, pos: V2, max_r: f32, life: f32, color: &'static str, width: f32) {
         self.rings.push(Ring {
             pos,
             r: 4.0,
@@ -825,7 +873,34 @@ impl Game {
                 };
                 self.alpha = 1.0;
             }
-            Phase::Playing | Phase::Dying => {
+            Phase::Playing | Phase::Dying => self.simulate(real_dt),
+            Phase::LevelUp | Phase::Paused if self.net.is_some() => {
+                if self.phase == Phase::LevelUp {
+                    self.levelup_t += real_dt;
+                }
+                self.simulate(real_dt);
+            }
+            Phase::LevelUp => {
+                self.levelup_t += real_dt;
+            }
+            Phase::Paused | Phase::GameOver => {}
+        }
+        self.net_tick();
+
+        if let Some(b) = &mut self.banner {
+            if self.phase != Phase::Paused && (self.phase != Phase::LevelUp || self.net.is_some()) {
+                b.t += real_dt;
+            }
+            if b.t > b.dur {
+                self.banner = None;
+            }
+        }
+        self.frame_tail(real_dt);
+    }
+
+    fn simulate(&mut self, real_dt: f32) {
+        {
+            {
                 let scale = if self.phase == Phase::Dying { 0.3 } else { 1.0 };
                 if self.hitstop > 0.0 {
                     self.hitstop -= real_dt;
@@ -861,20 +936,10 @@ impl Game {
                     }
                 }
             }
-            Phase::LevelUp => {
-                self.levelup_t += real_dt;
-            }
-            Phase::Paused | Phase::GameOver => {}
         }
+    }
 
-        if let Some(b) = &mut self.banner {
-            if self.phase != Phase::Paused && self.phase != Phase::LevelUp {
-                b.t += real_dt;
-            }
-            if b.t > b.dur {
-                self.banner = None;
-            }
-        }
+    fn frame_tail(&mut self, real_dt: f32) {
         if let Some(t) = &mut self.toast {
             t.1 -= real_dt;
             if t.1 <= 0.0 {
@@ -965,6 +1030,7 @@ impl Game {
                         "Digit1" | "Numpad1" => self.choose(0),
                         "Digit2" | "Numpad2" => self.choose(1),
                         "Digit3" | "Numpad3" => self.choose(2),
+                        "KeyA" | "KeyD" if self.net.is_some() => {}
                         "ArrowLeft" | "KeyA" => {
                             if self.sel > 0 {
                                 self.sel -= 1;
@@ -1045,6 +1111,7 @@ impl Game {
         self.phase = Phase::Menu;
         self.audio.set_track(Track::Lobby);
         self.audio.music_on = true;
+        self.net = None;
         self.player = Game::fresh_player();
         self.ups = Levels::default();
         self.victory_t = -1.0;
@@ -1113,9 +1180,10 @@ impl Game {
         } else {
             self.phase = Phase::Playing;
             self.last_ms = -1.0;
-            // breathing room: shove nearby zombies away
+            // breathing room: shove nearby zombies away (host/solo own the zombies)
             let p = self.player.pos;
-            for z in self.zombies.iter_mut() {
+            let owns_zombies = !self.is_client();
+            for z in self.zombies.iter_mut().filter(|_| owns_zombies) {
                 let d = z.pos - p;
                 let l = d.len();
                 if l < 240.0 && l > 0.1 {
@@ -1186,7 +1254,8 @@ impl Game {
         let name = self.player_name.replace(['\\', '"'], "");
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{}}}",
+            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{}}}",
+            self.net.as_ref().map(|n| n.players()).unwrap_or(1),
             name,
             self.wave.n.max(1),
             self.player.level,
@@ -1324,7 +1393,10 @@ impl Game {
     // ---------------------------------------------------------------- simulation
     fn step(&mut self) {
         self.time += DT;
-        let alive_play = self.phase == Phase::Playing;
+        let coop = self.net.is_some();
+        let client = self.is_client();
+        let alive_play = self.phase == Phase::Playing
+            || (coop && matches!(self.phase, Phase::LevelUp | Phase::Paused));
 
         self.grid.build(self.player.pos, &self.zombies);
         if alive_play && self.ult_queued {
@@ -1334,21 +1406,39 @@ impl Game {
             self.zombies.retain(|z| !z.dead);
             self.grid.build(self.player.pos, &self.zombies);
         }
-        if alive_play {
+        if alive_play && !self.player.dead {
             self.update_player();
-            self.update_weapons();
+            if self.player_alive() {
+                self.update_weapons();
+            }
         }
-        self.update_zombies();
+        if client {
+            // replicas: only cosmetic timers tick locally; positions come from snapshots
+            for z in self.zombies.iter_mut() {
+                z.flash = (z.flash - DT * 7.0).max(0.0);
+                z.blade_cd -= DT;
+                z.anim += DT * 0.6;
+            }
+        } else {
+            self.update_zombies();
+        }
         self.grid.build(self.player.pos, &self.zombies);
-        self.separate();
+        if !client {
+            self.separate();
+        }
         self.update_bullets();
-        self.update_eshots();
-        if alive_play {
+        if !client {
+            self.update_eshots();
+        }
+        if alive_play && !client {
             self.update_pickups();
         }
         self.update_effects();
-        if alive_play {
+        if alive_play && !client {
             self.update_waves();
+        }
+        if coop && alive_play {
+            self.update_revive();
         }
 
         self.zombies.retain(|z| !z.dead);
@@ -1362,7 +1452,7 @@ impl Game {
                 self.player.xp_next = xp_for(self.player.level);
                 self.pending_levels += 1;
             }
-            if self.pending_levels > 0 && self.phase == Phase::Playing {
+            if self.pending_levels > 0 && self.phase == Phase::Playing && self.player_alive() {
                 self.open_levelup();
             }
         }
@@ -1391,7 +1481,10 @@ impl Game {
 
     fn update_player(&mut self) {
         let mdir = self.move_dir();
-        let speed = self.move_speed();
+        let speed = self.move_speed() * if self.player.downed { 0.25 } else { 1.0 };
+        if self.player.downed {
+            self.player.dash_buf = 0.0;
+        }
         let dash_cd = self.dash_cooldown();
         let p = &mut self.player;
         p.prev = p.pos;
@@ -1695,6 +1788,8 @@ impl Game {
                 dead: false,
                 blast: gun.blast,
                 knock: gun.knock,
+                cosmetic: false,
+                tracer: g.tracer as u8,
             });
         };
         let n = gun.pellets as i32 + extra;
@@ -1718,6 +1813,7 @@ impl Game {
             shoot(self, a);
         }
         self.player.recoil = 1.0;
+        self.player.shots = self.player.shots.wrapping_add(1);
         let muzzle = ppos + V2::from_angle(aim) * (gun.len + 4.0);
         let flash_n = if gun.heavy { 7 } else { 3 };
         for _ in 0..flash_n {
@@ -1748,10 +1844,15 @@ impl Game {
     }
 
     pub fn damage_zombie(&mut self, j: usize, dmg: f32, dir: V2, knock: f32, crit: bool) -> bool {
+        if self.is_client() {
+            return self.client_hit(j, dmg, dir, knock, crit);
+        }
+        let hit_slot = self.hit_slot;
         let z = &mut self.zombies[j];
         if z.dead {
             return false;
         }
+        z.last_hitter = hit_slot;
         z.hp -= dmg;
         z.flash = 1.0;
         let kres = match z.kind {
@@ -1802,25 +1903,41 @@ impl Game {
     }
 
     fn kill_zombie(&mut self, j: usize) {
-        let (pos, kind, xp, r, fuse_done) = {
+        let (pos, kind, xp, r, fuse_done, uid, killer) = {
             let z = &mut self.zombies[j];
             z.dead = true;
-            (z.pos, z.kind, z.xp, z.r, z.fuse < -0.5)
+            (
+                z.pos,
+                z.kind,
+                z.xp,
+                z.r,
+                z.fuse < -0.5,
+                z.uid,
+                z.last_hitter,
+            )
         };
-        self.kills += 1;
-        self.combo += 1;
-        self.combo_t = 2.5;
-        self.best_combo = self.best_combo.max(self.combo);
-        let was = self.player.ult;
-        self.player.ult = (self.player.ult + 1.0 / (70.0 + 15.0 * self.ult_uses as f32)).min(1.0);
-        if was < 1.0 && self.player.ult >= 1.0 && !self.ult_ready_played {
-            self.ult_ready_played = true;
-            self.sfx(Sfx::UltReady, self.player.pos);
-            self.toast = Some(("ULTIMATE READY — press Q".into(), 2.2));
+        // a fuse that went off on its own isn't anyone's kill
+        if !fuse_done && killer == self.my_slot() {
+            self.credit_kill();
         }
-
-        // gore
+        if let Some(net) = &mut self.net {
+            let killer = if fuse_done { 255 } else { killer };
+            net.event(|w| {
+                w.u8(net::E_KILL);
+                w.u32(uid);
+                w.v2(pos);
+                w.u8(kind as u8);
+                w.u8(killer);
+            });
+        }
+        self.kill_effects(pos, kind, r);
         let big = matches!(kind, ZKind::Brute | ZKind::Boss);
+        self.drop_loot(pos, kind, xp, r, big);
+        self.kill_aftermath(j, pos, kind, fuse_done);
+    }
+
+    /// Gore, decal and death sound (also used for client-side predicted kills).
+    pub fn kill_effects(&mut self, pos: V2, kind: ZKind, r: f32) {
         let skin = match kind {
             ZKind::Walker => "#6f8f4e",
             ZKind::Runner => "#9aa25a",
@@ -1847,8 +1964,20 @@ impl Game {
             },
             seed,
         });
+        match kind {
+            ZKind::Boss => {
+                self.sfx(Sfx::BigDie, pos);
+                self.sfx(Sfx::Explosion, pos);
+                self.ring(pos, 260.0, 0.6, "#ffb0ff", 12.0);
+                self.burst(pos, 60, 700.0, "#ff6aff", 4.0, 0.8, false, true);
+            }
+            ZKind::Brute => self.sfx(Sfx::BigDie, pos),
+            ZKind::Exploder => {}
+            _ => self.sfx(Sfx::ZombieDie, pos),
+        }
+    }
 
-        // xp
+    fn drop_loot(&mut self, pos: V2, kind: ZKind, xp: u32, r: f32, big: bool) {
         let bonus = self.wave.n / 4;
         let mut drops = if big { 4 + (r / 10.0) as u32 } else { 1 };
         if kind == ZKind::Boss {
@@ -1887,23 +2016,13 @@ impl Game {
                 dead: false,
             });
         }
+    }
 
-        // vampirism
-        let vl = self.ups.get(Up::Vampire);
-        if vl > 0 && self.rng.chance(0.04 * vl as f32) {
-            self.player.hp = (self.player.hp + 3.0).min(self.player.max_hp);
-            let pp = self.player.pos;
-            self.text(pp, "+3".into(), "#ff4d6d", 14.0);
-        }
-
+    fn kill_aftermath(&mut self, j: usize, pos: V2, kind: ZKind, fuse_done: bool) {
         match kind {
             ZKind::Boss => {
-                self.sfx(Sfx::BigDie, pos);
-                self.sfx(Sfx::Explosion, pos);
                 self.add_shake(0.8);
                 self.hitstop = 0.12;
-                self.ring(pos, 260.0, 0.6, "#ffb0ff", 12.0);
-                self.burst(pos, 60, 700.0, "#ff6aff", 4.0, 0.8, false, true);
                 let bonus = (50.0 * self.difficulty().coins) as u32;
                 self.coins += bonus;
                 let name = self.zombies[j].boss_var.name();
@@ -1924,16 +2043,13 @@ impl Game {
                 }
             }
             ZKind::Brute => {
-                self.sfx(Sfx::BigDie, pos);
                 self.add_shake(0.25);
                 self.hitstop = self.hitstop.max(0.035);
             }
             ZKind::Exploder => {
                 self.explode(pos, 115.0, 45.0 * hp_mult(self.wave.n).sqrt(), fuse_done);
             }
-            _ => {
-                self.sfx(Sfx::ZombieDie, pos);
-            }
+            _ => {}
         }
     }
 
@@ -1967,8 +2083,15 @@ impl Game {
                 self.damage_zombie(j, dmg * 1.5, dir, 420.0, false);
             }
         }
-        if hurts_player && self.player.pos.dist(pos) < radius + PR {
-            self.hurt_player(dmg * 0.6, pos);
+        if hurts_player {
+            self.hurt_players_in(pos, radius, dmg * 0.6);
+        }
+        if let Some(net) = &mut self.net {
+            net.event(|w| {
+                w.u8(net::E_BLAST);
+                w.v2(pos);
+                w.f32(radius);
+            });
         }
         self.ring(pos, radius, 0.35, "#ffb24a", 8.0);
         self.burst(pos, 26, 520.0, "#ffb24a", 4.0, 0.45, false, true);
@@ -1978,15 +2101,16 @@ impl Game {
         self.add_shake(if d < 400.0 { 0.35 } else { 0.1 });
     }
 
-    fn hurt_player(&mut self, dmg: f32, from: V2) {
-        if self.phase != Phase::Playing {
+    pub fn hurt_player(&mut self, dmg: f32, from: V2) {
+        let coop_live = self.net.is_some() && matches!(self.phase, Phase::LevelUp | Phase::Paused);
+        if self.phase != Phase::Playing && !coop_live {
             return;
         }
         if self.victory_t >= 0.0 {
             return;
         }
         let p = &mut self.player;
-        if p.iframes > 0.0 || p.dash_t > 0.0 {
+        if p.iframes > 0.0 || p.dash_t > 0.0 || p.downed || p.dead {
             return;
         }
         p.hp -= dmg;
@@ -2000,7 +2124,9 @@ impl Game {
         self.burst(pos, 14, 260.0, "#c0101c", 3.0, 0.6, true, false);
         self.sfx(Sfx::Hurt, pos);
         self.combo = 0;
-        if self.player.hp <= 0.0 {
+        if self.player.hp <= 0.0 && self.net.is_some() {
+            self.go_down();
+        } else if self.player.hp <= 0.0 {
             self.player.hp = 0.0;
             self.phase = Phase::Dying;
             self.dying_t = 0.0;
@@ -2012,19 +2138,20 @@ impl Game {
     }
 
     fn update_zombies(&mut self) {
-        let ppos = self.player.pos;
+        let targets = self.targets();
         let wave_n = self.scale_n();
-        let mut contacts: Vec<usize> = Vec::new();
+        let mut contacts: Vec<(usize, u8)> = Vec::new();
         let mut fuses: Vec<usize> = Vec::new();
         let mut boss_summons: Vec<(V2, ZKind, u32)> = Vec::new();
         let mut blasts: Vec<V2> = Vec::new();
         let relocate_r = self.spawn_r * 1.7;
-        let pvel = self.player.vel;
-        let playing = self.phase == Phase::Playing;
+        let playing = self.phase == Phase::Playing
+            || (self.net.is_some() && matches!(self.phase, Phase::LevelUp | Phase::Paused));
         for (i, z) in self.zombies.iter_mut().enumerate() {
             if z.dead {
                 continue;
             }
+            let (tslot, ppos, pvel) = Game::nearest_target(&targets, z.pos);
             z.prev = z.pos;
             z.flash = (z.flash - DT * 7.0).max(0.0);
             z.attack_cd -= DT;
@@ -2241,9 +2368,9 @@ impl Game {
 
             // contact with player
             let rr = z.r + PR;
-            if dist < rr && playing {
+            if dist < rr && playing && tslot != 255 {
                 if z.attack_cd <= 0.0 {
-                    contacts.push(i);
+                    contacts.push((i, tslot));
                     z.attack_cd = 0.8;
                 }
                 if dist > 0.01 {
@@ -2252,8 +2379,12 @@ impl Game {
             }
         }
 
-        for i in contacts {
+        for (i, slot) in contacts {
             let (dmg, zp) = (self.zombies[i].dmg, self.zombies[i].pos);
+            if slot != self.my_slot() {
+                self.hurt_slot(slot, dmg, zp);
+                continue;
+            }
             let was_iframe = self.player.iframes > 0.0 || self.player.dash_t > 0.0;
             self.hurt_player(dmg, zp);
             let tl = self.ups.get(Up::Thorns);
@@ -2373,6 +2504,9 @@ impl Game {
                 }
             }
             b.pos += b.vel * DT;
+            if b.cosmetic {
+                continue;
+            }
 
             let mut hit = None;
             let zs = &self.zombies;
@@ -2446,7 +2580,7 @@ impl Game {
     }
 
     fn update_eshots(&mut self) {
-        let ppos = self.player.pos;
+        let targets = self.targets();
         let mut hits = Vec::new();
         for (i, s) in self.eshots.iter_mut().enumerate() {
             s.prev = s.pos;
@@ -2454,27 +2588,31 @@ impl Game {
             s.life -= DT;
             if s.life <= 0.0 {
                 s.dead = true;
-            } else if s.pos.dist(ppos) < PR + 7.0 {
+            } else if let Some(t) = targets
+                .iter()
+                .find(|t| t.0 != 255 && s.pos.dist(t.1) < PR + 7.0)
+            {
                 s.dead = true;
-                hits.push(i);
+                hits.push((i, t.0));
             }
         }
-        for i in hits {
+        for (i, slot) in hits {
             let (d, p) = (self.eshots[i].dmg, self.eshots[i].pos);
-            self.hurt_player(d, p);
+            self.hurt_slot(slot, d, p);
             self.burst(p, 10, 200.0, "#9be04a", 3.0, 0.4, true, false);
         }
         self.eshots.retain(|s| !s.dead);
     }
 
     fn update_pickups(&mut self) {
-        let ppos = self.player.pos;
+        let targets = self.targets();
         let mr = self.magnet_r();
         let mut gained = 0.0;
         let mut picked = 0;
         for g in self.gems.iter_mut() {
             g.prev = g.pos;
             g.t += DT;
+            let ppos = Game::nearest_target(&targets, g.pos).1;
             let d = ppos - g.pos;
             let l = d.len();
             if !g.magnet && l < mr && g.t > 0.15 {
@@ -2494,29 +2632,62 @@ impl Game {
                 picked += 1;
             }
         }
+        let ppos = self.player.pos;
         if picked > 0 {
+            // team xp: everybody levels from every gem
             self.player.xp += gained;
             self.sfx(Sfx::Pickup, ppos);
+            if let Some(net) = &mut self.net {
+                net.event(|w| {
+                    w.u8(net::E_XP);
+                    w.f32(gained);
+                });
+            }
         }
 
         let mut collected = Vec::new();
         for (i, pk) in self.pickups.iter_mut().enumerate() {
             pk.t += DT;
-            let d = ppos - pk.pos;
+            let (tslot, tpos, _) = Game::nearest_target(&targets, pk.pos);
+            let d = tpos - pk.pos;
             let l = d.len();
             if l < 60.0 {
                 pk.pos += d.norm() * 300.0 * DT;
             }
-            if l < PR + 14.0 {
+            if l < PR + 14.0 && tslot != 255 {
                 pk.dead = true;
-                collected.push(i);
+                collected.push((i, tslot));
             }
             if pk.t > 30.0 {
                 pk.dead = true;
             }
         }
-        for i in collected {
+        for (i, slot) in collected {
             let k = self.pickups[i].kind;
+            if slot != self.my_slot() {
+                // a teammate grabbed it
+                let heal = 30.0 + self.player.max_hp * 0.1;
+                if let Some(net) = &mut self.net {
+                    match k {
+                        PickKind::Heart => net.event(|w| {
+                            w.u8(net::E_HEAL);
+                            w.u8(slot);
+                            w.f32(heal);
+                        }),
+                        PickKind::Frenzy => net.event(|w| {
+                            w.u8(net::E_FRENZY);
+                            w.u8(slot);
+                        }),
+                        PickKind::Vacuum => {}
+                    }
+                }
+                if k == PickKind::Vacuum {
+                    for g in self.gems.iter_mut() {
+                        g.magnet = true;
+                    }
+                }
+                continue;
+            }
             match k {
                 PickKind::Heart => {
                     let heal = 30.0 + self.player.max_hp * 0.1;
@@ -2647,6 +2818,15 @@ impl Game {
             color: if boss { "#ff6a8a" } else { "#e8f0ff" },
         });
         self.sfx(Sfx::WaveStart, self.player.pos);
+        if let Some(net) = &mut self.net {
+            let total = self.wave.total;
+            net.event(|w| {
+                w.u8(net::E_WAVE_START);
+                w.u16(n.min(u16::MAX as u32) as u16);
+                w.u16((total + boss as u32).min(u16::MAX as u32) as u16);
+                w.u8(boss as u8);
+            });
+        }
     }
 
     fn spawn_boss(&mut self, var: BossVar, pos: V2) {
@@ -2775,6 +2955,7 @@ impl Game {
             tint: self.rng.f(),
             boss_var: BossVar::Abomination,
             special_t: 2.0,
+            last_hitter: 0,
         });
     }
 
@@ -2801,8 +2982,8 @@ impl Game {
             let gmax = 3 + lvl / 2;
             let g =
                 (2 + self.rng.below(gmax as usize) as u32).min(self.wave.total - self.wave.spawned);
-            let ppos = self.player.pos;
-            let pv = self.player.vel;
+            let targets = self.targets();
+            let (_, ppos, pv) = targets[self.rng.below(targets.len())];
             let a = if pv.len2() > 900.0 && self.rng.chance(0.4) {
                 pv.angle() + self.rng.range(-0.7, 0.7)
             } else {
@@ -2828,10 +3009,17 @@ impl Game {
                     (content::INFINITE_BOSSES[i], false)
                 };
                 let a = self.rng.angle();
-                let p = self.player.pos + V2::from_angle(a) * (self.spawn_r - 40.0);
+                let center = self.targets()[0].1;
+                let p = center + V2::from_angle(a) * (self.spawn_r - 40.0);
                 self.spawn_boss(var, p);
+                if let Some(net) = &mut self.net {
+                    net.event(|w| {
+                        w.u8(net::E_BOSS);
+                        w.u8(var as u8);
+                    });
+                }
                 if twin {
-                    let p2 = self.player.pos + V2::from_angle(a + PI) * (self.spawn_r - 40.0);
+                    let p2 = center + V2::from_angle(a + PI) * (self.spawn_r - 40.0);
                     self.spawn_boss(var, p2);
                 }
                 self.toast = Some((var.name().to_string(), 2.5));
@@ -2852,9 +3040,19 @@ impl Game {
             g.magnet = true;
         }
         let heal = self.player.max_hp * 0.1;
-        self.player.hp = (self.player.hp + heal).min(self.player.max_hp);
+        if self.player_alive() {
+            self.player.hp = (self.player.hp + heal).min(self.player.max_hp);
+        }
         let earned = ((10 + 5 * self.scale_n()) as f32 * self.difficulty().coins) as u32;
         self.coins += earned;
+        if let Some(net) = &mut self.net {
+            let n = self.wave.n;
+            net.event(|w| {
+                w.u8(net::E_WAVE_CLEAR);
+                w.u16(n.min(u16::MAX as u32) as u16);
+                w.u16(earned.min(u16::MAX as u32) as u16);
+            });
+        }
         self.banner = Some(Banner {
             title: format!("WAVE {} CLEARED", self.wave.n),
             sub: format!(

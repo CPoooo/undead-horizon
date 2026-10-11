@@ -90,13 +90,72 @@ fn wrap(c: &Ctx, s: &str, max_w: f32) -> Vec<String> {
     lines
 }
 
+const REVIVE_R: f32 = 75.0;
+
+/// Everything needed to draw a survivor (local, teammate or lobby showcase).
+pub struct PView {
+    pub aim: f32,
+    pub vel: V2,
+    pub walk: f32,
+    pub recoil: f32,
+    pub blink: bool,
+    pub frenzy: bool,
+    pub hurt: f32,
+    pub skin: usize,
+    pub gun: usize,
+    pub hat: usize,
+    pub downed: bool,
+    pub revive: f32,
+}
+
 enum Draw {
+    Remote(usize),
     Player,
     Zombie(usize),
     Ob(Obstacle),
 }
 
 impl Game {
+    fn local_view(&self) -> PView {
+        let pl = &self.player;
+        PView {
+            aim: pl.aim,
+            vel: pl.vel,
+            walk: pl.walk,
+            recoil: pl.recoil,
+            blink: pl.iframes > 0.0 && pl.dash_t <= 0.0 && !pl.downed,
+            frenzy: pl.frenzy > 0.0,
+            hurt: pl.hurt_flash,
+            skin: self.skin,
+            gun: self.gun,
+            hat: self.hat,
+            downed: pl.downed,
+            revive: pl.revive,
+        }
+    }
+
+    fn remote_view(r: &crate::net::Remote) -> PView {
+        let s = &r.state;
+        PView {
+            aim: s.aim,
+            vel: s.vel,
+            walk: r.walk,
+            recoil: r.recoil,
+            blink: false,
+            frenzy: s.flags & crate::net::PF_FRENZY != 0,
+            hurt: if s.flags & crate::net::PF_HURT != 0 {
+                0.8
+            } else {
+                0.0
+            },
+            skin: s.skin as usize,
+            gun: s.gun as usize,
+            hat: s.hat as usize,
+            downed: s.downed(),
+            revive: s.revive,
+        }
+    }
+
     fn lift(&self, base: V2, h: f32) -> V2 {
         base + (base - self.cam) * (h / (CAM_H - h))
     }
@@ -117,7 +176,7 @@ impl Game {
             ((t * 61.0).sin() + (t * 23.0).sin() * 0.5) * sh,
             ((t * 53.0).cos() + (t * 31.0).cos() * 0.5) * sh,
         );
-        self.cam = ppos;
+        self.cam = self.camera_pos(ppos);
 
         let _ = c.set_transform(d(dpr), 0.0, 0.0, d(dpr), 0.0, 0.0);
         c.set_image_smoothing_enabled(true);
@@ -147,11 +206,19 @@ impl Game {
 
         // depth-sorted bodies
         let mut list: Vec<(f32, Draw)> = Vec::with_capacity(self.zombies.len() + obs.len() + 1);
-        if !matches!(self.phase, Phase::Menu | Phase::Dying | Phase::GameOver) {
+        if !matches!(self.phase, Phase::Menu | Phase::Dying | Phase::GameOver) && !self.player.dead
+        {
             list.push((ppos.y, Draw::Player));
         }
+        if let Some(n) = &self.net {
+            for (i, r) in n.remotes.iter().enumerate() {
+                if r.present && !r.state.dead() {
+                    list.push((r.render_pos(self.real_time).y, Draw::Remote(i)));
+                }
+            }
+        }
         for (i, z) in self.zombies.iter().enumerate() {
-            let zp = z.prev.lerp(z.pos, a);
+            let zp = z.prev.lerp(z.pos, self.za(a));
             if zp.x > vmin.x && zp.x < vmax.x && zp.y > vmin.y && zp.y < vmax.y {
                 list.push((zp.y, Draw::Zombie(i)));
             }
@@ -164,7 +231,13 @@ impl Game {
         self.draw_ghosts(c);
         for (_, dr) in list.iter() {
             match dr {
-                Draw::Player => self.draw_player(c, ppos, t),
+                Draw::Player => self.draw_player(c, ppos, t, &self.local_view()),
+                Draw::Remote(i) => {
+                    if let Some(r) = self.net.as_ref().map(|n| &n.remotes[*i]) {
+                        let rp = r.render_pos(self.real_time);
+                        self.draw_player(c, rp, t, &Game::remote_view(r));
+                    }
+                }
                 Draw::Zombie(i) => self.draw_zombie(c, *i, a, t),
                 Draw::Ob(o) => self.draw_obstacle_base(c, o),
             }
@@ -217,11 +290,45 @@ impl Game {
             );
             c.fill();
             c.set_global_alpha(1.0);
-            self.draw_player(c, ppos, t);
+            self.draw_player(c, ppos, t, &self.local_view());
+            // party members stand beside us
+            let font = "'Inter','Segoe UI',system-ui,sans-serif";
+            for (k, (name, skin, hat, gun)) in self.lobby_mates.iter().enumerate() {
+                let side = if k == 0 { -1.0 } else { 1.0 };
+                let mp = ppos + v2(side * 62.0, 10.0);
+                c.set_global_alpha(0.25);
+                c.set_fill_style_str("#7ad7ff");
+                c.begin_path();
+                let _ = c.ellipse(d(mp.x), d(mp.y + 6.0), 24.0, 12.0, 0.0, 0.0, TAU64);
+                c.fill();
+                c.set_global_alpha(1.0);
+                let view = PView {
+                    aim: self.player.aim + side * 0.4,
+                    vel: self.player.vel,
+                    walk: self.player.walk + k as f32,
+                    recoil: 0.0,
+                    blink: false,
+                    frenzy: false,
+                    hurt: 0.0,
+                    skin: *skin,
+                    gun: *gun,
+                    hat: *hat,
+                    downed: false,
+                    revive: 0.0,
+                };
+                self.draw_player(c, mp, t, &view);
+                c.set_text_align("center");
+                c.set_text_baseline("middle");
+                c.set_font(&format!("800 6px {}", font));
+                c.set_fill_style_str("#9cffb8");
+                c.set_stroke_style_str("rgba(0,0,0,0.85)");
+                outlined(c, name, mp.x, mp.y - 30.0, 1.5);
+            }
             c.restore();
         }
         self.draw_bolts(c, t);
         self.draw_texts(c);
+        self.draw_teammate_tags(c, t);
         c.restore();
 
         // ---------------- screen space
@@ -230,6 +337,9 @@ impl Game {
             self.draw_offscreen(c, w, h, a, t);
             self.draw_hud(c, w, h, t);
             self.draw_minimap(c, w, h, a, t);
+        }
+        if self.coop() && !matches!(self.phase, Phase::Menu) {
+            self.draw_coop_hud(c, w, h, t);
         }
         if self.phase == Phase::LevelUp {
             self.draw_levelup(c, w, h, t);
@@ -402,7 +512,7 @@ impl Game {
             }
         }
         for z in self.zombies.iter() {
-            let p = z.prev.lerp(z.pos, a) + v2(3.0, z.r * 0.55);
+            let p = z.prev.lerp(z.pos, self.za(a)) + v2(3.0, z.r * 0.55);
             c.move_to(d(p.x + z.r * 1.05), d(p.y));
             let _ = c.ellipse(d(p.x), d(p.y), d(z.r * 1.05), d(z.r * 0.5), 0.0, 0.0, TAU64);
         }
@@ -491,7 +601,7 @@ impl Game {
 
     fn draw_telegraphs(&self, c: &Ctx, a: f32, t: f32) {
         for z in self.zombies.iter() {
-            let p = z.prev.lerp(z.pos, a);
+            let p = z.prev.lerp(z.pos, self.za(a));
             if z.kind == ZKind::Boss && z.state == 1 {
                 let k = 1.0 - (z.timer / 0.75).clamp(0.0, 1.0);
                 c.save();
@@ -548,23 +658,46 @@ impl Game {
         c.set_global_alpha(1.0);
     }
 
-    fn draw_player(&self, c: &Ctx, p: V2, t: f32) {
-        let pl = &self.player;
-        let blink = pl.iframes > 0.0 && pl.dash_t <= 0.0 && ((t * 24.0) as i32 % 2 == 0);
+    fn draw_player(&self, c: &Ctx, p: V2, t: f32, v: &PView) {
+        let blink = v.blink && ((t * 24.0) as i32 % 2 == 0);
+        if v.downed {
+            let pulse = 0.5 + 0.5 * (t * 5.0).sin();
+            c.set_global_alpha(d(0.35 + 0.3 * pulse));
+            c.set_stroke_style_str("#ff4a4a");
+            c.set_line_width(3.0);
+            c.begin_path();
+            let _ = c.arc(d(p.x), d(p.y), d(REVIVE_R), 0.0, TAU64);
+            c.stroke();
+            if v.revive > 0.0 {
+                c.set_global_alpha(1.0);
+                c.set_stroke_style_str("#9cffb8");
+                c.set_line_width(5.0);
+                c.begin_path();
+                let _ = c.arc(
+                    d(p.x),
+                    d(p.y),
+                    d(REVIVE_R),
+                    -PI as f64 / 2.0,
+                    -PI as f64 / 2.0 + TAU64 * v.revive as f64,
+                );
+                c.stroke();
+            }
+            c.set_global_alpha(0.55);
+        }
         if blink {
             c.set_global_alpha(0.45);
         }
-        let aim = pl.aim;
+        let aim = v.aim;
         let fwd = V2::from_angle(aim);
         let side = fwd.perp();
-        let moving = pl.vel.len() > 30.0;
-        let step = if moving { (pl.walk * 2.2).sin() } else { 0.0 };
+        let moving = v.vel.len() > 30.0;
+        let step = if moving { (v.walk * 2.2).sin() } else { 0.0 };
 
-        let skin = &SKINS[self.skin];
-        let gun = &GUNS[self.gun];
+        let skin = &SKINS[v.skin.min(SKINS.len() - 1)];
+        let gun = &GUNS[v.gun.min(GUNS.len() - 1)];
         // feet
         c.set_fill_style_str(skin.feet);
-        let mv = if moving { pl.vel.norm() } else { fwd };
+        let mv = if moving { v.vel.norm() } else { fwd };
         let f1 = p + side * 7.0 + mv * (step * 6.0);
         let f2 = p - side * 7.0 - mv * (step * 6.0);
         circle(c, f1.x, f1.y + 4.0, 5.0);
@@ -576,7 +709,7 @@ impl Game {
         circle(c, bp.x, bp.y - 2.0, 8.5);
 
         // gun
-        let rec = pl.recoil * 4.0;
+        let rec = v.recoil * 4.0;
         let g0 = p + fwd * (6.0 - rec) + side * 5.0;
         let g1 = p + fwd * (gun.len + 6.0 - rec) + side * 5.0;
         c.set_stroke_style_str(gun.color);
@@ -609,7 +742,7 @@ impl Game {
         circle(c, body.x, body.y, PR);
         c.set_fill_style_str(skin.light);
         circle(c, body.x - 2.0, body.y - 3.0, PR * 0.78);
-        if pl.frenzy > 0.0 {
+        if v.frenzy {
             let _ = c.set_global_composite_operation("lighter");
             c.set_global_alpha(d(0.25 + 0.15 * (t * 20.0).sin()));
             c.set_fill_style_str("#ffd84a");
@@ -642,20 +775,20 @@ impl Game {
         let e2 = head + fwd * 5.0 - side * 3.0;
         circle(c, e1.x, e1.y, 1.4);
         circle(c, e2.x, e2.y, 1.4);
-        self.draw_hat(c, head, aim, t);
-        if pl.hurt_flash > 0.0 {
-            c.set_global_alpha(d(pl.hurt_flash * 0.7));
+        self.draw_hat(c, head, aim, t, v.hat);
+        if v.hurt > 0.0 {
+            c.set_global_alpha(d(v.hurt * 0.7));
             c.set_fill_style_str("#ff2a2a");
             circle(c, body.x, body.y, PR + 2.0);
         }
         c.set_global_alpha(1.0);
 
         // muzzle flash
-        if pl.recoil > 0.6 {
+        if v.recoil > 0.6 {
             let m = p + fwd * (gun.len + 10.0) + side * 5.0 + v2(0.0, -4.0);
             let _ = c.set_global_composite_operation("lighter");
             c.set_fill_style_str("#ffcf6a");
-            c.set_global_alpha(d((pl.recoil - 0.6) * 2.2));
+            c.set_global_alpha(d((v.recoil - 0.6) * 2.2));
             circle(c, m.x, m.y, 9.0);
             c.set_fill_style_str("#ffffff");
             circle(c, m.x, m.y, 4.0);
@@ -664,10 +797,10 @@ impl Game {
         }
     }
 
-    fn draw_hat(&self, c: &Ctx, head: V2, aim: f32, t: f32) {
+    fn draw_hat(&self, c: &Ctx, head: V2, aim: f32, t: f32, hat: usize) {
         let fwd = V2::from_angle(aim);
         let side = fwd.perp();
-        match HATS[self.hat] {
+        match HATS[hat.min(HATS.len() - 1)] {
             "cap" => {
                 c.set_fill_style_str("#c0283a");
                 circle(c, head.x - fwd.x, head.y - fwd.y - 1.0, 8.5);
@@ -776,7 +909,7 @@ impl Game {
 
     fn draw_zombie(&self, c: &Ctx, i: usize, a: f32, t: f32) {
         let z = &self.zombies[i];
-        let p = z.prev.lerp(z.pos, a);
+        let p = z.prev.lerp(z.pos, self.za(a));
         let r = z.r;
         let face = z.face;
         let fwd = V2::from_angle(face);
@@ -1117,22 +1250,41 @@ impl Game {
     fn draw_bullets(&self, c: &Ctx, a: f32) {
         let _ = c.set_global_composite_operation("lighter");
         c.set_line_cap("round");
-        let tr = TRACERS[self.tracer];
         let rainbow = [
             "#ff4a4a", "#ffb84a", "#fff04a", "#4aff7a", "#4ac8ff", "#c04aff",
         ];
-        let (trail, core) = if tr.0 == "rainbow" {
-            let k = (self.real_time * 6.0) as usize % rainbow.len();
-            (rainbow[k], "#ffffff")
-        } else {
-            (tr.1, tr.2)
-        };
-        for (crit, col, w) in [(false, trail, 5.0f32), (true, "#ff7a2a", 8.0)] {
+        // one batch per tracer style in use (yours + teammates'), crits on top
+        let mut styles: Vec<u8> = self
+            .bullets
+            .iter()
+            .filter(|b| !b.crit)
+            .map(|b| b.tracer)
+            .collect();
+        styles.sort_unstable();
+        styles.dedup();
+        let mut passes: Vec<(Option<u8>, &str, &str, f32)> = styles
+            .into_iter()
+            .map(|ti| {
+                let tr = TRACERS[(ti as usize).min(TRACERS.len() - 1)];
+                let (trail, core) = if tr.0 == "rainbow" {
+                    let k = (self.real_time * 6.0) as usize % rainbow.len();
+                    (rainbow[k], "#ffffff")
+                } else {
+                    (tr.1, tr.2)
+                };
+                (Some(ti), trail, core, 5.0f32)
+            })
+            .collect();
+        passes.push((None, "#ff7a2a", "#fff2a0", 8.0));
+        for (style, col, core, w) in passes {
+            let crit = style.is_none();
+            let pick =
+                |b: &&crate::game::Bullet| b.crit == crit && (crit || Some(b.tracer) == style);
             c.set_stroke_style_str(col);
             c.set_line_width(d(w));
             c.set_global_alpha(0.55);
             c.begin_path();
-            for b in self.bullets.iter().filter(|b| b.crit == crit) {
+            for b in self.bullets.iter().filter(pick) {
                 let p = b.prev.lerp(b.pos, a);
                 let tail = p - b.vel * 0.022;
                 c.move_to(d(tail.x), d(tail.y));
@@ -1140,9 +1292,9 @@ impl Game {
             }
             c.stroke();
             c.set_global_alpha(1.0);
-            c.set_fill_style_str(if crit { "#fff2a0" } else { core });
+            c.set_fill_style_str(core);
             c.begin_path();
-            for b in self.bullets.iter().filter(|b| b.crit == crit) {
+            for b in self.bullets.iter().filter(pick) {
                 let p = b.prev.lerp(b.pos, a);
                 path_circle(c, p.x, p.y, b.r * 0.75);
             }
@@ -1338,7 +1490,7 @@ impl Game {
             if !(few || z.kind == ZKind::Boss) {
                 continue;
             }
-            let zp = z.prev.lerp(z.pos, a);
+            let zp = z.prev.lerp(z.pos, self.za(a));
             let s = center + (zp - self.cam) * self.zoom;
             if s.x > 0.0 && s.x < w && s.y > 0.0 && s.y < h {
                 continue;
@@ -1836,7 +1988,7 @@ impl Game {
             c.begin_path();
             for z in self.zombies.iter() {
                 if kinds.contains(&z.kind) {
-                    let m = to_map(z.prev.lerp(z.pos, a));
+                    let m = to_map(z.prev.lerp(z.pos, self.za(a)));
                     path_circle(c, m.x, m.y, size);
                 }
             }
@@ -1907,6 +2059,28 @@ impl Game {
             c.stroke();
         }
 
+        // teammates
+        if let Some(n) = &self.net {
+            for tm in n.remotes.iter().filter(|tm| tm.present && !tm.state.dead()) {
+                let mut m = (tm.render_pos(self.real_time) - cam) * k;
+                if m.len() > r - 5.0 {
+                    m = m.norm() * (r - 5.0);
+                }
+                let p = centre + m;
+                c.set_fill_style_str(if tm.state.downed() {
+                    "#ff7a7a"
+                } else {
+                    "#4ade80"
+                });
+                circle(c, p.x, p.y, 4.0);
+                c.set_stroke_style_str("#ffffff");
+                c.set_line_width(1.0);
+                c.begin_path();
+                let _ = c.arc(d(p.x), d(p.y), 4.5, 0.0, TAU64);
+                c.stroke();
+            }
+        }
+
         // player arrow (points along aim)
         c.save();
         let _ = c.translate(d(cx), d(cy));
@@ -1953,6 +2127,168 @@ impl Game {
             )
         };
         outlined(c, &label, cx, ty, 3.0);
+    }
+
+    /// Names + health bars above teammates (world space).
+    fn draw_teammate_tags(&self, c: &Ctx, t: f32) {
+        let Some(n) = &self.net else { return };
+        let font = "'Inter','Segoe UI',system-ui,sans-serif";
+        let s = 1.0 / self.zoom.max(0.5);
+        c.set_text_align("center");
+        c.set_text_baseline("middle");
+        c.set_line_join("round");
+        for r in n.remotes.iter().filter(|r| r.present && !r.state.dead()) {
+            let p = r.render_pos(self.real_time) + v2(0.0, -42.0);
+            c.set_font(&format!("800 {}px {}", (13.0 * s).round(), font));
+            c.set_stroke_style_str("rgba(0,0,0,0.85)");
+            c.set_fill_style_str(if r.state.downed() {
+                "#ff7a7a"
+            } else {
+                "#9cffb8"
+            });
+            outlined(c, &r.name, p.x, p.y, 3.0 * s);
+            let bw = 44.0 * s;
+            let k = (r.state.hp / r.state.max_hp).clamp(0.0, 1.0);
+            c.set_fill_style_str("rgba(0,0,0,0.6)");
+            c.fill_rect(d(p.x - bw * 0.5), d(p.y + 9.0 * s), d(bw), d(5.0 * s));
+            c.set_fill_style_str("#4ade80");
+            c.fill_rect(d(p.x - bw * 0.5), d(p.y + 9.0 * s), d(bw * k), d(5.0 * s));
+            if r.state.downed() {
+                let pulse = 0.6 + 0.4 * (t * 6.0).sin();
+                c.set_global_alpha(d(pulse));
+                c.set_font(&format!("900 {}px {}", (12.0 * s).round(), font));
+                c.set_fill_style_str("#ffdddd");
+                outlined(c, "DOWN · REVIVE ME", p.x, p.y - 16.0 * s, 3.0 * s);
+                c.set_global_alpha(1.0);
+            }
+        }
+    }
+
+    /// Screen-space co-op HUD: teammate list, downed/spectating state, arrows.
+    fn draw_coop_hud(&self, c: &Ctx, w: f32, h: f32, t: f32) {
+        let Some(n) = &self.net else { return };
+        let font = "'Inter','Segoe UI',system-ui,sans-serif";
+        // teammate cards under the HP bar
+        let mut y = 92.0;
+        c.set_text_baseline("middle");
+        for r in n.remotes.iter().filter(|r| r.present) {
+            let s = &r.state;
+            round_rect(c, 16.0, y, 180.0, 30.0, 8.0);
+            c.set_fill_style_str("rgba(10,12,20,0.7)");
+            c.fill();
+            c.set_text_align("left");
+            c.set_font(&format!("800 12px {}", font));
+            let (status, col) = if s.dead() {
+                ("☠", "#8a8a8a")
+            } else if s.downed() {
+                ("⬇", "#ff7a7a")
+            } else {
+                ("", "#e8eefc")
+            };
+            c.set_fill_style_str(col);
+            text(
+                c,
+                &format!("{} {}", status, r.name).trim().to_string(),
+                26.0,
+                y + 10.0,
+            );
+            c.set_text_align("right");
+            c.set_fill_style_str("#94a0bd");
+            text(c, &format!("Lv {}", s.level), 188.0, y + 10.0);
+            let k = if s.dead() {
+                0.0
+            } else {
+                (s.hp / s.max_hp).clamp(0.0, 1.0)
+            };
+            c.set_fill_style_str("rgba(255,255,255,0.1)");
+            c.fill_rect(26.0, d(y + 20.0), 160.0, 4.0);
+            c.set_fill_style_str(if s.downed() { "#ff7a7a" } else { "#4ade80" });
+            c.fill_rect(
+                26.0,
+                d(y + 20.0),
+                d(160.0 * if s.downed() { s.revive } else { k }),
+                4.0,
+            );
+            y += 36.0;
+        }
+        // arrows to teammates who are off-screen
+        let center = v2(w * 0.5, h * 0.5);
+        for r in n.remotes.iter().filter(|r| r.present && !r.state.dead()) {
+            let sp = center + (r.render_pos(self.real_time) - self.cam) * self.zoom;
+            if sp.x > 0.0 && sp.x < w && sp.y > 0.0 && sp.y < h {
+                continue;
+            }
+            let dir = (sp - center).norm();
+            let kx = if dir.x.abs() > 1e-4 {
+                (w * 0.5 - 40.0) / dir.x.abs()
+            } else {
+                f32::MAX
+            };
+            let ky = if dir.y.abs() > 1e-4 {
+                (h * 0.5 - 40.0) / dir.y.abs()
+            } else {
+                f32::MAX
+            };
+            let e = center + dir * kx.min(ky);
+            c.save();
+            let _ = c.translate(d(e.x), d(e.y));
+            let _ = c.rotate(d(dir.angle()));
+            c.set_fill_style_str(if r.state.downed() {
+                "#ff7a7a"
+            } else {
+                "#4ade80"
+            });
+            c.begin_path();
+            c.move_to(14.0, 0.0);
+            c.line_to(-8.0, -10.0);
+            c.line_to(-8.0, 10.0);
+            c.close_path();
+            c.fill();
+            c.restore();
+            c.set_text_align("center");
+            c.set_font(&format!("800 11px {}", font));
+            c.set_fill_style_str("#ffffff");
+            c.set_stroke_style_str("rgba(0,0,0,0.8)");
+            outlined(c, &r.name, e.x - dir.x * 22.0, e.y - dir.y * 22.0, 3.0);
+        }
+        // our own state
+        let p = &self.player;
+        c.set_text_align("center");
+        if p.downed {
+            let pulse = 0.7 + 0.3 * (t * 4.0).sin();
+            c.set_global_alpha(d(pulse));
+            c.set_font(&format!("900 26px {}", font));
+            c.set_fill_style_str("#ff6a6a");
+            c.set_stroke_style_str("rgba(0,0,0,0.85)");
+            outlined(
+                c,
+                &format!("DOWN · bleeding out in {:.0}s", p.bleed.max(0.0)),
+                w * 0.5,
+                h * 0.72,
+                6.0,
+            );
+            c.set_global_alpha(1.0);
+            c.set_font(&format!("700 14px {}", font));
+            c.set_fill_style_str("#ffd0d0");
+            outlined(
+                c,
+                "Crawl toward a teammate: they revive you by standing close",
+                w * 0.5,
+                h * 0.72 + 28.0,
+                4.0,
+            );
+        } else if p.dead {
+            c.set_font(&format!("900 22px {}", font));
+            c.set_fill_style_str("#c8d2e8");
+            c.set_stroke_style_str("rgba(0,0,0,0.85)");
+            outlined(
+                c,
+                "SPECTATING · you'll be back next run",
+                w * 0.5,
+                h - 140.0,
+                5.0,
+            );
+        }
     }
 
     fn draw_levelup(&self, c: &Ctx, w: f32, h: f32, t: f32) {

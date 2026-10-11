@@ -1,7 +1,9 @@
 mod audio;
 mod content;
+mod coop;
 mod game;
 mod math;
+mod net;
 mod render;
 mod upgrades;
 mod world;
@@ -24,6 +26,12 @@ extern "C" {
     /// Rust -> JS notifications (game over, pause, ...).
     #[wasm_bindgen(js_namespace = window, js_name = uhEvent)]
     fn ui_event(kind: &str, data: &str);
+    /// Co-op: send bytes to a player slot over WebRTC (reliable or not).
+    #[wasm_bindgen(js_namespace = window, js_name = uhNetSend)]
+    fn net_send(slot: u8, reliable: bool, data: &[u8]);
+    /// Co-op: next received message as `{ from, data: Uint8Array }`, or undefined.
+    #[wasm_bindgen(js_namespace = window, js_name = uhNetPoll)]
+    fn net_poll() -> JsValue;
 }
 
 fn window() -> web_sys::Window {
@@ -334,13 +342,36 @@ fn run() -> Result<(), JsValue> {
                 while let Some(cmd) = ui_poll() {
                     handle_cmd(&mut g, &cmd);
                 }
+                if g.net.is_some() {
+                    loop {
+                        let m = net_poll();
+                        if m.is_undefined() || m.is_null() {
+                            break;
+                        }
+                        let from = js_sys::Reflect::get(&m, &"from".into())
+                            .ok()
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(255.0) as u8;
+                        if let Ok(d) = js_sys::Reflect::get(&m, &"data".into()) {
+                            let bytes = js_sys::Uint8Array::new(&d).to_vec();
+                            if from < net::MAX_PLAYERS as u8 && g.net_in.len() < 4096 {
+                                g.net_in.push((from, bytes));
+                            }
+                        }
+                    }
+                }
                 g.screen = v2(cw, chh);
                 g.frame(ts);
                 g.render(&ctx, cw, chh, dpr);
-                std::mem::take(&mut g.ui_out)
+                let out = std::mem::take(&mut g.net_out);
+                (std::mem::take(&mut g.ui_out), out)
             }
-            Err(_) => Vec::new(),
+            Err(_) => (Vec::new(), Vec::new()),
         };
+        let (events, net_out) = events;
+        for (slot, reliable, data) in net_out {
+            net_send(slot, reliable, &data);
+        }
         for (kind, data) in events {
             ui_event(kind, &data);
         }
@@ -371,6 +402,27 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
     let a = parts.next().unwrap_or("");
     match head {
         "start" => g.start(a),
+        "coop" => g.start_coop(a),
+        "peerleft" => g.peer_left(a.parse().unwrap_or(255)),
+        // party members for the lobby showcase: name~skin~hat~gun|...
+        "lobbymates" => {
+            g.lobby_mates = a
+                .split('|')
+                .filter(|s| !s.is_empty())
+                .take(2)
+                .map(|m| {
+                    let f: Vec<&str> = m.split('~').collect();
+                    (
+                        f.first()
+                            .map(|s| s.chars().take(16).collect())
+                            .unwrap_or_default(),
+                        content::skin_index(f.get(1).copied().unwrap_or("")),
+                        content::hat_index(f.get(2).copied().unwrap_or("")),
+                        content::gun_index(f.get(3).copied().unwrap_or("")),
+                    )
+                })
+                .collect();
+        }
         "equip" => g.apply_opts(a),
         "load" => g.load_save(a),
         "save" => {

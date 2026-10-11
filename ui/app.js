@@ -351,7 +351,13 @@
     saveSettings();
   }
   on('mode-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.mode = b.dataset.mode; renderMode(); send('equip|'); } });
-  on('diff-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.diff = b.dataset.diff; renderMode(); } });
+  on('diff-seg', 'click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    settings.diff = b.dataset.diff;
+    renderMode();
+    window.UHCoop?.setDiff(settings.diff);
+  });
   on('chapters', 'click', (e) => {
     const c = e.target.closest('.chapter');
     if (!c || c.classList.contains('locked')) return;
@@ -370,7 +376,8 @@
     const b = e.target.closest('button');
     if (!b) return;
     for (const x of $('tabs').children) x.classList.toggle('on', x === b);
-    for (const t of ['lb', 'shop', 'locker', 'settings']) $('tab-' + t).classList.toggle('on', t === b.dataset.tab);
+    for (const t of ['lb', 'shop', 'locker', 'friends', 'settings']) $('tab-' + t)?.classList.toggle('on', t === b.dataset.tab);
+    if (b.dataset.tab === 'friends') window.UHCoop?.render();
     if (b.dataset.tab === 'shop') renderShop();
     if (b.dataset.tab === 'locker') renderLocker();
     if (b.dataset.tab === 'lb') renderLB($('lb-menu'));
@@ -412,6 +419,7 @@
       return;
     }
     pushEquip();
+    window.UHCoop?.lookChanged();
     renderShop(); renderCoins(); renderTag();
     toast(`Unlocked ${it.name}! Equipped.`);
   });
@@ -436,6 +444,7 @@
     const [cat, id] = it.dataset.eq.split(':');
     try { await Data.equip(cat, id); } catch { toast('Could not equip that item.'); }
     pushEquip();
+    window.UHCoop?.lookChanged();
     renderLocker(); renderTag();
   });
 
@@ -543,11 +552,14 @@
   on('save', 'click', () => { afterSave = 'stay'; send('save'); });
   on('save-quit', 'click', () => { afterSave = 'quit'; send('save'); });
   on('quit', 'click', async () => {
-    if (!confirm('Abandon this run? Coins earned so far are kept, but progress is lost.')) return;
+    const coop = window.UHCoop?.inGame;
+    if (!confirm(coop ? 'Leave the co-op game? Your coins are kept.' : 'Abandon this run? Coins earned so far are kept, but progress is lost.')) return;
     if (lastPause) await Data.finishRun(lastPause.run, true).catch((e) => console.warn(e));
+    window.UHCoop?.gameEnded();
     toMenu();
   });
-  on('again', 'click', start);
+  let againGoesToLobby = false;
+  on('again', 'click', () => (againGoesToLobby ? toMenu() : start()));
   on('tomenu', 'click', toMenu);
   on('next-ch', 'click', () => { settings.chapter = Math.min(settings.chapter + 1, STORY.length - 1); start(); });
   on('pause-btn', 'click', () => send('pause'));
@@ -585,7 +597,10 @@
     $('p-ups').innerHTML = d.upgrades.length ? d.upgrades.map((u) =>
       `<div class="up"><span>${u.icon}</span><span>${esc(u.name)}</span><span class="pips">${Array.from({ length: u.max }, (_, i) => `<i style="${i < u.lvl ? 'background:' + u.color : ''}"></i>`).join('')}</span></div>`).join('')
       : '<div class="empty" style="padding:8px">No powers yet. Level up to pick some.</div>';
-    $('save-hint').textContent = 'Saved runs resume from the start of the current wave.';
+    const coopRun = !!window.UHCoop?.inGame;
+    for (const id of ['save', 'save-quit']) { const el = $(id); if (el) el.closest('.tip-wrap, button').style.display = coopRun ? 'none' : ''; }
+    $('quit').textContent = coopRun ? 'Leave co-op game' : 'Abandon run';
+    $('save-hint').textContent = coopRun ? '⚠ Co-op games keep running while paused, so stay alert!' : 'Saved runs resume from the start of the current wave.';
     const slot = r.mode === 'campaign' ? 'campaign' : 'infinite';
     const label = slot === 'campaign' ? 'Campaign' : 'Infinite';
     const prev = Data.profile.saves[slot];
@@ -634,6 +649,10 @@
       case 'victory': {
         const s = JSON.parse(data);
         const win = kind === 'victory';
+        const wasCoop = !!window.UHCoop?.inGame;
+        window.UHCoop?.gameEnded();
+        $('again').textContent = wasCoop ? '👥 Back to party' : '↻ PLAY AGAIN';
+        againGoesToLobby = wasCoop;
         let result = { coins: s.coins, rank: null, id: null };
         const prevBest = s.mode === 'infinite' ? await personalBest(s.name) : 0;
         const top = s.mode === 'infinite' ? (await Data.leaderboard('all').catch(() => []))[0] : null;
@@ -679,6 +698,7 @@
     const signedIn = !!Data.cloud;
     $('account-name').textContent = signedIn ? Data.profile.name : (window.UHCloud ? 'Sign in' : 'Offline');
     if (signedIn && Data.profile.name) { $('name').value = Data.profile.name; settings.name = Data.profile.name; }
+    window.UHCoop?.onAuthChanged();
   }
   function openAccount() {
     state = 'auth';
@@ -783,5 +803,22 @@
   }
   on('account-pill', 'click', openAccount);
   on('auth-x', 'click', () => toMenu());
-  window.UHUI = { show, toMenu, toast, renderLB, renderCoins, renderMode, renderTag, pushEquip, state: () => state, setState: (s) => { state = s; } };
+  window.UHDiffName = (d) => DIFF[d]?.name || d;
+  window.UHUI = {
+    send,
+    equipString,
+    startCoop(o) {
+      runCtx = { mode: 'infinite', chapter: 0, diff: settings.diff, coop: true };
+      state = 'playing';
+      show(null);
+      applySettings();
+      pushEquip();
+      send('coop|' + o);
+    },
+    setDiff(diff, locked) {
+      if (diff) settings.diff = diff;
+      if (diff && settings.mode !== 'infinite') settings.mode = 'infinite';
+      for (const b of $('diff-seg').children) b.disabled = !!locked;
+      renderMode();
+    }, show, toMenu, toast, renderLB, renderCoins, renderMode, renderTag, pushEquip, state: () => state, setState: (s) => { state = s; } };
 })();

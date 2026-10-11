@@ -222,3 +222,38 @@ body.touch.playing #pause-btn { display: block; }
   line-height: 1.4; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.5); opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; z-index: 5; }
 .tip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #1c2234; }
 .tip-wrap:hover .tip, .tip-wrap:focus-within .tip { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------------- party / friends ---------------- */
+#party-box { margin-bottom: 14px; }
+.party { background: rgba(122,215,255,.06); border: 1px solid rgba(122,215,255,.25); border-radius: 14px; padding: 12px; }
+.party.empty-party { display: flex; flex-direction: column; gap: 6px; }
+.party.empty-party span { color: var(--muted); font-size: 13px; }
+.party-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.party-head .hint { margin: 0; }
+.pms { display: grid; gap: 6px; }
+.pm { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 10px; background: rgba(0,0,0,.25); font-size: 13px; }
+.pm b { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm.empty { color: var(--muted); border: 1px dashed var(--line); background: transparent; justify-content: space-between; }
+.pm.empty span { font-size: 11px; opacity: .7; }
+.pm.offline { opacity: .55; }
+.pm .rdy { font-size: 10px; font-weight: 900; letter-spacing: 1px; color: var(--muted); }
+.pm .rdy.yes { color: #4ade80; }
+.pm .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 2px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555b6b; margin-right: 6px; flex: none; }
+.dot.on { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.7); }
+.fcode { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.fcode b { color: var(--gold); font-size: 18px; letter-spacing: 3px; font-family: ui-monospace, monospace; }
+.fcode .btn { width: auto; margin-left: auto; }
+.fadd { display: flex; gap: 8px; margin-bottom: 6px; }
+.fadd input { text-transform: uppercase; letter-spacing: 2px; font-size: 14px; padding: 9px 12px; }
+.fadd .btn { width: auto; }
+#tab-friends h3 { margin: 14px 0 6px; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+.frow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+.frow .btn { width: auto; }
+.frow.offline { opacity: .6; }
+.tag { font-size: 10px; font-weight: 800; color: var(--accent); margin-left: 6px; }
+#invite-pop { position: fixed; top: 16px; left: 50%; transform: translate(-50%, -140%); z-index: 70; display: flex; align-items: center; gap: 14px;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 14px; padding: 12px 16px; box-shadow: 0 10px 40px rgba(0,0,0,.6); transition: transform .3s cubic-bezier(.2,.9,.3,1.2); }
+#invite-pop.show { transform: translate(-50%, 0); }
+#invite-pop .btn { width: auto; }
+.seg button:disabled { opacity: .5; cursor: not-allowed; }
