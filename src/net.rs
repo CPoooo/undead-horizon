@@ -13,11 +13,16 @@ use crate::math::{v2, V2};
 
 pub const MAX_PLAYERS: usize = 3;
 
+/// Bump whenever the wire format or sim rules change in a way that would
+/// desync peers running different builds.
+pub const PROTOCOL: u16 = 2;
+
 pub const MSG_PSTATE: u8 = 1; // client -> host (unreliable): own player state
 pub const MSG_HITS: u8 = 2; // client -> host (reliable): damage dealt to zombies
 pub const MSG_SNAP: u8 = 3; // host -> clients (unreliable): world snapshot
 pub const MSG_GEMS: u8 = 4; // host -> clients (unreliable): xp gem positions
 pub const MSG_EVENTS: u8 = 5; // host -> clients (reliable): discrete events
+pub const MSG_HELLO: u8 = 6; // everyone (reliable), once per match: protocol version
 
 // events
 pub const E_HURT: u8 = 1;

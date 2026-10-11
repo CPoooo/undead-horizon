@@ -10,6 +10,8 @@ use std::f32::consts::{PI, TAU};
 /// Simulation runs at a fixed 120 Hz; rendering interpolates between steps.
 pub const DT: f32 = 1.0 / 120.0;
 pub const PR: f32 = 16.0; // player radius
+/// Save-string format version (`v=`). Older saves (no `v`) still load.
+pub const SAVE_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Phase {
@@ -1356,7 +1358,8 @@ impl Game {
         let ups: Vec<String> = self.ups.0.iter().map(|l| l.to_string()).collect();
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={}",
+            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={}",
+            SAVE_VERSION,
             self.player_name.replace([';', '=', '|'], ""),
             self.mode.id(),
             self.chapter(),
@@ -1378,8 +1381,20 @@ impl Game {
         )
     }
 
+    /// Version stamped into a save string (0 = pre-versioning).
+    pub fn save_version(data: &str) -> u32 {
+        data.split(';')
+            .find_map(|kv| kv.strip_prefix("v="))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    }
+
     pub fn load_save(&mut self, data: &str) {
         self.start(data);
+        if Game::save_version(data) > SAVE_VERSION {
+            // best effort: unknown keys are skipped, but say why things may look off
+            self.toast = Some(("Save is from a newer version. Refresh to update.".into(), 4.0));
+        }
         let mut wave = 1u32;
         for kv in data.split(';') {
             let Some((k, v)) = kv.split_once('=') else {
@@ -2963,5 +2978,23 @@ mod tests {
         g.grid.build(g.player.pos, &g.zombies);
         g.damage_zombie(0, 1.0e9, v2(1.0, 0.0), 0.0, false);
         assert!(g.victory_t >= 0.0, "final boss kill wins the chapter");
+    }
+
+    #[test]
+    fn save_strings_are_versioned_and_roundtrip() {
+        let mut g = Game::new(5);
+        g.start("mode=campaign;chapter=1;diff=veteran;gun=smg");
+        g.wave.n = 3;
+        g.player.level = 4;
+        g.kills = 77;
+        let s = g.save_string();
+        assert_eq!(Game::save_version(&s), SAVE_VERSION);
+        assert_eq!(Game::save_version("name=old;savewave=2"), 0);
+        let mut h = Game::new(6);
+        h.load_save(&s);
+        assert_eq!(h.mode, Mode::Campaign(1));
+        assert_eq!(h.player.level, 4);
+        assert_eq!(h.kills, 77);
+        assert_eq!(h.diff, 2);
     }
 }

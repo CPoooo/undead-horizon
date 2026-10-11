@@ -84,6 +84,20 @@ impl Game {
             self.wave.intermission = 0.0;
         }
         let n = net.players();
+        // say hello so peers on a different build bail out instead of desyncing
+        let peers: Vec<u8> = if role == Role::Host {
+            (0..MAX_PLAYERS as u8)
+                .filter(|s| *s != me && net.remotes[*s as usize].present)
+                .collect()
+        } else {
+            vec![0]
+        };
+        for slot in peers {
+            let mut w = W::new();
+            w.u8(MSG_HELLO);
+            w.u16(PROTOCOL);
+            self.net_out.push((slot, true, w.0));
+        }
         self.net = Some(net);
         self.banner = Some(Banner {
             title: "CO-OP".into(),
@@ -602,6 +616,13 @@ impl Game {
                         );
                         self.hit_slot = self.my_slot();
                     }
+                }
+            }
+            MSG_HELLO => {
+                let theirs = r.u16().unwrap_or(0);
+                if theirs != PROTOCOL {
+                    self.ui_out
+                        .push(("netversion", format!("{}:{}", PROTOCOL, theirs)));
                 }
             }
             MSG_SNAP if !host => self.apply_snapshot(&mut r),

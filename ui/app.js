@@ -639,6 +639,14 @@
         break;
       }
       case 'autoaim': settings.autoaim = data === '1'; applySettings(); break;
+      case 'netversion': {
+        // a teammate runs a different build: leave before the sims desync
+        const [mine, theirs] = String(data).split(':').map(Number);
+        toast(theirs > mine ? 'A teammate has a newer version. Refresh the page to update, then rejoin.' : 'A teammate is on an older version. Ask them to refresh the page.');
+        window.UHCoop?.gameEnded();
+        toMenu();
+        break;
+      }
       case 'saved': {
         const r = lastPause ? lastPause.run : {};
         const summary = { mode: r.mode || runCtx.mode, chapter: r.chapter || 0, diff: r.diff || runCtx.diff, wave: r.wave || 1, level: r.level || 1, date: Date.now() };
