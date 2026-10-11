@@ -531,6 +531,14 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
                 g.spawn_boss(var, p);
                 g.boss_intro(var);
             }
+            if a == "horde" && g.phase == Phase::Playing {
+                let p = g.player.pos;
+                for k in 0..800 {
+                    let ang = k as f32 * 0.37;
+                    let r = 250.0 + (k % 30) as f32 * 14.0;
+                    g.spawn_zombie(game::ZKind::ALL[k % 5], p + math::V2::from_angle(ang) * r);
+                }
+            }
             if a == "elites" && g.phase == Phase::Playing {
                 let p = g.player.pos;
                 for (k, af) in elites::AFFIXES.iter().enumerate() {

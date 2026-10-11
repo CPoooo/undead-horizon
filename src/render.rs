@@ -241,12 +241,16 @@ impl Game {
                 }
             }
         }
+        let mut visible = 0;
         for (i, z) in self.zombies.iter().enumerate() {
             let zp = z.prev.lerp(z.pos, self.za(a));
             if zp.x > vmin.x && zp.x < vmax.x && zp.y > vmin.y && zp.y < vmax.y {
                 list.push((zp.y, Draw::Zombie(i)));
+                visible += 1;
             }
         }
+        // big hordes: cheap zombies (no composite-mode switches, fewer paths)
+        self.lod = visible > 220;
         for o in obs.iter() {
             list.push((o.pos.y, Draw::Ob(*o)));
         }
@@ -1154,7 +1158,34 @@ impl Game {
         c.set_global_alpha(1.0);
     }
 
+    /// Level-of-detail zombie for huge hordes: shadowless flat shapes only.
+    fn draw_zombie_lod(&self, c: &Ctx, i: usize, a: f32) {
+        let z = &self.zombies[i];
+        let p = z.prev.lerp(z.pos, self.za(a));
+        let r = z.r;
+        let def = z.kind.def();
+        let (cloth, skin) = if z.kind == ZKind::Boss {
+            let (cl, sk, _) = z.boss_var.colors();
+            (cl, sk)
+        } else {
+            (def.cloth[0], def.skin)
+        };
+        let fwd = V2::from_angle(z.face);
+        c.set_fill_style_str(if z.flash > 0.3 { "#ffffff" } else { cloth });
+        circle(c, p.x, p.y - r * 0.3, r);
+        c.set_fill_style_str(skin);
+        let head = p + fwd * (r * 0.32) + v2(0.0, -r * 0.6);
+        circle(c, head.x, head.y, r * 0.55);
+        if z.st.frozen() {
+            c.set_fill_style_str("rgba(191,244,255,0.5)");
+            circle(c, p.x, p.y - r * 0.3, r * 1.2);
+        }
+    }
+
     fn draw_zombie_body(&self, c: &Ctx, i: usize, a: f32, t: f32) {
+        if self.lod && self.zombies[i].kind != ZKind::Boss && self.zombies[i].affix == crate::elites::Affix::None {
+            return self.draw_zombie_lod(c, i, a);
+        }
         let z = &self.zombies[i];
         let p = z.prev.lerp(z.pos, self.za(a));
         let r = z.r;

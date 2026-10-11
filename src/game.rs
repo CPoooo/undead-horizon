@@ -462,6 +462,8 @@ pub struct Game {
     pub tutorial: Option<crate::tutorial::Tutorial>,
     /// the touch USE button is visible
     pub use_shown: bool,
+    /// render big hordes with cheap zombies
+    pub lod: bool,
     pub ready_shown: bool,
     pub boss_intro: Option<crate::boss::BossIntro>,
     /// chests picked up while another overlay was open
@@ -631,6 +633,7 @@ impl Game {
             hub: None,
             tutorial: None,
             use_shown: false,
+            lod: false,
             ready_shown: false,
             boss_intro: None,
             pending_chests: 0,
@@ -4603,5 +4606,36 @@ mod tests {
         g.tick_tutorial(0.1);
         assert!(g.tutorial.is_none());
         assert!(g.ui_out.iter().any(|e| e.0 == "tutorial"));
+    }
+
+    /// Perf budget: 1,000 zombies must simulate well under a 60 fps frame.
+    #[test]
+    fn perf_budget_1000_zombies() {
+        let mut g = Game::new(34);
+        g.start("diff=rookie");
+        g.player.hp = 1.0e9;
+        g.player.max_hp = 1.0e9;
+        g.ups.0[Up::Multishot.idx()] = 3;
+        g.ups.0[Up::Blades.idx()] = 4;
+        g.ups.0[Up::Lightning.idx()] = 3;
+        for k in 0..1000 {
+            let a = k as f32 * 0.37;
+            let r = 300.0 + (k % 40) as f32 * 15.0;
+            g.spawn_zombie(ZKind::ALL[k % 5], V2::from_angle(a) * r);
+            if let Some(z) = g.zombies.last_mut() {
+                z.hp = 1.0e12; // keep the whole horde alive for the measurement
+                z.max_hp = 1.0e12;
+            }
+        }
+        g.wave.intermission = 1.0e9; // no more spawns
+        let steps = 240;
+        let t0 = std::time::Instant::now();
+        for _ in 0..steps {
+            g.step();
+        }
+        let per_step = t0.elapsed().as_secs_f64() * 1000.0 / steps as f64;
+        // 2 sim steps per 60 fps frame (120 Hz); leave most of the 16.7 ms for rendering
+        eprintln!("perf: {:.3} ms per step with {} zombies", per_step, g.zombies.len());
+        assert!(per_step < 4.0, "sim step took {per_step:.2} ms");
     }
 }
