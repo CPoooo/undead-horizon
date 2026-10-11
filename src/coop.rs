@@ -2,6 +2,7 @@
 //! See `net.rs` for the authority model and wire format.
 
 use crate::audio::Sfx;
+use crate::modes::Mode;
 use crate::content::{self, BossVar, GUNS, INFINITE_BOSSES};
 use crate::game::*;
 use crate::math::*;
@@ -62,8 +63,8 @@ impl Game {
             }
         }
         self.start(opts);
-        // co-op supports Infinite and Outbreak
-        if !matches!(self.mode, crate::modes::Mode::Outbreak | crate::modes::Mode::Siege) {
+        // co-op supports Infinite, Campaign (the host's chapter), Outbreak and Siege
+        if !matches!(self.mode, Mode::Campaign(_) | Mode::Outbreak | Mode::Siege) {
             self.mode = crate::modes::Mode::Infinite;
         }
         let mut net = Net::new(role, me);
@@ -1133,6 +1134,14 @@ impl Game {
                     }
                 }
                 E_GAMEOVER => self.enter_dying(),
+                E_VICTORY => {
+                    let Some(coins) = r.u16() else { return };
+                    self.coins += coins as u32;
+                    match self.mode {
+                        Mode::Siege => self.siege_victory(),
+                        _ => self.campaign_victory(),
+                    }
+                }
                 E_BLAST => {
                     let (Some(p), Some(rad)) = (r.v2(), r.f32()) else {
                         return;
@@ -1301,6 +1310,39 @@ mod tests {
             client.player.xp > 0.0 || client.player.level > 1,
             "team xp reaches the client"
         );
+    }
+
+    #[test]
+    fn campaign_coop_runs_the_hosts_chapter_and_shares_the_win() {
+        let mut host = Game::new(1);
+        let mut client = Game::new(2);
+        for g in [&mut host, &mut client] {
+            g.screen = v2(1280.0, 720.0);
+            g.zoom = 1.0;
+        }
+        host.start_coop("role=host;me=0;names=Host,Guest;present=1,1,0;diff=rookie;chapter=2;mode=campaign");
+        client.start_coop("role=client;me=1;names=Host,Guest;present=1,1,0;diff=rookie;mode=campaign;chapter=2");
+        assert!(matches!(host.mode, Mode::Campaign(2)) && matches!(client.mode, Mode::Campaign(2)));
+        let mut t = 0.0;
+        pump(&mut host, &mut client, &mut t, 30, |_, _, _| {});
+        // the host kills the last chapter boss: both players get the win
+        host.wave.n = content::CHAPTERS[2].waves;
+        host.wave.boss_pending = false;
+        host.zombies.clear();
+        let hooks = host.mode.hooks();
+        hooks.on_kill(&mut host, ZKind::Boss, V2::ZERO);
+        assert!(host.victory_t >= 0.0);
+        let coins = client.coins;
+        pump(&mut host, &mut client, &mut t, 10, |_, _, _| {});
+        assert!(client.victory_t >= 0.0, "client replays the chapter win");
+        assert!(client.coins > coins, "client gets the chapter bonus");
+        // a client can't end the chapter on its own
+        let mut solo = Game::new(3);
+        solo.start_coop("role=client;me=1;names=Host,Guest;present=1,1,0;mode=campaign;chapter=0");
+        solo.wave.n = 99;
+        let hooks = solo.mode.hooks();
+        hooks.on_kill(&mut solo, ZKind::Boss, V2::ZERO);
+        assert!(solo.victory_t < 0.0);
     }
 
     #[test]

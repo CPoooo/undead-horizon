@@ -463,3 +463,8 @@ body.reduce-motion *, body.reduce-motion *::before { transition: none !important
 
 #go-squad table.squad { margin: 10px 0; }
 #go-squad .tag { background: #ffd36a; color: #1a1206; border-radius: 4px; padding: 0 5px; font-size: 10px; font-weight: 900; }
+
+/* party mode picker: 2x2 so four modes fit the narrow party panel */
+.seg.party-mode { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+.party-ch select { width: 100%; padding: 8px; border-radius: 8px; background: rgba(0,0,0,.35); color: var(--text); border: 1px solid var(--line); font-weight: 700; }
+.party-ch .hint { margin-top: 4px; }

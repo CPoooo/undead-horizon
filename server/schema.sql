@@ -187,3 +187,8 @@ create or replace view balance_upgrades as
   from runs r, unnest(string_to_array(nullif(r.build, ''), ',')) as pick
   where r.mode = 'infinite' and r.created_at > now() - interval '30 days'
   group by 1 order by avg_wave desc;
+
+-- Campaign co-op: the host picks a chapter they have unlocked.
+alter table parties add column if not exists chapter int not null default 0;
+alter table parties drop constraint if exists parties_mode_check;
+alter table parties add constraint parties_mode_check check (mode in ('infinite','campaign','outbreak','siege'));

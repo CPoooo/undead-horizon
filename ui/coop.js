@@ -205,6 +205,21 @@
     copyInvite(link);
   }
 
+  const MODE_LABEL = { infinite: '♾️ Infinite', campaign: '📖 Campaign', outbreak: '🧟 Outbreak', siege: '🏰 Siege' };
+
+  // campaign co-op: the host picks one of their unlocked chapters; a win counts
+  // for every member who has that chapter unlocked
+  function chapterRow(p, amHost) {
+    const info = UI().chapters?.() || { titles: [], unlocked: 0 };
+    const ch = p.chapter || 0;
+    const title = info.titles[ch] || '';
+    const pick = amHost
+      ? `<select id="party-ch">${info.titles.map((t, i) => (i <= info.unlocked ? `<option value="${i}" ${i === ch ? 'selected' : ''}>Chapter ${i + 1} · ${esc(t)}</option>` : '')).join('')}</select>`
+      : `<b>Chapter ${ch + 1} · ${esc(title)}</b>`;
+    const note = ch <= info.unlocked ? 'Clearing it counts toward your story.' : 'You haven\'t reached this chapter yet: play along, but it won\'t unlock anything for you.';
+    return `<div class="party-ch" style="margin-top:6px">${pick}<div class="hint">${note}</div></div>`;
+  }
+
   function renderParty() {
     const box = $('party-box');
     if (!box) return;
@@ -241,8 +256,9 @@
     box.innerHTML = `<div class="party">
       <div class="party-head"><b>👥 Party ${p.members.length}/4</b><span class="hint">${esc(window.UHDiffName?.(p.diff) || p.diff)}${amHost ? ' · you set the difficulty' : ' · host sets difficulty'}</span></div>
       <div class="pms">${slots}</div>
-      <div class="seg party-mode" style="margin-top:8px">${['infinite', 'outbreak', 'siege'].map((m) =>
-        `<button data-pmode="${m}" class="${(p.mode || 'infinite') === m ? 'on' : ''}" ${amHost ? '' : 'disabled'}>${m === 'outbreak' ? '🧟 Outbreak' : m === 'siege' ? '🏰 Siege' : '♾️ Infinite'}</button>`).join('')}</div>
+      <div class="seg party-mode" style="margin-top:8px">${['infinite', 'campaign', 'outbreak', 'siege'].map((m) =>
+        `<button data-pmode="${m}" class="${(p.mode || 'infinite') === m ? 'on' : ''}" ${amHost ? '' : 'disabled'}>${MODE_LABEL[m]}</button>`).join('')}</div>
+      ${p.mode === 'campaign' ? chapterRow(p, amHost) : ''}
       <div id="voice-ctl"></div>
       <div class="row" style="margin-top:8px">
         <button class="btn small secondary" id="party-link" title="Anyone signed in with this link joins your party and becomes your friend">${canShare() ? '📤 Share invite link' : '🔗 Copy invite link'}</button>
@@ -256,7 +272,8 @@
     </div>`;
     $('party-link').onclick = () => shareInvite();
     $('party-leave').onclick = () => wsSend({ t: 'party.leave' });
-    box.querySelectorAll('[data-pmode]').forEach((b) => (b.onclick = () => { if (amHost) wsSend({ t: 'party.mode', mode: b.dataset.pmode }); }));
+    box.querySelectorAll('[data-pmode]').forEach((b) => (b.onclick = () => { if (amHost) wsSend({ t: 'party.mode', mode: b.dataset.pmode, chapter: p.chapter || 0 }); }));
+    if ($('party-ch')) $('party-ch').onchange = (e) => { if (amHost) wsSend({ t: 'party.mode', mode: 'campaign', chapter: Number(e.target.value) }); };
     if ($('party-ready')) $('party-ready').onclick = () => { send('sfx|click'); wsSend({ t: 'party.ready', ready: !me?.ready }); };
     if ($('party-start')) $('party-start').onclick = () => wsSend({ t: 'party.start' });
     box.querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => wsSend({ t: 'party.kick', id: b.dataset.kick })));
@@ -526,7 +543,7 @@
 
   function opts(role, present) {
     const names = [0, 1, 2, 3].map((i) => (S.roster.find((m) => m.slot === i)?.name || '').replace(/[;,=|]/g, ''));
-    return `role=${role};me=${S.mySlot};names=${names.join(',')};present=${present.join(',')};mode=${['outbreak', 'siege'].includes(S.party.mode) ? S.party.mode : 'infinite'};diff=${S.party.diff};name=${names[S.mySlot]};${UI().equipString()}`;
+    return `role=${role};me=${S.mySlot};names=${names.join(',')};present=${present.join(',')};mode=${['campaign', 'outbreak', 'siege'].includes(S.party.mode) ? S.party.mode : 'infinite'};chapter=${S.party.chapter || 0};diff=${S.party.diff};name=${names[S.mySlot]};${UI().equipString()}`;
   }
 
   function hostTimedOut() {

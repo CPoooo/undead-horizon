@@ -332,7 +332,7 @@
           rank = lb.indexOf(entry) + 1;
           id = entry.id;
         }
-      } else if (s.victory) {
+      } else if (s.victory && s.chapter <= p.campaign.unlocked) {
         const c = p.campaign;
         if (!c.cleared.includes(s.chapter)) c.cleared.push(s.chapter);
         c.unlocked = Math.max(c.unlocked, Math.min(s.chapter + 1, STORY.length - 1));
@@ -1403,7 +1403,7 @@
           if (win) {
             rec = `Chapter ${s.chapter + 1} cleared!`;
             await showStory(s.chapter, 'outro', 'Continue ▶');
-            if (s.chapter + 1 < STORY.length) $('next-ch').style.display = '';
+            if (s.chapter + 1 < STORY.length && !wasCoop) $('next-ch').style.display = '';
           } else {
             rec = `Chapter ${s.chapter + 1}: ${STORY[s.chapter].title}`;
           }
@@ -1542,8 +1542,12 @@
   window.UHUI = {
     send,
     equipString,
+    // campaign co-op: chapter titles and how far this player has unlocked
+    chapters: () => ({ titles: STORY.map((c) => c.title), unlocked: Data.profile.campaign?.unlocked || 0 }),
     startCoop(o) {
-      runCtx = { mode: 'infinite', chapter: 0, diff: settings.diff, coop: true };
+      const m = /(?:^|;)mode=(\w+)/.exec(o)?.[1] || 'infinite';
+      const ch = Number(/(?:^|;)chapter=(\d+)/.exec(o)?.[1] || 0);
+      runCtx = { mode: m, chapter: ch, diff: settings.diff, coop: true };
       state = 'playing';
       show(null);
       applySettings();

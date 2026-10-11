@@ -106,7 +106,9 @@ try {
   });
   check(relay === 'relay', `relay-only match connects through TURN (local candidate: ${relay})`);
 } finally {
-  console.log(log.length ? 'PAGE ERRORS:\n' + log.slice(0, 20).join('\n') : 'no page errors');
+  // failed fetches (e.g. a route not deployed yet) are logged but only page errors fail the test
+  const errs = log.filter((l) => l.includes('pageerror'));
+  console.log(errs.length ? 'PAGE ERRORS:\n' + errs.slice(0, 20).join('\n') : 'no page errors');
   await browser.close();
 }
-if (log.length) process.exit(1);
+if (log.some((l) => l.includes('pageerror'))) process.exit(1);

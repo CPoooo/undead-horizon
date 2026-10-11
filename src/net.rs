@@ -15,7 +15,7 @@ pub const MAX_PLAYERS: usize = 4;
 
 /// Bump whenever the wire format or sim rules change in a way that would
 /// desync peers running different builds.
-pub const PROTOCOL: u16 = 12;
+pub const PROTOCOL: u16 = 13;
 
 pub const MSG_PSTATE: u8 = 1; // client -> host (unreliable): own player state
 pub const MSG_HITS: u8 = 2; // client -> host (reliable): damage dealt to zombies
@@ -50,6 +50,7 @@ pub const E_DEFCHANGE: u8 = 17; // B_*, uid
 pub const E_MANA: u8 = 18; // slot, amount
 pub const E_CRYSTAL: u8 = 19; // crystal hp (f32)
 pub const E_PING: u8 = 20; // slot, kind, pos
+pub const E_VICTORY: u8 = 21; // coins: the chapter / siege is won (clients replay the win)
 
 // defense changes
 pub const B_UPGRADE: u8 = 1;

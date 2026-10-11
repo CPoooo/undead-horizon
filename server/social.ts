@@ -9,7 +9,7 @@
 // Client -> server: { t: "friends.add", code } | { t: "friends.accept"|"friends.remove", id }
 //   | { t: "party.create"|"party.leave"|"party.start"|"party.end" }
 //   | { t: "party.invite"|"party.kick", id } | { t: "party.join"|"party.decline", partyId }
-//   | { t: "party.ready", ready } | { t: "party.diff", diff } | { t: "party.mode", mode } | { t: "party.look", look }
+//   | { t: "party.ready", ready } | { t: "party.diff", diff } | { t: "party.mode", mode, chapter? } | { t: "party.look", look }
 //   | { t: "signal", to, data } | { t: "ping" }
 //   | { t: "chat", text } | { t: "party.voice", on } | { t: "block"|"unblock", id } | { t: "report", id, reason, message }
 // Server -> client: hello, social, party, party.start, invite, signal, chat, toast, error, ping
@@ -187,6 +187,7 @@ async function partyState(uid: string) {
     hostId: pa.host_id,
     diff: pa.diff,
     mode: pa.mode ?? "infinite",
+    chapter: pa.chapter ?? 0,
     status: pa.status,
     seed: pa.seed ? String(pa.seed) : null,
     members: m.rows,
@@ -410,8 +411,15 @@ async function handle(uid: string, msg: any): Promise<void> {
     case "party.mode": {
       const pa = await partyOf(uid);
       if (!pa || pa.host_id !== uid) throw new Error("Only the host can change the mode.");
-      if (!["infinite", "outbreak", "siege"].includes(msg.mode)) return;
-      await pool.query("update parties set mode = $2 where id = $1", [pa.id, msg.mode]);
+      if (!["infinite", "campaign", "outbreak", "siege"].includes(msg.mode)) return;
+      // campaign co-op plays one of the host's unlocked chapters
+      let chapter = 0;
+      if (msg.mode === "campaign") {
+        const pr = await pool.query("select campaign from profiles where user_id = $1", [uid]);
+        const unlocked = Math.max(0, Math.floor(Number(pr.rows[0]?.campaign?.unlocked) || 0));
+        chapter = Math.max(0, Math.min(unlocked, Math.floor(Number(msg.chapter) || 0)));
+      }
+      await pool.query("update parties set mode = $2, chapter = $3 where id = $1", [pa.id, msg.mode, chapter]);
       await notify(await memberIds(pa.id), { k: "party" });
       return;
     }

@@ -406,7 +406,8 @@ app.post("/runs", async (c) => {
       [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map, daily, mutated, pure, cause, build],
     );
     const campaign = p.campaign as { unlocked: number; cleared: number[] };
-    if (victory) {
+    // co-op: a chapter win only counts for players who had that chapter unlocked
+    if (victory && chapter <= campaign.unlocked) {
       if (!campaign.cleared.includes(chapter)) campaign.cleared.push(chapter);
       campaign.unlocked = Math.max(campaign.unlocked, Math.min(chapter + 1, CHAPTERS.length - 1));
     }

@@ -532,20 +532,13 @@ impl Game {
         self.coins += earned;
         self.score += 100 * n as u64;
         if n >= last {
-            let stars = self.siege_stars();
-            let bonus = (60 * stars) as u32;
-            self.coins += bonus;
-            self.victory_t = 0.0;
-            self.ui_out.push(("siegestars", format!("{}:{}:{}", self.map_id, stars, glass as u8)));
-            self.banner = Some(Banner {
-                title: format!("KEEP DEFENDED {}", "★".repeat(stars as usize)),
-                sub: format!("+{} bonus coins", bonus),
-                t: 0.0,
-                dur: 3.2,
-                color: "#ffd36a",
-            });
-            self.audio.play(Sfx::WaveClear);
-            self.audio.play(Sfx::LevelUp);
+            if let Some(net) = &mut self.net {
+                net.event(|w| {
+                    w.u8(net::E_VICTORY);
+                    w.u16(earned.min(u16::MAX as u32) as u16);
+                });
+            }
+            self.siege_victory();
             return;
         }
         if let Some(s) = self.siege.as_mut() {
@@ -569,6 +562,29 @@ impl Game {
                 w.u16(earned.min(u16::MAX as u32) as u16);
             });
         }
+    }
+
+    /// The last wave is held: stars from the crystal's health (clients run this
+    /// from `E_VICTORY` with the replicated crystal hp).
+    pub(crate) fn siege_victory(&mut self) {
+        if self.victory_t >= 0.0 {
+            return;
+        }
+        let glass = self.siege.as_ref().map(|s| s.glass).unwrap_or(false);
+        let stars = self.siege_stars();
+        let bonus = (60 * stars) as u32;
+        self.coins += bonus;
+        self.victory_t = 0.0;
+        self.ui_out.push(("siegestars", format!("{}:{}:{}", self.map_id, stars, glass as u8)));
+        self.banner = Some(Banner {
+            title: format!("KEEP DEFENDED {}", "★".repeat(stars as usize)),
+            sub: format!("+{} bonus coins", bonus),
+            t: 0.0,
+            dur: 3.2,
+            color: "#ffd36a",
+        });
+        self.audio.play(Sfx::WaveClear);
+        self.audio.play(Sfx::LevelUp);
     }
 
     /// 3 stars above 80% crystal health, 2 above 40%, else 1.

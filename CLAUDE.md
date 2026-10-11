@@ -267,7 +267,8 @@ Original design notes:
 - [x] M6 (S) **End-of-match scoreboard.** Kills, downs, revives, points, damage, MVP; per-player stats via events.
 - [ ] M7 (M) **Public parties and Quick Play.** Opt-in public parties listed via the social server; auto-fill to 3–4.
 - [x] M8 (S) **Lobby text chat.** Rate limit, length cap, a basic profanity filter, and block/report (server table).
-- [ ] M9 (S) **Co-op modes.** Campaign co-op: the host's chapter, with progress credited to all who have it unlocked.
+- [x] M9 (S) **Co-op modes.** Campaign co-op: the host's chapter, with progress credited to all who have it unlocked.
+  - Party mode `campaign` + `parties.chapter` (clamped server-side to the host's unlocked chapter). The host broadcasts `E_VICTORY` (protocol 13) so clients replay the chapter win (and the Siege win, which clients used to miss). `/runs` only credits a chapter win when `chapter <= campaign.unlocked`.
 
 ### M8 · World & presentation
 - [x] V1 (M) **Day/night and weather.** Day/night cycle in Infinite, plus weather (rain streaks, fog) that changes visibility and spawns (more runners at night).
