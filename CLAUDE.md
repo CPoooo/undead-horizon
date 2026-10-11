@@ -68,7 +68,7 @@ _Written 2026-10-11 at commit `83f1dea` (plus this doc update). Read this sectio
 ```bash
 cd ~/undead-horizon && git pull && git log --oneline -5
 cargo build --target wasm32-unknown-unknown --release 2>&1 | grep -E "^(warning|error)"   # must print nothing
-cargo test --release                                     # 55 tests
+cargo test --release                                     # 56 tests
 for f in ui/*.js; do node --check "$f"; done
 trunk build --release                                    # writes dist/
 (cd dist && python3 -m http.server 8765 &)               # serve for e2e
@@ -196,7 +196,7 @@ npm run build:cloud                                # after editing ui/cloud-src.
 - Occasional flake: a party join in `coop`/`chat-voice` can time out on a slow social-server round trip. Rerun before debugging.
 
 **Dev commands** (send from the console with `window.UHUI.send('dev|…')`):
-- `chest`, `elites`, `kinds`, `horde` (800 zombies)
+- `chest`, `levelup` (fills the XP bar), `elites`, `kinds`, `horde` (800 zombies)
 - `boss=N`, `tp=x,y`, `points=N`, `biome=snow|town|forest|graveyard`
 - `sky=rain|fog|clear,clock`
 - `tank` (10M HP)
@@ -424,7 +424,8 @@ npm run build:cloud                                # after editing ui/cloud-src.
   - **Siege build bar:** full width above the cluster (portrait), or bottom-centre left of it (landscape). Portal labels are clamped into the free area.
   - **Outbreak:** points/weapon/perks above the cluster (portrait) or left of it (landscape); power-up timers under the stack.
   - **Subtitles** (`#subs`) lift above the build bar and the cluster (`body[data-mode]`).
-- A native test (`hud_layout::tests`) checks for overlaps on six phone sizes. The e2e `mobile-hud.mjs` checks portrait, landscape and small phones.
+- **Level-up tray** (`Game::levelup_layout`/`levelup_title`): three wide cards low on the screen with a light dim, so the player stays visible; buttons above (phones) or below (desktop) the cards; phone landscape puts the title on the buttons' row. The thumb cluster hides meanwhile (`levelup` UI event → `body.levelup`).
+- A native test (`hud_layout::tests`) checks for overlaps on six phone sizes, and that the level-up tray and chest strip stay off the player. The e2e `mobile-hud.mjs` checks portrait, landscape and small phones.
 - Fixed along the way: on short landscape phones (≤400px tall) the Siege portal labels called `f32::clamp` with min > max, which crashed the game.
 
 ### 7.2 Home Base (Destiny-style social hub)
@@ -485,7 +486,7 @@ Files: `modes/hub.rs`, `render_hub.rs`, `assets/maps/hub.json`, the stall UI in 
 #### M2 · Combat depth
 - [x] C1 Reroll / Banish / Skip.
 - [x] C2 8 evolutions.
-- [x] C3 Chests with a 1/3/5 reveal.
+- [x] C3 Chests with a 1/3/5 reveal: a small loot strip near the top (`Game::chest_rect`) that never pauses or waits for input and fades on its own (`chest::HOLD_T`).
 - [x] C4 Elements: burn, chill/freeze, shock, poison, plus shatter and blight combos.
 - [x] C5 Elite affixes: shielded, hasted, splitting, vampiric, explosive, reflective.
 - [x] C6 Archetypes: crawler, screamer, armored, bat swarm, burrower.

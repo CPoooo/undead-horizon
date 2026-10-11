@@ -542,12 +542,11 @@ impl Game {
         if let Some(bi) = &self.boss_intro {
             self.draw_boss_intro(c, w, h, bi.var, bi.t);
         }
+        if self.chest.is_some() && matches!(self.phase, Phase::Playing | Phase::Dying | Phase::LevelUp) {
+            self.draw_chest(c, t);
+        }
         if self.phase == Phase::LevelUp {
-            if self.chest.is_some() {
-                self.draw_chest(c, w, h, t);
-            } else {
-                self.draw_levelup(c, w, h, t);
-            }
+            self.draw_levelup(c, w, h, t);
         }
         if self.show_fps {
             c.set_font("12px monospace");
@@ -3381,101 +3380,113 @@ impl Game {
     }
 
     /// Slot-machine chest reveal: one reel per pick, stopping left to right.
-    fn draw_chest(&self, c: &Ctx, w: f32, h: f32, t: f32) {
+    /// The chest's loot strip: a small panel near the top that spins its
+    /// reels, lists what you got, then fades. It never blocks play.
+    fn draw_chest(&self, c: &Ctx, t: f32) {
+        use crate::chest::Chest;
         let Some(ch) = &self.chest else { return };
         let font = "'Inter','Segoe UI',system-ui,sans-serif";
         let emoji = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif";
-        let k = ease_out((ch.t / 0.3).min(1.0));
-        c.set_global_alpha(d(0.75 * k));
-        c.set_fill_style_str("#05060c");
-        c.fill_rect(0.0, 0.0, d(w), d(h));
-        c.set_global_alpha(d(k));
-        // golden god-rays
-        let _ = c.set_global_composite_operation("lighter");
-        c.set_fill_style_str("rgba(255,200,80,0.06)");
-        for i in 0..12 {
-            let a = t * 0.3 + i as f32 * TAU / 12.0;
-            c.begin_path();
-            c.move_to(d(w * 0.5), d(h * 0.45));
-            let r = w.max(h);
-            c.line_to(d(w * 0.5 + a.cos() * r), d(h * 0.45 + a.sin() * r));
-            c.line_to(d(w * 0.5 + (a + 0.12).cos() * r), d(h * 0.45 + (a + 0.12).sin() * r));
-            c.fill();
-        }
-        let _ = c.set_global_composite_operation("source-over");
+        let n = ch.picks.len();
+        let compact = self.hud_layout().compact;
+        let (x, y0, bw, bh) = self.chest_rect(n);
+        let a = ch.alpha();
+        let y = y0 - (1.0 - ease_out((ch.t / 0.25).min(1.0))) * 14.0;
+        c.set_global_alpha(d(a));
+        round_rect(c, x, y, bw, bh, 12.0);
+        c.set_fill_style_str("rgba(20,14,6,0.86)");
+        c.fill();
+        c.set_stroke_style_str(if n >= 5 { "#ffb347" } else { "#c9a24a" });
+        c.set_line_width(1.5);
+        c.stroke();
         c.set_text_align("center");
         c.set_text_baseline("middle");
-        c.set_stroke_style_str("rgba(0,0,0,0.85)");
-        c.set_line_join("round");
-        let small = w < 640.0;
-        let n = ch.picks.len();
-        c.set_font(&format!("900 {}px {}", if small { 30 } else { 46 }, font));
+        c.set_font(&format!("900 {}px {}", if compact { 11 } else { 13 }, font));
         c.set_fill_style_str("#ffd36a");
         let title = match n {
-            5 => "LEGENDARY CHEST!",
-            3 => "TREASURE CHEST!",
-            _ => "CHEST",
+            5 => "🎁 LEGENDARY CHEST",
+            3 => "🎁 TREASURE CHEST",
+            _ => "🎁 CHEST",
         };
-        outlined(c, title, w * 0.5, h * 0.2, 7.0);
-        let size = if small { (w - 40.0) / n.max(1) as f32 - 8.0 } else { 104.0f32 }.min(104.0);
-        let gap = 10.0;
-        let total = n as f32 * size + (n.saturating_sub(1)) as f32 * gap;
-        let x0 = w * 0.5 - total * 0.5;
-        let y = h * 0.45 - size * 0.5;
+        text(c, title, x + bw * 0.5, y + 12.0);
+
+        let tile = Self::chest_tile(compact);
+        let gap = 6.0;
+        let inner = n as f32 * tile + n.saturating_sub(1) as f32 * gap;
+        let tx0 = x + bw * 0.5 - inner * 0.5;
+        let ty = y + 24.0;
         for (i, u) in ch.picks.iter().enumerate() {
-            let x = x0 + i as f32 * (size + gap);
-            let stop = 0.6 + crate::chest::REEL_T * (i + 1) as f32;
+            let tx = tx0 + i as f32 * (tile + gap);
+            let stop = Chest::stop_t(i);
             let done = ch.t >= stop;
-            round_rect(c, x, y, size, size, 14.0);
+            round_rect(c, tx, ty, tile, tile, 8.0);
             c.set_fill_style_str(if done { "#2a1f10" } else { "#14161e" });
             c.fill();
-            let evo = matches!(u, crate::chest::ChestPick::Evo(_));
             c.set_stroke_style_str(if done { u.color() } else { "#5a4a2a" });
-            c.set_line_width(if done { 3.0 } else { 2.0 });
+            c.set_line_width(if done { 2.0 } else { 1.0 });
             c.stroke();
             c.save();
-            round_rect(c, x, y, size, size, 14.0);
+            round_rect(c, tx, ty, tile, tile, 8.0);
             c.clip();
-            c.set_font(&format!("{}px {}", (size * 0.5).round(), emoji));
             c.set_fill_style_str("#ffffff");
             if done {
                 let pop = 1.0 + 0.25 * (1.0 - ((ch.t - stop) / 0.2).min(1.0));
-                c.set_font(&format!("{}px {}", (size * 0.5 * pop).round(), emoji));
-                text(c, u.icon(), x + size * 0.5, y + size * 0.5);
+                c.set_font(&format!("{}px {}", (tile * 0.55 * pop).round(), emoji));
+                text(c, u.icon(), tx + tile * 0.5, ty + tile * 0.52);
             } else {
                 // spinning strip of icons
+                c.set_font(&format!("{}px {}", (tile * 0.5).round(), emoji));
                 let spin = ch.t * 14.0 + i as f32 * 1.7;
+                let f = spin.fract();
                 for j in 0..3 {
-                    let f = spin.fract();
                     let idx = (spin.floor() as usize + j) % ALL.len();
-                    let yy = y + size * (0.5 + (j as f32 - 1.0 - f + 1.0) * 0.8) - size * 0.3;
-                    text(c, ALL[idx].def().icon, x + size * 0.5, yy);
+                    let yy = ty + tile * (0.5 + (j as f32 - f) * 0.8) - tile * 0.3;
+                    text(c, ALL[idx].def().icon, tx + tile * 0.5, yy);
                 }
             }
             c.restore();
-            if done {
-                c.set_font(&format!("800 {}px {}", if small { 10 } else { 12 }, font));
-                c.set_fill_style_str("#ffffff");
-                if evo {
-                    c.set_fill_style_str("#ffd36a");
-                    text(c, "EVOLVED!", x + size * 0.5, y - 12.0);
-                    c.set_fill_style_str("#ffffff");
-                }
-                let lines = wrap(c, u.name(), size + 6.0);
-                for (li, l) in lines.iter().take(2).enumerate() {
-                    text(c, l, x + size * 0.5, y + size + 14.0 + li as f32 * 14.0);
-                }
+            if done && matches!(u, crate::chest::ChestPick::Evo(_)) {
+                c.set_font(&format!("900 9px {}", font));
+                c.set_fill_style_str("#ffd36a");
+                text(c, "EVO", tx + tile * 0.5, ty + tile - 6.0);
             }
         }
+
+        // what you got, once every reel has landed
+        let sy = ty + tile + 12.0;
+        c.set_font(&format!("700 {}px {}", if compact { 10 } else { 12 }, font));
         if ch.revealed() {
-            c.set_font(&format!("800 {}px {}", if small { 15 } else { 18 }, font));
+            let mut names: Vec<&str> = Vec::new();
+            for u in &ch.picks {
+                if !names.contains(&u.name()) {
+                    names.push(u.name());
+                }
+            }
+            c.set_fill_style_str("#e8f0ff");
+            if self.hud_layout().landscape {
+                let tail = format!(" · +{} coins", ch.coins);
+                let fits = |s: &str| c.measure_text(s).map(|m| m.width() as f32).unwrap_or(0.0) <= bw - 16.0;
+                let mut head: Vec<char> = names.join(" · ").chars().collect();
+                let mut line = format!("{}{}", head.iter().collect::<String>(), tail);
+                while !fits(&line) && head.len() > 4 {
+                    head.truncate(head.len() - 2);
+                    line = format!("{}…{}", head.iter().collect::<String>().trim_end_matches([' ', '·']), tail);
+                }
+                text(c, &line, x + bw * 0.5, sy);
+                c.set_global_alpha(1.0);
+                return;
+            }
+            let lines = wrap(c, &names.join(" · "), bw - 16.0);
+            for (li, l) in lines.iter().take(2).enumerate() {
+                text(c, l, x + bw * 0.5, sy + li as f32 * 13.0);
+            }
             c.set_fill_style_str("#ffd36a");
-            outlined(c, &format!("+{} coins", ch.coins), w * 0.5, y + size + 56.0, 4.0);
-            c.set_font(&format!("600 14px {}", font));
+            c.set_font(&format!("800 {}px {}", if compact { 10 } else { 12 }, font));
+            text(c, &format!("+{} coins", ch.coins), x + bw * 0.5, sy + if lines.len() > 1 { 26.0 } else { 15.0 });
+        } else {
             c.set_fill_style_str("#c8d2e8");
-            let hint = if self.input.is_touch { "Tap to continue" } else { "Click or press Enter to continue" };
-            c.set_global_alpha(d(0.6 + 0.4 * (t * 4.0).sin().abs()));
-            outlined(c, hint, w * 0.5, y + size + 84.0, 3.0);
+            c.set_global_alpha(d(a * (0.6 + 0.4 * (t * 5.0).sin().abs())));
+            text(c, "Opening…", x + bw * 0.5, sy + 6.0);
         }
         c.set_global_alpha(1.0);
     }
@@ -3483,39 +3494,60 @@ impl Game {
     fn draw_levelup(&self, c: &Ctx, w: f32, h: f32, t: f32) {
         let font = "'Inter','Segoe UI',system-ui,sans-serif";
         let k = ease_out((self.levelup_t / 0.25).min(1.0));
-        c.set_global_alpha(d(0.68 * k));
+        let rects = self.card_rects();
+        let btns = self.levelup_buttons();
+        // the tray: a light dim overall (lighter in co-op, where the fight goes
+        // on) and a darker fade behind the cards, so the player stays visible
+        let top = rects[0].1.min(btns[0].1);
+        let (tx, ty, inline) = self.levelup_title();
+        c.set_global_alpha(d(if self.net.is_some() { 0.12 } else { 0.25 } * k));
         c.set_fill_style_str("#05060c");
         c.fill_rect(0.0, 0.0, d(w), d(h));
+        {
+            let g0 = (ty - if inline { 60.0 } else { 40.0 }).max(0.0);
+            let g = c.create_linear_gradient(0.0, d(g0), 0.0, d(top + 20.0));
+            let _ = g.add_color_stop(0.0, "rgba(5,6,12,0)");
+            let _ = g.add_color_stop(1.0, "rgba(5,6,12,0.82)");
+            c.set_global_alpha(d(k));
+            c.set_fill_style_canvas_gradient(&g);
+            c.fill_rect(0.0, d(g0), d(w), d(top + 20.0 - g0));
+            c.set_fill_style_str("rgba(5,6,12,0.82)");
+            c.fill_rect(0.0, d(top + 20.0), d(w), d(h - top - 20.0));
+        }
         c.set_global_alpha(1.0);
 
-        let rects = self.card_rects();
         c.set_text_align("center");
         c.set_text_baseline("middle");
         c.set_stroke_style_str("rgba(0,0,0,0.85)");
         c.set_line_join("round");
-        let ty = rects[0].1 - if self.pending_levels > 1 { 70.0 } else { 54.0 };
         let small = w < 640.0;
-        c.set_font(&format!("900 {}px {}", if small { 28 } else { 44 }, font));
+        c.set_font(&format!("900 {}px {}", if small { 22 } else { 28 }, font));
         c.set_fill_style_str("#ffe27a");
         c.set_global_alpha(d(k));
-        outlined(c, "LEVEL UP!", w * 0.5, ty, 7.0);
-        c.set_font(&format!("600 14px {}", font));
+        if inline {
+            c.set_text_align("left");
+        }
+        outlined(c, "LEVEL UP!", tx, ty, 6.0);
+        let title_w = c.measure_text("LEVEL UP!").map(|m| m.width() as f32).unwrap_or(110.0);
+        c.set_font(&format!("600 {}px {}", if small { 11 } else { 13 }, font));
         c.set_fill_style_str("#c8d2e8");
-        let hint = if self.input.is_touch {
-            "Tap a power"
+        let mut hint = if self.input.is_touch {
+            "Tap a power".to_string()
         } else {
-            "Choose a power — 1 · 2 · 3, arrows + Enter, or click"
+            "Choose a power — 1 · 2 · 3, arrows + Enter, or click".to_string()
         };
-        outlined(c, hint, w * 0.5, ty + 32.0, 3.0);
         if self.pending_levels > 1 {
-            c.set_fill_style_str("#7ad7ff");
-            outlined(
-                c,
-                &format!("+{} more level-ups queued", self.pending_levels - 1),
-                w * 0.5,
-                ty + 52.0,
-                3.0,
-            );
+            hint = format!("{hint} · +{} more queued", self.pending_levels - 1);
+        }
+        if inline {
+            // only if it fits before the buttons
+            let hw = c.measure_text(&hint).map(|m| m.width() as f32).unwrap_or(0.0);
+            if tx + title_w + 10.0 + hw < btns[0].0 - 8.0 {
+                outlined(c, &hint, tx + title_w + 10.0, ty + 1.0, 3.0);
+            }
+            c.set_text_align("center");
+        } else {
+            outlined(c, &hint, tx, ty + 20.0, 3.0);
         }
         c.set_global_alpha(1.0);
 
@@ -3525,11 +3557,11 @@ impl Game {
             let ck = ease_out_back(((self.levelup_t - delay) / 0.3).clamp(0.0, 1.0));
             let sel = i == self.sel;
             let lift = if sel {
-                -10.0 - (t * 4.0).sin() * 2.0
+                -3.0 - (t * 4.0).sin() * 1.5
             } else {
                 0.0
             };
-            let yy = y + (1.0 - ck) * 120.0 + lift;
+            let yy = y + (1.0 - ck) * 60.0 + lift;
             let def = u.def();
             let lvl = self.ups.get(*u);
             c.set_global_alpha(d(ck.clamp(0.0, 1.0)));
@@ -3538,7 +3570,7 @@ impl Game {
             if sel {
                 let _ = c.set_global_composite_operation("lighter");
                 c.set_global_alpha(d(0.25 * ck.clamp(0.0, 1.0)));
-                round_rect(c, x - 8.0, yy - 8.0, cw + 16.0, ch + 16.0, 18.0);
+                round_rect(c, x - 5.0, yy - 5.0, cw + 10.0, ch + 10.0, 16.0);
                 c.set_fill_style_str(def.color);
                 c.fill();
                 let _ = c.set_global_composite_operation("source-over");
@@ -3583,38 +3615,61 @@ impl Game {
             if cw > ch * 1.6 {
                 // compact horizontal card (phones): icon left, text right
                 let bob = if sel { (t * 5.0).sin() * 2.0 } else { 0.0 };
+                let col = (ch * 0.9).min(70.0);
                 c.set_text_align("center");
                 c.set_font(&format!(
                     "{}px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif",
-                    (ch * 0.36).min(44.0).round()
+                    (ch * 0.42).min(40.0).round()
                 ));
                 // solid fill: Safari draws text under a gradient fillStyle as a
                 // flat silhouette, which hid the emoji against the dark card
                 c.set_fill_style_str("#ffffff");
-                text(c, def.icon, x + ch * 0.42, yy + ch * 0.5 + bob);
-                let tx = x + ch * 0.82;
+                text(c, def.icon, x + col * 0.5 + 4.0, yy + ch * 0.5 + bob);
+                let tx = x + col + 4.0;
+                let tight = ch < 70.0;
                 c.set_text_align("left");
-                c.set_font(&format!("800 10px {}", font));
+                c.set_font(&format!("800 9px {}", font));
                 c.set_fill_style_str(rc);
-                text(c, rl, tx, yy + 16.0);
+                text(c, rl, tx, yy + if tight { 11.0 } else { 15.0 });
                 c.set_text_align("right");
-                c.set_font(&format!("800 12px {}", font));
-                if lvl == 0 {
+                c.set_font(&format!("800 11px {}", font));
+                if banish {
+                    c.set_fill_style_str("#ff6a7a");
+                    text(c, "🚫 BANISH", x + cw - 12.0, yy + if tight { 11.0 } else { 15.0 });
+                } else if lvl == 0 {
                     c.set_fill_style_str("#7dffa0");
-                    text(c, "NEW!", x + cw - 14.0, yy + 16.0);
+                    text(c, "NEW!", x + cw - 12.0, yy + if tight { 11.0 } else { 15.0 });
                 } else {
                     c.set_fill_style_str("#ffd36a");
-                    text(c, &format!("Lv {} → {}", lvl, lvl + 1), x + cw - 14.0, yy + 16.0);
+                    text(c, &format!("Lv {} → {}", lvl, lvl + 1), x + cw - 12.0, yy + if tight { 11.0 } else { 15.0 });
                 }
                 c.set_text_align("left");
-                c.set_font(&format!("800 17px {}", font));
+                c.set_font(&format!("800 {}px {}", if tight || cw < 240.0 { 14 } else { 16 }, font));
                 c.set_fill_style_str("#ffffff");
-                text(c, def.name, tx, yy + 38.0);
-                c.set_font(&format!("500 13px {}", font));
+                let name_y = yy + if tight { 27.0 } else { 33.0 };
+                text(c, def.name, tx, name_y);
+                c.set_font(&format!("500 {}px {}", if tight { 11 } else { 12 }, font));
                 c.set_fill_style_str("#c8d2e8");
-                let lines = wrap(c, &u.desc(lvl + 1), cw - (tx - x) - 14.0);
-                for (li, l) in lines.iter().take(((ch - 58.0) / 16.0).max(1.0) as usize).enumerate() {
-                    text(c, l, tx, yy + 60.0 + li as f32 * 16.0);
+                let lh = if tight { 13.0 } else { 15.0 };
+                let room = cw - (tx - x) - 12.0 - if self.input.is_touch { 0.0 } else { 24.0 };
+                let lines = wrap(c, &u.desc(lvl + 1), room);
+                let fit = ((yy + ch - 6.0 - (name_y + 11.0)) / lh).floor().max(1.0) as usize;
+                for (li, l) in lines.iter().take(fit).enumerate() {
+                    let mut l = l.clone();
+                    if li + 1 == fit && lines.len() > fit {
+                        l.push('…');
+                    }
+                    text(c, &l, tx, name_y + 17.0 + li as f32 * lh);
+                }
+                if !self.input.is_touch {
+                    // number key badge
+                    round_rect(c, x + cw - 30.0, yy + ch - 28.0, 20.0, 18.0, 5.0);
+                    c.set_fill_style_str(if sel { "#ffffff" } else { "rgba(255,255,255,0.12)" });
+                    c.fill();
+                    c.set_text_align("center");
+                    c.set_font(&format!("800 11px {}", font));
+                    c.set_fill_style_str(if sel { "#111" } else { "#ddd" });
+                    text(c, &format!("{}", i + 1), x + cw - 20.0, yy + ch - 19.0);
                 }
                 c.set_text_align("center");
                 continue;

@@ -1,11 +1,11 @@
 //! Treasure chests: bosses (and the odd brute) drop one. Opening it spins a
 //! slot machine that reveals 1, 3 or 5 upgrades. The first chest of a run is
 //! always generous. Upgrades are applied the moment it opens; the reels are
-//! presentation, and the overlay reuses the level-up phase (so co-op keeps
-//! running underneath).
+//! presentation only: a small loot strip near the top of the screen that never
+//! pauses the game or waits for input, and fades out on its own.
 
 use crate::audio::Sfx;
-use crate::game::{Game, Phase};
+use crate::game::Game;
 use crate::upgrades::{Evo, Up, ALL};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -42,11 +42,28 @@ pub struct Chest {
 }
 
 /// Seconds per reel before it stops (reels stop one after another).
-pub const REEL_T: f32 = 0.55;
+pub const REEL_T: f32 = 0.4;
+/// Before the first reel stops.
+pub const LEAD_T: f32 = 0.35;
+/// How long the result stays up once revealed, then how long it fades.
+pub const HOLD_T: f32 = 2.6;
+pub const FADE_T: f32 = 0.45;
 
 impl Chest {
+    /// When reel `k` (0-based) lands.
+    pub fn stop_t(k: usize) -> f32 {
+        LEAD_T + REEL_T * (k + 1) as f32
+    }
     pub fn revealed(&self) -> bool {
-        self.t > 0.6 + REEL_T * self.picks.len() as f32
+        self.t >= Self::stop_t(self.picks.len().max(1) - 1)
+    }
+    /// Strip opacity: slides in, holds, fades out.
+    pub fn alpha(&self) -> f32 {
+        let end = Self::stop_t(self.picks.len().max(1) - 1) + HOLD_T;
+        ((self.t / 0.2).min(1.0) * (1.0 - (self.t - end) / FADE_T)).clamp(0.0, 1.0)
+    }
+    pub fn finished(&self) -> bool {
+        self.t >= Self::stop_t(self.picks.len().max(1) - 1) + HOLD_T + FADE_T
     }
 }
 
@@ -107,44 +124,25 @@ impl Game {
         self.coins += coins;
         self.chest = Some(Chest { picks, coins, t: 0.0 });
         self.haptic(120, 0.5);
-        self.levelup_t = 0.0;
-        self.phase = Phase::LevelUp;
         self.audio.play(Sfx::UltReady);
     }
 
+    /// Advance the loot strip; it removes itself once it has faded.
     pub fn tick_chest(&mut self, dt: f32) {
         let Some(c) = &mut self.chest else { return };
         let before = c.t;
         c.t += dt;
         // a clack as each reel lands
         let n = c.picks.len();
+        let finished = c.finished();
         for k in 0..n {
-            let stop = 0.6 + REEL_T * (k + 1) as f32;
+            let stop = Chest::stop_t(k);
             if before < stop && c.t >= stop {
                 self.audio.play(if k + 1 == n { Sfx::LevelUp } else { Sfx::UiSelect });
             }
         }
-    }
-
-    /// Close the chest once everything is revealed (any key, click or tap).
-    pub fn close_chest(&mut self) -> bool {
-        match &self.chest {
-            Some(c) if c.revealed() => {
-                self.chest = None;
-                self.phase = Phase::Playing;
-                self.last_ms = -1.0;
-                self.player.iframes = self.player.iframes.max(0.8);
-                true
-            }
-            Some(c) => {
-                // impatient: skip the spin
-                let full = 0.61 + REEL_T * c.picks.len() as f32;
-                if let Some(c) = &mut self.chest {
-                    c.t = c.t.max(full);
-                }
-                true
-            }
-            None => false,
+        if finished {
+            self.chest = None;
         }
     }
 }

@@ -434,6 +434,8 @@ pub struct Game {
     pub offers: Vec<Up>,
     pub sel: usize,
     pub levelup_t: f32,
+    /// last level-up state sent to the UI (it hides the thumb cluster meanwhile)
+    pub levelup_ui: bool,
     pub pending_levels: u32,
     /// level-up charges for this run
     pub rerolls: u32,
@@ -639,6 +641,7 @@ impl Game {
             offers: Vec::new(),
             sel: 0,
             levelup_t: 0.0,
+            levelup_ui: false,
             pending_levels: 0,
             rerolls: 0,
             banishes: 0,
@@ -1329,15 +1332,21 @@ impl Game {
             Phase::LevelUp | Phase::Paused if self.net.is_some() => {
                 if self.phase == Phase::LevelUp {
                     self.levelup_t += real_dt;
-                    self.tick_chest(real_dt);
                 }
                 self.simulate(real_dt);
             }
             Phase::LevelUp => {
                 self.levelup_t += real_dt;
-                self.tick_chest(real_dt);
             }
             Phase::Paused | Phase::GameOver => {}
+        }
+        if matches!(self.phase, Phase::Playing | Phase::Dying | Phase::LevelUp) {
+            self.tick_chest(real_dt);
+        }
+        let lvl = self.phase == Phase::LevelUp;
+        if lvl != self.levelup_ui {
+            self.levelup_ui = lvl;
+            self.ui_out.push(("levelup", if lvl { "1" } else { "0" }.into()));
         }
         self.net_tick();
 
@@ -1510,11 +1519,7 @@ impl Game {
                 self.try_ult();
             }
         }
-        if self.phase == Phase::LevelUp && self.chest.is_some() {
-            if !clicks.is_empty() {
-                self.close_chest();
-            }
-        } else if self.phase == Phase::LevelUp {
+        if self.phase == Phase::LevelUp {
             // hover selects, click picks
             let rects = self.card_rects();
             let m = self.input.mouse;
@@ -1616,13 +1621,6 @@ impl Game {
                 _ => return false,
             },
             Phase::LevelUp => {
-                if self.chest.is_some() {
-                    return match a {
-                        Action::Confirm | Action::Pick1 | Action::Pick2 | Action::Pick3
-                        | Action::Dash | Action::Interact | Action::Pause => self.close_chest(),
-                        _ => false,
-                    };
-                }
                 if self.levelup_t < 0.35 {
                     return true;
                 }
@@ -1713,31 +1711,105 @@ impl Game {
 
     /// Layout of the three level-up cards in CSS pixels: (x, y, w, h).
     pub fn card_rects(&self) -> [(f32, f32, f32, f32); 3] {
-        // phones in portrait: three wide cards stacked vertically
-        if self.screen.x < 600.0 {
-            let cw = (self.screen.x - 28.0).min(440.0);
-            let gap = 12.0;
-            // fit between the title and the touch buttons at the bottom
-            let ch = ((self.screen.y * 0.5 - 2.0 * gap) / 3.0).clamp(84.0, 118.0);
-            let x = (self.screen.x - cw) * 0.5;
-            let y0 = (self.screen.y * 0.22).max(150.0);
-            return [
-                (x, y0, cw, ch),
-                (x, y0 + ch + gap, cw, ch),
-                (x, y0 + 2.0 * (ch + gap), cw, ch),
-            ];
+        self.levelup_layout().0
+    }
+
+    /// Reroll / Banish / Skip buttons, a row just above the cards.
+    pub fn levelup_buttons(&self) -> [(f32, f32, f32, f32); 3] {
+        self.levelup_layout().1
+    }
+
+    /// The level-up tray sits low on the screen so the player and the fight
+    /// around them stay visible (co-op keeps running underneath). Phones hide
+    /// the thumb cluster meanwhile (DASH would only pick a card), so the tray
+    /// can use the bottom edge.
+    fn levelup_layout(&self) -> ([(f32, f32, f32, f32); 3], [(f32, f32, f32, f32); 3]) {
+        let (w, h) = (self.screen.x, self.screen.y);
+        let l = self.hud_layout();
+        let gap = 8.0;
+        let row = |x0: f32, y: f32, total: f32, rh: f32| {
+            let bw = (total - 2.0 * gap) / 3.0;
+            [(x0, y, bw, rh), (x0 + bw + gap, y, bw, rh), (x0 + 2.0 * (bw + gap), y, bw, rh)]
+        };
+        if !l.compact {
+            // desktop: a row of wide cards above the ability icons
+            let total = (w - 48.0).min(960.0);
+            let ch = 112.0;
+            let bh = 34.0;
+            let by = h - 92.0 - bh;
+            let cy = by - 10.0 - ch;
+            let bt = total.min(540.0);
+            // the buttons sit under the cards here
+            return (row(w * 0.5 - total * 0.5, cy, total, ch), row(w * 0.5 - bt * 0.5, by, bt, bh));
         }
-        let w = (self.screen.x * 0.27).clamp(150.0, 260.0);
-        let h = (w * 1.35).min(self.screen.y * 0.55);
-        let gap = (self.screen.x * 0.025).clamp(10.0, 28.0);
-        let total = w * 3.0 + gap * 2.0;
-        let x0 = (self.screen.x - total) * 0.5;
-        let y = self.screen.y * 0.5 - h * 0.42;
-        [
-            (x0, y, w, h),
-            (x0 + w + gap, y, w, h),
-            (x0 + 2.0 * (w + gap), y, w, h),
-        ]
+        let bh = 34.0;
+        if l.landscape {
+            // one row along the bottom; the buttons share a row with the title
+            let total = (w - 24.0).min(900.0);
+            let ch = if h < 400.0 { 70.0 } else { 78.0 };
+            let cy = h - 10.0 - ch;
+            let bh = 30.0;
+            let by = cy - 6.0 - bh;
+            let bt = (total * 0.55).min(420.0);
+            let x0 = w * 0.5 - total * 0.5;
+            return (row(x0, cy, total, ch), row(x0 + total - bt, by, bt, bh));
+        }
+        // portrait: three wide cards stacked at the bottom, buttons above them
+        let cw = (w - 24.0).min(440.0);
+        let x0 = w * 0.5 - cw * 0.5;
+        let ch = if h < 700.0 { 54.0 } else { 66.0 };
+        let bottom = h - if h < 700.0 { 18.0 } else { 34.0 }; // tall phones have a home bar
+        let cy0 = bottom - 3.0 * ch - 2.0 * gap;
+        let by = cy0 - gap - bh;
+        (
+            [(x0, cy0, cw, ch), (x0, cy0 + ch + gap, cw, ch), (x0, cy0 + 2.0 * (ch + gap), cw, ch)],
+            row(x0, by, cw, bh),
+        )
+    }
+
+    /// Where the "LEVEL UP!" title goes: (x, y, inline). Inline (phone
+    /// landscape) means left-aligned on the buttons' row; otherwise centred
+    /// above the tray.
+    pub fn levelup_title(&self) -> (f32, f32, bool) {
+        let (cards, btns) = self.levelup_layout();
+        let l = self.hud_layout();
+        if l.compact && l.landscape {
+            return (cards[0].0 + 4.0, btns[0].1 + btns[0].3 * 0.5, true);
+        }
+        (self.screen.x * 0.5, cards[0].1.min(btns[0].1) - 34.0, false)
+    }
+
+    /// The chest loot strip: (x, y, w, h), near the top and clear of the HUD
+    /// (on phones, beside the minimap; under the status stack otherwise).
+    pub fn chest_rect(&self, n: usize) -> (f32, f32, f32, f32) {
+        let w = self.screen.x;
+        let l = self.hud_layout();
+        let tile = Self::chest_tile(l.compact);
+        let n = n.max(1) as f32;
+        let inner = n * tile + (n - 1.0) * 6.0;
+        // short landscape phones get a one-line summary
+        let bh = tile + if l.compact && l.landscape { 44.0 } else { 66.0 };
+        if !l.compact {
+            let bw = (inner + 28.0).max(280.0);
+            return (w * 0.5 - bw * 0.5, l.stack_end - 6.0, bw, bh);
+        }
+        if l.landscape {
+            let bw = (inner + 24.0).max(260.0).min(l.stack_w);
+            return (l.stack_x + l.stack_w * 0.5 - bw * 0.5, l.stack_end - 4.0, bw, bh);
+        }
+        // portrait: between the left edge and the minimap
+        let (mx, _, mr) = l.minimap;
+        let free = mx - mr - 8.0 - 12.0;
+        let bw = (inner + 20.0).max(210.0).min(free);
+        (12.0 + free * 0.5 - bw * 0.5, l.stack_end + 8.0, bw, bh)
+    }
+
+    pub fn chest_tile(compact: bool) -> f32 {
+        if compact {
+            34.0
+        } else {
+            52.0
+        }
     }
 
     pub(crate) fn open_levelup(&mut self) {
@@ -1760,28 +1832,6 @@ impl Game {
     }
 
     /// Level-up buttons under the cards: (x, y, w, h) for Reroll, Banish, Skip.
-    pub fn levelup_buttons(&self) -> [(f32, f32, f32, f32); 3] {
-        let rects = self.card_rects();
-        let last = rects[2];
-        let first = rects[0];
-        let phone = self.screen.x < 600.0;
-        let y = if phone {
-            last.1 + last.3 + 14.0
-        } else {
-            first.1 + first.3 + 22.0
-        };
-        let total_w = if phone { last.2 } else { (last.0 + last.2 - first.0).min(560.0) };
-        let x0 = if phone { last.0 } else { self.screen.x * 0.5 - total_w * 0.5 };
-        let gap = 10.0;
-        let bw = (total_w - gap * 2.0) / 3.0;
-        let bh = if phone { 40.0 } else { 36.0 };
-        [
-            (x0, y, bw, bh),
-            (x0 + bw + gap, y, bw, bh),
-            (x0 + 2.0 * (bw + gap), y, bw, bh),
-        ]
-    }
-
     pub(crate) fn reroll(&mut self) {
         if self.rerolls == 0 || self.phase != Phase::LevelUp {
             self.audio.play(Sfx::UiMove);
@@ -2294,14 +2344,11 @@ impl Game {
                 self.player.xp_next = xp_for(self.player.level);
                 self.pending_levels += 1;
             }
-            if self.pending_chests > 0 && self.phase == Phase::Playing && self.player_alive() {
+            if self.pending_chests > 0 && self.chest.is_none() && self.phase == Phase::Playing && self.player_alive() {
                 self.pending_chests -= 1;
                 self.open_chest();
             }
-            if self.pending_levels > 0
-                && self.phase == Phase::Playing
-                && self.chest.is_none()
-                && self.player_alive()
+            if self.pending_levels > 0 && self.phase == Phase::Playing && self.player_alive()
             {
                 self.open_levelup();
             }
@@ -4314,13 +4361,26 @@ mod tests {
         assert_eq!(c.picks.len(), 3, "first chest is generous");
         let total: u32 = crate::upgrades::ALL.iter().map(|u| g.ups.get(*u) as u32).sum();
         assert_eq!(total, 3, "picks are applied on open");
-        assert_eq!(g.phase, Phase::LevelUp);
-        // first press skips the spin, second closes
-        assert!(g.close_chest());
-        assert!(g.chest.is_some());
-        assert!(g.close_chest());
+        assert_eq!(g.phase, Phase::Playing, "a chest never pauses the game");
+        // the strip reveals, holds, then removes itself
+        g.tick_chest(crate::chest::Chest::stop_t(2) + 0.01);
+        assert!(g.chest.as_ref().unwrap().revealed());
+        g.tick_chest(crate::chest::HOLD_T + crate::chest::FADE_T);
         assert!(g.chest.is_none());
         assert_eq!(g.phase, Phase::Playing);
+        // a level-up isn't held back by a chest that's still showing
+        g.open_chest();
+        g.pending_levels = 1;
+        g.player.xp = 0.0;
+        let mut t = 0.0;
+        for _ in 0..4 {
+            t += 16.7;
+            g.frame(t);
+        }
+        assert_eq!(g.phase, Phase::LevelUp);
+        assert!(g.chest.is_some());
+        g.chest = None;
+        g.choose(0);
         // a chest picked up during a level-up waits its turn
         g.pending_levels = 1;
         g.open_levelup();

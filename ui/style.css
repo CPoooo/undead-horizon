@@ -211,6 +211,7 @@ input[type=range] { flex: 1; accent-color: #7fd65a; }
    keeps that box clear). ☢ and Q show their charge as a ring (--k = 0..1),
    fed by the game's `abil` event. */
 #touch-ui { position: fixed; right: calc(14px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom)); width: 222px; height: 150px; z-index: 5; display: none; pointer-events: none; }
+body.levelup #touch-ui { visibility: hidden; }
 body.touch.playing #touch-ui { display: block; }
 .tbtn { position: absolute; pointer-events: auto; width: 74px; height: 74px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(20,24,40,.55); color: #fff; font-weight: 900; font-size: 13px; backdrop-filter: blur(4px); display: grid; place-items: center; touch-action: none; }
 #t-dash { right: 0; bottom: 0; width: 76px; height: 76px; }

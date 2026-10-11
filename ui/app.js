@@ -1440,6 +1440,8 @@
       case 'bindings': renderBinds(String(data)); break;
       case 'tutorial': settings.tutorialDone = true; saveSettings(); break;
       case 'usebtn': $('t-use').classList.toggle('on', data === '1'); break;
+      // the level-up tray uses the bottom of the screen; DASH would only pick a card meanwhile
+      case 'levelup': document.body.classList.toggle('levelup', data === '1'); break;
       case 'readybtn': $('t-ready').classList.toggle('on', data === '1'); break;
       case 'haptic': {
         const [ms, str] = String(data).split(':').map(Number);

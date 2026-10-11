@@ -130,4 +130,51 @@ mod tests {
             }
         }
     }
+
+    /// The level-up tray and the chest strip leave the player (screen centre)
+    /// visible and stay on screen, on phones and desktop.
+    #[test]
+    fn levelup_tray_and_chest_strip_stay_clear() {
+        let sizes = [(390.0, 844.0, true), (360.0, 640.0, true), (844.0, 390.0, true), (667.0, 375.0, true),
+            (430.0, 932.0, true), (932.0, 430.0, true), (1280.0, 720.0, false), (1920.0, 1080.0, false)];
+        for (w, h, touch) in sizes {
+            let mut g = Game::new(1);
+            g.screen = v2(w, h);
+            g.input.is_touch = touch;
+            let l = g.hud_layout();
+            let cards = g.card_rects();
+            let btns = g.levelup_buttons();
+            let (_, title_y, _) = g.levelup_title();
+            let top = cards[0].1.min(btns[0].1).min(title_y - 16.0);
+            // the title and the tray stay off the player
+            assert!(top > h * 0.5 + 24.0, "level-up tray covers the player at {w}x{h} (top {top})");
+            for r in cards.iter().chain(btns.iter()) {
+                assert!(r.0 >= 0.0 && r.0 + r.2 <= w && r.1 + r.3 <= h, "tray piece off screen at {w}x{h}: {r:?}");
+            }
+            // cards and buttons don't overlap each other
+            for (i, a) in cards.iter().chain(btns.iter()).enumerate() {
+                for b in cards.iter().chain(btns.iter()).skip(i + 1) {
+                    let hit = a.0 < b.0 + b.2 && b.0 < a.0 + a.2 && a.1 < b.1 + b.3 && b.1 < a.1 + a.3;
+                    assert!(!hit, "tray pieces overlap at {w}x{h}: {a:?} {b:?}");
+                }
+            }
+            for n in [1, 3, 5] {
+                let (x, y, cw, ch) = g.chest_rect(n);
+                assert!(x >= 0.0 && x + cw <= w, "chest strip off screen at {w}x{h}");
+                assert!(y + ch < h * 0.5 - 24.0, "chest strip covers the player at {w}x{h}");
+                // fits its tiles
+                let tile = Game::chest_tile(l.compact);
+                assert!(cw >= n as f32 * tile + (n - 1) as f32 * 6.0, "chest tiles don't fit at {w}x{h} n={n}");
+                if l.compact {
+                    let (mx, my, mr) = l.minimap;
+                    let clear_map = x + cw <= mx - mr || y >= my + mr || y + ch <= my - mr;
+                    assert!(clear_map, "chest strip over the minimap at {w}x{h}");
+                    assert!(y >= 92.0 || l.landscape, "chest strip under the pause row at {w}x{h}");
+                    if l.landscape {
+                        assert!(x > 50.0 + l.hp_w && x + cw < w - 150.0, "chest strip vs side panels at {w}x{h}");
+                    }
+                }
+            }
+        }
+    }
 }

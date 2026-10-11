@@ -524,6 +524,9 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
             if a == "chest" && g.phase == Phase::Playing {
                 g.open_chest();
             }
+            if a == "levelup" && g.phase == Phase::Playing {
+                g.player.xp = g.player.xp_next;
+            }
             if a == "kinds" && g.phase == Phase::Playing {
                 let p = g.player.pos;
                 use game::ZKind::*;
