@@ -84,8 +84,15 @@ if (cfg.apiBase && cfg.authUrl) {
     token: () => getToken(),
     wsUrl: API.replace(/^http/, 'ws') + '/ws',
     /** Leaderboard is public: works signed in or out. */
-    leaderboard: (f) => api('/leaderboard' + (f && f.startsWith('ob:') ? '?mode=outbreak&map=' + encodeURIComponent(f.slice(3))
-      : f && f !== 'all' ? '?diff=' + encodeURIComponent(f) : ''), { authed: false }),
+    leaderboard: (f) => {
+      const qs = !f || f === 'all' ? ''
+        : f.startsWith('ob:') ? '?mode=outbreak&map=' + encodeURIComponent(f.slice(3))
+        : f.startsWith('daily:') ? '?daily=' + encodeURIComponent(f.slice(6))
+        : f === 'week' ? '?scope=week' : f === 'solo' ? '?players=solo' : f === 'coop' ? '?players=coop'
+        : f === 'pure' ? '?pure=1' : f === 'friends' ? '?friends=1'
+        : '?diff=' + encodeURIComponent(f);
+      return api('/leaderboard' + qs, { authed: f === 'friends' });
+    },
     async restore() {
       try {
         const { data } = await auth.getSession();

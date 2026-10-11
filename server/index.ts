@@ -77,9 +77,10 @@ app.post("/errors", async (c) => {
 });
 
 app.get("/leaderboard", async (c) => {
-  if (c.req.query("mode") === "outbreak") {
+  const q = (k: string) => c.req.query(k);
+  if (q("mode") === "outbreak") {
     // best round per player on one Outbreak map
-    const map = String(c.req.query("map") || "asylum").slice(0, 20);
+    const map = String(q("map") || "asylum").slice(0, 20);
     const { rows } = await pool.query(
       `select * from (
          select distinct on (user_id) id, user_id, name, wave, level, kills, time, diff, gun, players, score, created_at
@@ -89,38 +90,71 @@ app.get("/leaderboard", async (c) => {
       [map],
     );
     c.header("Cache-Control", "no-store");
-    return c.json(rows.map((r) => ({ id: String(r.id), name: r.name, wave: r.wave, level: r.level, kills: r.kills, time: r.time, diff: r.diff, gun: r.gun, players: r.players, score: Number(r.score), date: r.created_at })));
+    return c.json(rows.map(lbRow));
   }
-  const diff = c.req.query("diff");
-  const filter = diff && DIFFS.includes(diff) ? diff : null;
-  // Best infinite run per player, then ranked.
+  if (q("daily")) {
+    // today's daily run: each player's FIRST attempt counts
+    const day = String(q("daily")).slice(0, 10);
+    const { rows } = await pool.query(
+      `select * from (
+         select distinct on (user_id) id, user_id, name, wave, level, kills, time, diff, gun, players, score, created_at
+         from runs where daily = $1 order by user_id, created_at asc
+       ) first order by wave desc, score desc, kills desc limit 25`,
+      [day],
+    );
+    c.header("Cache-Control", "no-store");
+    return c.json(rows.map(lbRow));
+  }
+  // filters: diff, scope=week, players=solo|coop, pure=1, friends=1 (signed in)
+  const where = ["mode = 'infinite'", "not abandoned", "not mutated", "daily = ''"];
+  const args: unknown[] = [];
+  const diff = q("diff");
+  if (diff && DIFFS.includes(diff)) {
+    args.push(diff);
+    where.push(`diff = $${args.length}`);
+  }
+  if (q("scope") === "week") where.push("created_at > now() - interval '7 days'");
+  if (q("players") === "solo") where.push("players = 1");
+  if (q("players") === "coop") where.push("players > 1");
+  if (q("pure") === "1") where.push("pure");
+  if (q("friends") === "1") {
+    const h = c.req.header("authorization");
+    const uid = h?.toLowerCase().startsWith("bearer ") ? await verifyToken(h.slice(7)).catch(() => null) : null;
+    if (!uid) return c.json([]);
+    args.push(uid);
+    where.push(`(user_id = $${args.length} or user_id in (select friend_id from friends where user_id = $${args.length} and status = 'accepted'))`);
+  }
+  // Best run per player, then ranked.
   const { rows } = await pool.query(
     `select * from (
-       select distinct on (user_id) id, user_id, name, wave, level, kills, time, diff, gun, players, created_at
+       select distinct on (user_id) id, user_id, name, wave, level, kills, time, diff, gun, players, score, created_at
        from runs
-       where mode = 'infinite' and not abandoned and ($1::text is null or diff = $1)
+       where ${where.join(" and ")}
        order by user_id, wave desc, level desc, kills desc, time asc
      ) best
      order by wave desc, level desc, kills desc, time asc
      limit 25`,
-    [filter],
+    args,
   );
   c.header("Cache-Control", "no-store");
-  return c.json(
-    rows.map((r) => ({
-      id: String(r.id),
-      name: r.name,
-      wave: r.wave,
-      level: r.level,
-      kills: r.kills,
-      time: r.time,
-      diff: r.diff,
-      gun: r.gun,
-      players: r.players,
-      date: r.created_at,
-    })),
-  );
+  return c.json(rows.map(lbRow));
 });
+
+function lbRow(r: any) {
+  return {
+    id: String(r.id),
+    name: r.name,
+    wave: r.wave,
+    level: r.level,
+    kills: r.kills,
+    time: r.time,
+    diff: r.diff,
+    gun: r.gun,
+    players: r.players,
+    score: Number(r.score ?? 0),
+    date: r.created_at,
+  };
+}
 
 // ---------------------------------------------------------------- auth
 app.use("/me/*", auth);
@@ -334,7 +368,7 @@ app.post("/runs", async (c) => {
 
   const p = await ensureProfile(uid);
   // Coins are capped by what the reported progress could plausibly have earned.
-  const cap = waveCoins({ mode, chapter, diff, wave, victory });
+  const cap = waveCoins({ mode, chapter, diff, wave, victory, mutated: !!r.mutated });
   const coins = Math.min(int(r.coins, 0, 1_000_000), cap);
 
   const client = await pool.connect();
@@ -343,10 +377,14 @@ app.post("/runs", async (c) => {
     await client.query("begin");
     const score = int(r.score, 0, 2_000_000_000);
     const map = String(r.map || "").replace(/[^a-z0-9_]/g, "").slice(0, 20);
+    const today = new Date().toISOString().slice(0, 10);
+    const daily = r.daily === today ? today : "";
+    const mutated = !!r.mutated;
+    const pure = !!r.pure;
     const ins = await client.query(
-      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning id`,
-      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map],
+      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map, daily, mutated, pure)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning id`,
+      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map, daily, mutated, pure],
     );
     const campaign = p.campaign as { unlocked: number; cleared: number[] };
     if (victory) {
@@ -363,7 +401,7 @@ app.post("/runs", async (c) => {
     const career = Prog.applyRun(p.progress, {
       mode, diff, wave, level, kills, time, victory, players, gun, score, kk, bosses,
       combo: int(r.combo, 0, 100000), evos: int(r.evos, 0, 8), chests: int(r.chests, 0, 200),
-      stars: int(r.stars, 0, 3), pure: !!r.pure, chapter,
+      stars: int(r.stars, 0, 3), pure: !!r.pure, chapter, daily: r.daily === new Date().toISOString().slice(0, 10) ? r.daily : "",
     });
     const owned = new Set(p.owned as string[]);
     for (const it of career.items) owned.add(it);
@@ -403,6 +441,19 @@ app.post("/runs", async (c) => {
 app.use("/meta/*", auth);
 app.use("/relics/*", auth);
 app.use("/achievement", auth);
+
+/** Welcome back: a gentle bonus after 3+ days away (no streaks to lose). */
+app.use("/welcome", auth);
+app.post("/welcome", async (c) => {
+  const uid = c.get("userId");
+  const p = await ensureProfile(uid);
+  const away = Date.now() - new Date(p.updated_at ?? Date.now()).getTime();
+  const last = p.last_bonus ? Date.now() - new Date(p.last_bonus).getTime() : Infinity;
+  if (away < 3 * 86_400_000 || last < 3 * 86_400_000) return c.json({ bonus: 0, profile: await profileJson(uid) });
+  const bonus = 150;
+  await pool.query("update profiles set coins = coins + $2, last_bonus = now(), updated_at = now() where user_id = $1", [uid, bonus]);
+  return c.json({ bonus, profile: await profileJson(uid) });
+});
 
 /** Buy one rank of a permanent upgrade. */
 app.post("/meta/buy", async (c) => {

@@ -523,6 +523,9 @@ pub struct Game {
     pub tracer: usize,
     /// permanent upgrades, relic bonuses and gun camo from the profile
     pub meta: content::Meta,
+    pub mutators: content::Mutators,
+    /// daily run: everyone gets the same seed
+    pub daily: String,
     pub relics: content::RelicBonus,
     pub camo: usize,
     /// kills per enemy kind and bosses felled this run (achievements, bestiary)
@@ -673,6 +676,8 @@ impl Game {
             hat: 0,
             tracer: 0,
             meta: content::Meta::default(),
+            mutators: content::Mutators::default(),
+            daily: String::new(),
             relics: content::RelicBonus::default(),
             camo: 0,
             kind_kills: [0; 15],
@@ -770,6 +775,13 @@ impl Game {
                 "tracer" => self.tracer = content::tracer_index(v),
                 "char" => self.character = content::character_index(v),
                 "meta" => self.meta = content::Meta::parse(v),
+                "mut" => self.mutators = content::Mutators::parse(v),
+                "seed" => {
+                    if let Ok(n) = v.parse::<u64>() {
+                        self.rng = Rng::new(n);
+                    }
+                }
+                "daily" => self.daily = v.chars().take(10).collect(),
                 "relics" => self.relics = content::relic_bonus(v),
                 "camo" => self.camo = v.parse::<usize>().unwrap_or(0).min(content::CAMOS.len() - 1),
                 "map" => self.map_id = v.to_string(),
@@ -812,6 +824,8 @@ impl Game {
         self.best_wave = 0;
         self.map_id.clear();
         self.variant.clear();
+        self.mutators = content::Mutators::default();
+        self.daily.clear();
         self.mode = Mode::Infinite;
         self.pending_chapter = 0;
         self.apply_opts(opts);
@@ -895,6 +909,9 @@ impl Game {
         // permanent upgrades and relics
         let bonus_hp = 5.0 * self.meta.hp as f32 + self.relics.hp;
         self.player.max_hp += bonus_hp;
+        if self.mutators.glass {
+            self.player.max_hp *= 0.5;
+        }
         self.player.hp = self.player.max_hp;
         self.player.hp_ghost = self.player.hp;
         // starting perk from the loadout
@@ -953,6 +970,7 @@ impl Game {
         (1.0 + 0.25 * self.ups.f(Up::Damage))
             * (1.0 + 0.08 * self.ups.f(Up::Velocity))
             * (1.0 + 0.02 * self.meta.dmg as f32 + self.relics.dmg / 100.0)
+            * if self.mutators.glass { 2.0 } else { 1.0 }
     }
     pub(crate) fn fire_interval(&self) -> f32 {
         let class = if self.kit() == content::Kit::HeatSink { 1.1 } else { 1.0 };
@@ -1778,7 +1796,7 @@ impl Game {
         let name = self.player_name.replace(['\\', '"'], "");
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{}}}",
+            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{},\"mutated\":{},\"daily\":\"{}\"}}",
             self.net.as_ref().map(|n| n.players()).unwrap_or(1),
             name,
             self.wave.n.max(1),
@@ -1800,7 +1818,9 @@ impl Game {
             self.evolved.len(),
             self.chests_opened,
             self.meta.is_pure() && self.relics == content::RelicBonus::default(),
-            if self.victory_t >= 0.0 && self.siege.is_some() { self.siege_stars() } else { 0 }
+            if self.victory_t >= 0.0 && self.siege.is_some() { self.siege_stars() } else { 0 },
+            self.mutators.any(),
+            self.daily
         )
     }
 
@@ -2542,7 +2562,7 @@ impl Game {
         let dummy = z.dummy;
         z.hp -= dmg;
         z.flash = 1.0;
-        z.vel += dir * knock * z.kind.def().knock;
+        z.vel += dir * knock * z.kind.def().knock * if self.mutators.floaty { 2.5 } else { 1.0 };
         let pos = z.pos;
         let dead = z.hp <= 0.0;
         if dead && crit && hit_slot == self.my_slot() {
@@ -2818,7 +2838,7 @@ impl Game {
         }
         let dmg = self.shield_block(dmg, from);
         let p = &mut self.player;
-        p.hp -= dmg;
+        p.hp -= if self.mutators.onehit { p.hp + 1.0 } else { dmg };
         p.iframes = 0.65;
         p.hurt_flash = 1.0;
         let away = (p.pos - from).norm();
@@ -3753,7 +3773,7 @@ impl Game {
             } else {
                 1.0
             };
-        let sm = 1.0 + (0.018 * (n - 1) as f32).min(0.35);
+        let sm = (1.0 + (0.018 * (n - 1) as f32).min(0.35)) * if self.mutators.fast { 1.3 } else { 1.0 };
         let (p, _) = world::resolve(pos, r);
         let uid = self.next_uid;
         self.next_uid += 1;
@@ -4491,5 +4511,25 @@ mod tests {
         // party members show up
         g.set_hub_mates("Mara~10~20~0.5~crimson~cap~smg|Doc~-50~40~1~default~none~pistol");
         assert_eq!(g.hub.as_ref().unwrap().mates.len(), 2);
+    }
+
+    #[test]
+    fn daily_seed_is_deterministic_and_mutators_apply() {
+        let run = |seed: u64| {
+            let mut g = Game::new(seed + 1000); // different construction seeds...
+            g.start(&format!("seed={};mut=glass,fast;daily=2026-10-11;diff=rookie", 4242));
+            let mut t = 0.0;
+            for _ in 0..400 {
+                t += 16.7;
+                g.player.hp = g.player.max_hp;
+                g.frame(t);
+            }
+            (g.zombies.iter().map(|z| (z.pos.x as i32, z.pos.y as i32)).collect::<Vec<_>>(), g.player.max_hp, g.mutators)
+        };
+        let (a, hp, m) = run(1);
+        let (b, _, _) = run(2);
+        assert_eq!(a, b, "...but the same daily seed gives the same run");
+        assert!(m.glass && m.fast);
+        assert!(hp <= 50.0, "glass cannon halves health");
     }
 }

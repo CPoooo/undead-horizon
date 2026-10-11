@@ -1061,3 +1061,50 @@ pub fn relic_bonus(spec: &str) -> RelicBonus {
 
 /// Weapon mastery camo tints (P4), unlocked by kills with that gun.
 pub const CAMOS: [&str; 4] = ["", "#4a6a3a", "#3a5a8a", "#d4af37"];
+
+// ------------------------------------------------------------------ mutators
+
+/// Run modifiers (weekly mutator, Custom mode, the daily run). Mutated runs are
+/// not ranked on the main board.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct Mutators {
+    pub bighead: bool,
+    pub glass: bool,
+    pub fast: bool,
+    pub onehit: bool,
+    pub floaty: bool,
+}
+
+impl Mutators {
+    pub fn parse(spec: &str) -> Mutators {
+        let mut m = Mutators::default();
+        for id in spec.split(',') {
+            match id {
+                "bighead" => m.bighead = true,
+                "glass" => m.glass = true,
+                "fast" => m.fast = true,
+                "onehit" => m.onehit = true,
+                "floaty" => m.floaty = true,
+                _ => {}
+            }
+        }
+        m
+    }
+    pub fn any(&self) -> bool {
+        *self != Mutators::default()
+    }
+    /// coin multiplier for the extra risk
+    pub fn coin_mult(&self) -> f32 {
+        let mut k = 1.0;
+        if self.glass {
+            k += 0.25;
+        }
+        if self.fast {
+            k += 0.25;
+        }
+        if self.onehit {
+            k += 1.0;
+        }
+        k
+    }
+}

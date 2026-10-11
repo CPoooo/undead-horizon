@@ -1412,7 +1412,7 @@ impl Game {
 
         // head
         let head = body + fwd * (r * 0.32) + v2(0.0, -r * 0.3);
-        let hr = r * if z.kind == ZKind::Boss { 0.5 } else { 0.6 };
+        let hr = r * if z.kind == ZKind::Boss { 0.5 } else { 0.6 } * if self.mutators.bighead { 1.8 } else { 1.0 };
         c.set_fill_style_str(skin);
         circle(c, head.x, head.y, hr);
         // glowing eyes

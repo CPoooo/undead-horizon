@@ -160,3 +160,10 @@ alter table parties add constraint parties_mode_check check (mode in ('infinite'
 
 -- Career progression (account level, achievements, mastery, bestiary, meta upgrades, relics).
 alter table profiles add column if not exists progress jsonb not null default '{}';
+
+-- Live features: daily seeded run, mutated (unranked) runs, pure runs (no upgrades/relics).
+alter table runs add column if not exists daily text not null default '';
+alter table runs add column if not exists mutated boolean not null default false;
+alter table runs add column if not exists pure boolean not null default false;
+create index if not exists runs_daily_idx on runs (daily, created_at) where daily <> '';
+alter table profiles add column if not exists last_bonus timestamptz;

@@ -158,6 +158,115 @@
     return { name: `${RARITY[r.rarity]} ${base.name}`, icon: base.icon, desc: extra ? `${main}, ${extra}` : main };
   }
 
+  // ------------------------------------------------------------ live: challenges, season, daily
+  const dayKey = (d = new Date()) => d.toISOString().slice(0, 10);
+  // weeks start Monday (UTC)
+  function weekKey(d = new Date()) {
+    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+    return 'w' + dayKey(t);
+  }
+  function hash(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+    return h >>> 0;
+  }
+  function seeded(key) {
+    let s = hash(key) || 1;
+    return () => ((s = Math.imul(s ^ (s >>> 15), 2246822507) ^ Math.imul(s ^ (s >>> 13), 3266489909)) >>> 0) / 4294967296;
+  }
+  // challenge templates: metric reads a run; goal scales with `big` (weekly)
+  const CHALLENGES = [
+    { id: 'kills', text: (n) => `Kill ${n} zombies`, goal: [150, 1500], metric: (r) => r.kills || 0 },
+    { id: 'wave', text: (n) => `Reach wave ${n} in one Infinite run`, goal: [8, 15], metric: (r) => (r.mode === 'infinite' ? r.wave : 0), best: true },
+    { id: 'boss', text: (n) => `Kill ${n} boss${n > 1 ? 'es' : ''}`, goal: [1, 6], metric: (r) => r.bosses || 0 },
+    { id: 'streak', text: (n) => `Get a ${n}-kill streak`, goal: [40, 120], metric: (r) => r.combo || 0, best: true },
+    { id: 'chests', text: (n) => `Open ${n} chests`, goal: [2, 10], metric: (r) => r.chests || 0 },
+    { id: 'outbreak', text: (n) => `Reach round ${n} in Outbreak`, goal: [5, 12], metric: (r) => (r.mode === 'outbreak' ? r.wave : 0), best: true },
+    { id: 'siege', text: (n) => `Hold ${n} Siege waves`, goal: [4, 20], metric: (r) => (r.mode === 'siege' ? r.wave : 0) },
+    { id: 'runs', text: (n) => `Play ${n} runs`, goal: [2, 10], metric: () => 1 },
+    { id: 'brutes', text: (n) => `Kill ${n} brutes`, goal: [15, 120], metric: (r) => (r.kk || [])[2] || 0 },
+    { id: 'score', text: (n) => `Score ${n.toLocaleString()} points in one run`, goal: [40000, 200000], metric: (r) => r.score || 0, best: true },
+  ];
+  function challengesFor(key, weekly) {
+    const rand = seeded(key);
+    const pool = CHALLENGES.slice();
+    const out = [];
+    const n = weekly ? 5 : 3;
+    while (out.length < n && pool.length) {
+      const c = pool.splice(Math.floor(rand() * pool.length), 1)[0];
+      const goal = c.goal[weekly ? 1 : 0];
+      out.push({ id: `${key}:${c.id}`, kind: c.id, text: c.text(goal), goal, best: !!c.best, coins: weekly ? 250 : 60, sxp: weekly ? 1500 : 400 });
+    }
+    return out;
+  }
+  const currentChallenges = (d = new Date()) => [...challengesFor(dayKey(d), false), ...challengesFor(weekKey(d), true)];
+
+  // free season pass: 30 tiers of season XP
+  const SEASON = { id: 's1', name: 'Season 1: The Bloom', tiers: 30, perTier: 1000 };
+  const SEASON_REWARDS = (tier) => {
+    const items = { 5: 'hat:cowboy', 10: 'skin:shadow', 15: 'tracer:fire', 20: 'skin:royal', 25: 'tracer:plasma', 30: 'skin:gold' };
+    return { coins: tier % 5 === 0 ? 0 : 40 + tier * 5, item: items[tier] || null };
+  };
+  const seasonTier = (sxp) => Math.min(SEASON.tiers, Math.floor((sxp || 0) / SEASON.perTier));
+
+  // today's daily run: same seed and mutator for everyone
+  const MUTATORS = [
+    { id: 'bighead', name: 'Big Heads', desc: 'Zombie heads are huge' },
+    { id: 'glass', name: 'Glass Cannon', desc: 'Half health, double damage' },
+    { id: 'fast', name: 'Fast Horde', desc: 'Zombies move 30% faster' },
+    { id: 'onehit', name: 'One Hit', desc: 'Any hit is fatal (2× coins)' },
+    { id: 'floaty', name: 'Low Gravity', desc: 'Huge knockback' },
+  ];
+  function daily(d = new Date()) {
+    const key = dayKey(d);
+    const rand = seeded('daily:' + key);
+    return { key, seed: Math.floor(rand() * 2 ** 31), mutator: MUTATORS[Math.floor(rand() * MUTATORS.length)].id };
+  }
+  const weeklyMutator = (d = new Date()) => MUTATORS[hash(weekKey(d)) % MUTATORS.length];
+
+  /** fold challenge + season progress for one run (mutates p); returns rewards */
+  function applyLive(p, run, now = new Date()) {
+    p.challenges = p.challenges || {};
+    const keep = new Set([dayKey(now), weekKey(now)]);
+    for (const k of Object.keys(p.challenges)) if (!keep.has(k.split(':')[0])) delete p.challenges[k];
+    const done = [];
+    let coins = 0;
+    let sxp = Math.round(xpForRun(run) / 2);
+    for (const c of currentChallenges(now)) {
+      const st = p.challenges[c.id] || { v: 0, done: false };
+      if (st.done) continue;
+      const tmpl = CHALLENGES.find((x) => x.id === c.kind);
+      const m = tmpl.metric(run);
+      st.v = c.best ? Math.max(st.v, m) : st.v + m;
+      if (st.v >= c.goal) {
+        st.done = true;
+        coins += c.coins;
+        sxp += c.sxp;
+        done.push(c);
+      }
+      p.challenges[c.id] = st;
+    }
+    p.season = p.season || { id: SEASON.id, sxp: 0 };
+    if (p.season.id !== SEASON.id) p.season = { id: SEASON.id, sxp: 0 };
+    const before = seasonTier(p.season.sxp);
+    p.season.sxp += sxp;
+    const after = seasonTier(p.season.sxp);
+    const tiers = [];
+    const items = [];
+    for (let t = before + 1; t <= after; t++) {
+      tiers.push(t);
+      const rw = SEASON_REWARDS(t);
+      coins += rw.coins;
+      if (rw.item) items.push(rw.item);
+    }
+    if (run.daily && run.daily === dayKey(now)) {
+      p.dailyBest = p.dailyBest || {};
+      if (!p.dailyBest[run.daily]) p.dailyBest = { [run.daily]: run.wave };
+    }
+    return { challenges: done, coins, sxp, tiers, items };
+  }
+
   // ------------------------------------------------------------ apply a run
   function fresh() {
     return { xp: 0, achievements: [], kills: 0, bosses: 0, runs: 0, kinds: {}, gunKills: {}, meta: {}, relics: [], equippedRelics: [] };
@@ -209,6 +318,9 @@
         if (r.rarity === 3 && !p.achievements.includes('relic_epic')) p.achievements.push('relic_epic');
       }
     }
+    const live = applyLive(p, run);
+    coins += live.coins;
+    items.push(...live.items);
     const achievements = [];
     for (const a of ACHIEVEMENTS) {
       if (!p.achievements.includes(a.id) && a.test(run, p)) {
@@ -217,12 +329,13 @@
       }
     }
     if (relics.some((r) => r.rarity === 3)) achievements.push('relic_epic');
-    return { progress: p, xp, levelsGained, coins, items, achievements, relics };
+    return { progress: p, xp, levelsGained, coins, items, achievements, relics, live };
   }
 
   return {
     KINDS, BESTIARY, ACHIEVEMENTS, EVENT_ACHIEVEMENTS, CHAR_UNLOCK, CAMO_AT, META, RELIC_BASES,
     xpToNext, levelFromXp, xpForRun, levelReward, charUnlocked, camoTier, metaCost, metaSpec,
     rollRelic, relicSpec, relicLabel, fresh, normalize, applyRun,
+    dayKey, weekKey, currentChallenges, SEASON, SEASON_REWARDS, seasonTier, MUTATORS, daily, weeklyMutator,
   };
 });

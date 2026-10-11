@@ -240,17 +240,17 @@ Original design notes:
 - [x] P6 (S) **Bestiary and Codex.** Enemy entries unlocked on first kill, plus a lore page (campaign story).
 
 ### M6 · Live & retention (free, no FOMO)
-- [ ] L1 (M) **Challenges.** Daily (3) and weekly (5) challenges, generated server-side from a date seed. Progress is reported in `/runs`; rewards are coins and season XP.
-- [ ] L2 (M) **Daily seeded run.**
+- [x] L1 (M) **Challenges.** Daily (3) and weekly (5) challenges, generated server-side from a date seed. Progress is reported in `/runs`; rewards are coins and season XP.
+- [x] L2 (M) **Daily seeded run.**
   - Same seed, mode and mutator for everyone.
   - One attempt counts for the board; a separate daily leaderboard.
   - Seed passed via `start|seed=`; the rng already takes a seed.
-- [ ] L3 (M) **Free seasonal pass.** 30 tiers of cosmetics. The season config is server JSON; earned through season XP; past seasons' cosmetics rotate back into the shop later (no permanent FOMO).
-- [ ] L4 (S) **Mutators.**
+- [x] L3 (M) **Free seasonal pass.** 30 tiers of cosmetics. The season config is server JSON; earned through season XP; past seasons' cosmetics rotate back into the shop later (no permanent FOMO).
+- [x] L4 (S) **Mutators.**
   - Weekly mutators: big-head zombies, glass cannon, fast horde, one-hit, low gravity knockback.
   - Selectable in a "Custom" mode with no ranking.
-- [ ] L5 (S) **Leaderboard upgrades.** Filters: mode, map, player count, friends-only, weekly and all-time. Server query params plus indexes.
-- [ ] L6 (S) **Welcome-back bonus.** Gentle, with no streak-loss punishment.
+- [x] L5 (S) **Leaderboard upgrades.** Filters: mode, map, player count, friends-only, weekly and all-time. Server query params plus indexes.
+- [x] L6 (S) **Welcome-back bonus.** Gentle, with no streak-loss punishment.
 
 ### M7 · Multiplayer & social hardening
 - [ ] M1 (S) **TURN relay.** Add a TURN server (Cloudflare Calls TURN, or a free tier) with credentials minted by the `api` function (`/turn`), plus ICE restart on failure. Known gap today.

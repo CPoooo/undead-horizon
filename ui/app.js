@@ -175,9 +175,16 @@
   const cmpScore = (a, b) => b.wave - a.wave || b.level - a.level || b.kills - a.kills || a.time - b.time;
   const localProfile = () => normalizeProfile(store.get(PROFILE_KEY, null));
   const OB_KEY = 'undeadHorizon.outbreakBoard.v1';
+  const DAILY_KEY = 'undeadHorizon.dailyBoard.v1';
   const localBoard = (filter) => {
     if (filter && filter.startsWith('ob:')) return store.get(OB_KEY, []).filter((e) => e.map === filter.slice(3)).slice(0, 10);
+    if (filter && filter.startsWith('daily:')) return store.get(DAILY_KEY, []).filter((e) => e.daily === filter.slice(6)).slice(0, 10);
     let lb = store.get(LB_KEY, []);
+    if (filter === 'week') return lb.filter((e) => Date.now() - new Date(e.date || 0).getTime() < 7 * 86400000).slice(0, 10);
+    if (filter === 'solo') return lb.filter((e) => (e.players || 1) === 1).slice(0, 10);
+    if (filter === 'coop') return lb.filter((e) => (e.players || 1) > 1).slice(0, 10);
+    if (filter === 'pure') return lb.filter((e) => e.pure).slice(0, 10);
+    if (filter === 'friends') return lb.slice(0, 10);
     if (filter && filter !== 'all') lb = lb.filter((e) => (e.diff || 'survivor') === filter);
     return lb.slice(0, 10);
   };
@@ -192,6 +199,18 @@
     async init() {
       if (window.UHCloud) await window.UHCloud.restore();
       await this.reload();
+      // welcome back: a gentle bonus after 3+ days away (never a lost streak)
+      const last = settings.lastSeen || 0;
+      settings.lastSeen = Date.now(); saveSettings();
+      try {
+        if (this.cloud) {
+          const r = await this.cloud.api('/welcome', { method: 'POST' });
+          if (r.bonus) { this.applyCloud(r.profile); setTimeout(() => toast(`👋 Welcome back, survivor! +🪙 ${r.bonus}`), 1500); }
+        } else if (last && Date.now() - last > 3 * 86400000) {
+          this.profile.coins += 150; this.persistLocal();
+          setTimeout(() => toast('👋 Welcome back, survivor! +🪙 150'), 1500);
+        }
+      } catch {}
     },
     async reload() {
       if (this.cloud) {
@@ -255,10 +274,18 @@
         ob.sort((a, b) => b.wave - a.wave || b.score - a.score);
         store.set(OB_KEY, ob.slice(0, 100));
       }
-      if (s.mode === 'infinite') {
+      if (s.daily && !abandoned) {
+        const db = store.get(DAILY_KEY, []);
+        if (!db.some((e) => e.daily === s.daily && e.mine)) {
+          db.push({ name: s.name, wave: s.wave, level: s.level, kills: s.kills, time: s.time, diff: s.diff, score: s.score || 0, daily: s.daily, mine: true, id: String(Date.now()) });
+          db.sort((a, b) => b.wave - a.wave || b.score - a.score);
+          store.set(DAILY_KEY, db.slice(0, 60));
+        }
+      }
+      if (s.mode === 'infinite' && !s.mutated && !s.daily) {
         p.stats.bestWave = Math.max(p.stats.bestWave || 0, s.wave);
         if (!abandoned) {
-          const entry = { name: s.name, wave: s.wave, level: s.level, kills: s.kills, time: s.time, diff: s.diff, gun: s.gun, id: String(Date.now() + Math.random()), date: new Date().toISOString() };
+          const entry = { name: s.name, wave: s.wave, level: s.level, kills: s.kills, time: s.time, diff: s.diff, gun: s.gun, players: s.players, pure: s.pure, id: String(Date.now() + Math.random()), date: new Date().toISOString() };
           const lb = store.get(LB_KEY, []);
           lb.push(entry);
           lb.sort(cmpScore);
@@ -432,6 +459,14 @@
     const camp = settings.mode === 'campaign';
     $('chapter-box').style.display = camp ? '' : 'none';
     $('map-box').style.display = settings.mode === 'outbreak' ? '' : 'none';
+    $('mut-box').style.display = settings.mode === 'infinite' ? '' : 'none';
+    const wk = window.UHProg.weeklyMutator();
+    settings.muts = settings.muts || [];
+    $('mut-seg').innerHTML = window.UHProg.MUTATORS.map((m) => `<button data-mut="${m.id}" class="${settings.muts.includes(m.id) ? 'on' : ''}" title="${esc(m.desc)}">${esc(m.name)}${m.id === wk.id ? ' ⭐' : ''}</button>`).join('');
+    const dly = window.UHProg.daily();
+    const tried = !!Data.profile.progress?.dailyBest?.[dly.key];
+    const dm = window.UHProg.MUTATORS.find((m) => m.id === dly.mutator);
+    $('daily-btn').textContent = `☀️ Daily Run · ${dm.name}${tried ? ' (practice: your score is in)' : ''}`;
     $('siege-box').style.display = settings.mode === 'siege' ? '' : 'none';
     const stars = settings.siegeStars || {};
     $('siege-seg').innerHTML = SIEGE_MAPS.map((m) => `<button data-smap="${m.id}" class="${(settings.siegeMap || 'keep') === m.id ? 'on' : ''}">${m.icon} ${m.name} <span style="color:#ffd36a">${'★'.repeat(stars[m.id] || 0)}${'☆'.repeat(3 - (stars[m.id] || 0))}</span></button>`).join('');
@@ -473,6 +508,20 @@
     { id: 'bridge', name: 'River Crossing', icon: '🌉' },
     { id: 'crossroads', name: 'The Crossroads', icon: '✖️' },
   ];
+  on('mut-seg', 'click', (e) => {
+    const b = e.target.closest('[data-mut]');
+    if (!b) return;
+    settings.muts = settings.muts || [];
+    const id = b.dataset.mut;
+    settings.muts = settings.muts.includes(id) ? settings.muts.filter((x) => x !== id) : [...settings.muts, id];
+    renderMode();
+  });
+  on('daily-btn', 'click', () => {
+    const d = window.UHProg.daily();
+    settings.mode = 'infinite';
+    dailyOverride = `;seed=${d.seed};mut=${d.mutator};daily=${d.key}`;
+    start();
+  });
   on('siege-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.siegeMap = b.dataset.smap; renderMode(); } });
   on('glass', 'change', (e) => { settings.glass = e.target.checked; saveSettings(); });
   on('map-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.map = b.dataset.map; renderMode(); } });
@@ -522,7 +571,20 @@
         <div class="acct-bar"><div style="width:${Math.round((lv.into / lv.need) * 100)}%"></div></div>
         <span class="hint">${lv.into.toLocaleString()} / ${lv.need.toLocaleString()} XP · next reward: 🪙 ${P.levelReward(lv.level + 1).coins}${P.levelReward(lv.level + 1).item ? ' + ' + esc(P.levelReward(lv.level + 1).item.split(':')[1]) : ''}</span></div></div>
       <div class="hint" style="margin:6px 0 14px">${pr.runs} runs · ${pr.kills.toLocaleString()} kills · ${pr.bosses} bosses · ${got.size}/${P.ACHIEVEMENTS.length} achievements</div>
-      <h3>🏅 Achievements</h3><div class="achs">${ach}</div>
+      <h3>🎯 Challenges</h3><div class="chals">${P.currentChallenges().map((c, i) => {
+        const st = pr.challenges?.[c.id] || { v: 0, done: false };
+        const k = Math.min(1, st.v / c.goal);
+        return `<div class="chal ${st.done ? 'done' : ''}"><span class="tag">${i < 3 ? 'Daily' : 'Weekly'}</span><b>${esc(c.text)}</b>
+          <div class="acct-bar"><div style="width:${Math.round(k * 100)}%"></div></div><span class="hint">${st.done ? '✓ Done' : `${Math.min(st.v, c.goal).toLocaleString()} / ${c.goal.toLocaleString()}`} · 🪙 ${c.coins} · ${c.sxp} season XP</span></div>`;
+      }).join('')}</div>
+      <h3 style="margin-top:18px">🌸 ${esc(P.SEASON.name)} <span class="hint">(free · tier ${P.seasonTier(pr.season?.sxp)} / ${P.SEASON.tiers})</span></h3>
+      <div class="season">${Array.from({ length: P.SEASON.tiers }, (_, i) => {
+        const tier = i + 1;
+        const rw = P.SEASON_REWARDS(tier);
+        const got = P.seasonTier(pr.season?.sxp) >= tier;
+        return `<div class="tier ${got ? 'got' : ''} ${rw.item ? 'big' : ''}" title="Tier ${tier}: ${rw.item ? esc(rw.item.split(':')[1]) : '🪙 ' + rw.coins}"><b>${tier}</b><span>${rw.item ? '🎁' : '🪙'}</span></div>`;
+      }).join('')}</div>
+      <h3 style="margin-top:18px">🏅 Achievements</h3><div class="achs">${ach}</div>
       <h3 style="margin-top:18px">📖 Bestiary</h3><div class="codexes">${codex}</div>
       <h3 style="margin-top:18px">🔫 Weapon mastery</h3><div class="masteries">${guns}</div>`;
   }
@@ -655,7 +717,8 @@
   });
   async function renderLB(el, highlightId) {
     let lb = [];
-    const filter = el.id === 'lb-menu' ? lbFilter : 'all';
+    let filter = el.id === 'lb-menu' ? lbFilter : 'all';
+    if (filter === 'daily') filter = 'daily:' + window.UHProg.dayKey();
     try { lb = await Data.leaderboard(filter); } catch (err) { console.warn(err); lb = localBoard(filter); }
     $('lb-live').style.display = Data.globalBoard ? '' : 'none';
     const note = Data.globalBoard && !Data.cloud ? '<div class="hint" style="margin-top:10px">🌍 Global board. <a href="#" data-signin style="color:var(--accent)">Sign in</a> to get your runs on it.</div>' : '';
@@ -713,6 +776,7 @@
   on('story-go', 'click', () => { clearInterval(storyTimer); const r = storyResolve; storyResolve = null; r && r(); });
 
   let runCtx = null;
+  let dailyOverride = '';
   async function start() {
     const name = playerName();
     settings.name = name; saveSettings();
@@ -726,8 +790,11 @@
     show(null);
     applySettings();
     pushEquip();
-    const map = settings.mode === 'outbreak' ? `;map=${settings.map || 'asylum'}`
-      : settings.mode === 'siege' ? `;map=${settings.siegeMap || 'keep'}${settings.glass ? ';variant=glass' : ''}` : '';
+    let extra = '';
+    if (dailyOverride) { extra = dailyOverride; dailyOverride = ''; }
+    else if (settings.mode === 'infinite' && (settings.muts || []).length) extra = `;mut=${settings.muts.join(',')}`;
+    const map = extra + (settings.mode === 'outbreak' ? `;map=${settings.map || 'asylum'}`
+      : settings.mode === 'siege' ? `;map=${settings.siegeMap || 'keep'}${settings.glass ? ';variant=glass' : ''}` : '');
     send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}${map}`);
   }
   async function continueRun(slot) {
@@ -1113,6 +1180,8 @@
           const bits = [`+${cr.xp.toLocaleString()} XP`];
           if (cr.levelsGained?.length) bits.push(`⬆️ Account level ${cr.levelsGained[cr.levelsGained.length - 1]} (+🪙 ${cr.coins})`);
           if (cr.relics?.length) bits.push(`🏺 ${cr.relics.length} relic${cr.relics.length > 1 ? 's' : ''} found`);
+          if (cr.live?.challenges?.length) bits.push(`🎯 ${cr.live.challenges.length} challenge${cr.live.challenges.length > 1 ? 's' : ''} done`);
+          if (cr.live?.tiers?.length) bits.push(`🌸 Season tier ${cr.live.tiers[cr.live.tiers.length - 1]}`);
           $('earned').textContent += ($('earned').textContent ? ' · ' : '') + bits.join(' · ');
           const P = window.UHProg;
           (cr.achievements || []).forEach((id, i) => {

@@ -30,7 +30,7 @@ export const CHAPTERS = [
 ];
 
 /** Upper bound on coins a run with this progress could have earned (mirrors game.rs). */
-export function waveCoins(r: { mode: string; chapter: number; diff: string; wave: number; victory: boolean }): number {
+export function waveCoins(r: { mode: string; chapter: number; diff: string; wave: number; victory: boolean; mutated?: boolean }): number {
   const m = DIFF_COINS[r.diff] ?? 1;
   let total = 0;
   // siege: star bonus, and the Glass Crystal challenge doubles wave coins
@@ -49,5 +49,5 @@ export function waveCoins(r: { mode: string; chapter: number; diff: string; wave
     for (let n = 1; n <= r.wave; n++) total += (10 + 5 * n) * m;
     total += Math.floor(r.wave / 5) * 50 * m;
   }
-  return Math.ceil(total * glassMult) + 5;
+  return Math.ceil(total * glassMult * (r.mutated ? 2.5 : 1)) + 5;
 }
