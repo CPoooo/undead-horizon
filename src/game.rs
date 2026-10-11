@@ -3,6 +3,7 @@ use crate::content::{self, BossVar, CHAPTERS, DIFFICULTIES, GUNS};
 use crate::math::*;
 use crate::input::{Action, Bindings};
 use crate::modes::Mode;
+use crate::status::Elem;
 use crate::net::{self, Net};
 use crate::upgrades::{Levels, Up};
 use crate::world;
@@ -103,7 +104,7 @@ pub struct Zombie {
     pub flash: f32,
     pub anim: f32,
     pub attack_cd: f32,
-    pub slow_t: f32,
+    pub st: crate::status::Status,
     pub timer: f32,
     pub state: u8,
     pub charge_dir: V2,
@@ -1729,6 +1730,7 @@ impl Game {
             }
         } else {
             self.update_zombies();
+            self.update_status();
         }
         self.grid.build(self.player.pos, &self.zombies);
         if !client {
@@ -2006,11 +2008,14 @@ impl Game {
                 let mut hits = Vec::new();
                 self.grid.query(ppos, r, |j| hits.push(j));
                 for j in hits {
-                    let z = &mut self.zombies[j];
+                    let z = &self.zombies[j];
                     if !z.dead && z.pos.dist(ppos) < r + z.r {
-                        z.slow_t = 2.2;
                         let dir = (z.pos - ppos).norm();
-                        self.damage_zombie(j, dmg, dir, 260.0, false);
+                        let power = self.elem_power();
+                        self.afflict(j, Elem::Chill, power);
+                        if !self.zombies[j].dead {
+                            self.damage_zombie(j, dmg, dir, 260.0, false);
+                        }
                     }
                 }
                 self.ring(ppos, r, 0.5, "#a8f4ff", 10.0);
@@ -2045,7 +2050,11 @@ impl Game {
                         visited.push(uid);
                         pts.push(zp);
                         let dir = (zp - *pts.first().unwrap()).norm();
-                        self.damage_zombie(cur, dmg, dir, 120.0, false);
+                        let power = self.elem_power();
+                        self.afflict(cur, Elem::Shock, power);
+                        if !self.zombies[cur].dead {
+                            self.damage_zombie(cur, dmg, dir, 120.0, false);
+                        }
                         self.burst(zp, 6, 220.0, "#cfe0ff", 2.5, 0.25, false, true);
                         let mut next = None;
                         let mut bd = 240.0f32 * 240.0;
@@ -2191,6 +2200,7 @@ impl Game {
             return self.client_hit(j, dmg, dir, knock, crit);
         }
         let hit_slot = self.hit_slot;
+        let dmg = dmg * self.status_damage_mult(j);
         let z = &mut self.zombies[j];
         if z.dead {
             return false;
@@ -2244,6 +2254,7 @@ impl Game {
     }
 
     pub(crate) fn kill_zombie(&mut self, j: usize) {
+        let shocked = self.zombies[j].st.shock_t > 0.0;
         let (pos, kind, xp, r, fuse_done, uid, killer) = {
             let z = &mut self.zombies[j];
             z.dead = true;
@@ -2272,6 +2283,9 @@ impl Game {
             });
         }
         self.note_kill(if fuse_done { 255 } else { killer }, kind, pos);
+        if shocked {
+            self.shock_discharge(pos, uid);
+        }
         self.kill_effects(pos, kind, r);
         let big = kind.def().big;
         self.drop_loot(pos, kind, xp, r, big);
@@ -2491,7 +2505,6 @@ impl Game {
             z.prev = z.pos;
             z.flash = (z.flash - DT * 7.0).max(0.0);
             z.attack_cd -= DT;
-            z.slow_t -= DT;
             z.blade_cd -= DT;
             let to = ppos - z.pos;
             let dist = to.len();
@@ -2510,7 +2523,7 @@ impl Game {
                 continue;
             }
 
-            let mut spd = z.speed * if z.slow_t > 0.0 { 0.45 } else { 1.0 };
+            let mut spd = z.speed * z.st.speed_mult();
             let mut want = if playing {
                 dir
             } else {
@@ -2705,7 +2718,7 @@ impl Game {
             // contact with player
             let rr = z.r + PR;
             if dist < rr && playing && tslot != 255 {
-                if z.attack_cd <= 0.0 {
+                if z.attack_cd <= 0.0 && !z.st.frozen() {
                     contacts.push((i, tslot));
                     z.attack_cd = 0.8;
                 }
@@ -2820,6 +2833,7 @@ impl Game {
         let mut bullets = std::mem::take(&mut self.bullets);
         let homing = self.ups.get(Up::Homing);
         let expl = self.ups.get(Up::Explosive);
+        let venom = self.ups.get(Up::Venom);
         for b in bullets.iter_mut() {
             if b.dead {
                 continue;
@@ -2862,6 +2876,14 @@ impl Game {
             if let Some(j) = hit {
                 let uid = self.zombies[j].uid;
                 let dir = b.vel.norm();
+                if venom > 0 && self.rng.chance(0.22 + 0.13 * venom as f32) {
+                    let power = self.elem_power();
+                    self.afflict(j, Elem::Poison, power);
+                }
+                if self.zombies[j].dead {
+                    b.dead = true;
+                    continue;
+                }
                 self.damage_zombie(j, b.dmg, dir, b.knock, b.crit);
                 b.last_hit = uid;
                 // impact sparks
@@ -2902,11 +2924,15 @@ impl Game {
     pub(crate) fn small_blast(&mut self, pos: V2, r: f32, dmg: f32, skip: u32) {
         let mut hits = Vec::new();
         self.grid.query(pos, r + 50.0, |j| hits.push(j));
+        let power = self.elem_power();
         for j in hits {
             let z = &self.zombies[j];
             if !z.dead && z.uid != skip && z.pos.dist(pos) < r + z.r {
                 let dir = (z.pos - pos).norm();
-                self.damage_zombie(j, dmg, dir, 160.0, false);
+                self.afflict(j, Elem::Burn, power);
+                if !self.zombies[j].dead {
+                    self.damage_zombie(j, dmg, dir, 160.0, false);
+                }
             }
         }
         self.ring(pos, r, 0.22, "#ff9a3a", 4.0);
@@ -3170,7 +3196,7 @@ impl Game {
             flash: 0.0,
             anim: self.rng.range(0.0, 10.0),
             attack_cd: 0.0,
-            slow_t: 0.0,
+            st: crate::status::Status::default(),
             timer: if kind == ZKind::Boss {
                 3.0
             } else {
@@ -3425,5 +3451,40 @@ mod tests {
             g.frame(t);
         }
         assert!(g.chest.is_some(), "queued chest opens after the level-up");
+    }
+
+    #[test]
+    fn elements_tick_freeze_and_combo() {
+        let mut g = Game::new(16);
+        g.start("diff=rookie");
+        g.wave.n = 5;
+        g.spawn_zombie(ZKind::Brute, v2(300.0, 0.0));
+        g.spawn_zombie(ZKind::Brute, v2(330.0, 40.0));
+        g.grid.build(g.player.pos, &g.zombies);
+        let hp0 = g.zombies[0].hp;
+        // burn ticks damage over time
+        g.afflict(0, Elem::Burn, 10.0);
+        for _ in 0..240 {
+            g.update_status();
+        }
+        assert!(g.zombies[0].hp < hp0, "burn hurts");
+        // two chills freeze; a frozen zombie doesn't move
+        g.afflict(1, Elem::Chill, 1.0);
+        g.afflict(1, Elem::Chill, 1.0);
+        assert!(g.zombies[1].st.frozen());
+        assert_eq!(g.zombies[1].st.speed_mult(), 0.0);
+        // shock on a frozen zombie shatters it for a chunk of its health
+        let hp1 = g.zombies[1].hp;
+        g.afflict(1, Elem::Shock, 10.0);
+        assert!(!g.zombies[1].st.frozen());
+        assert!(g.zombies[1].hp < hp1 - g.zombies[1].max_hp * 0.3 || g.zombies[1].dead);
+        // poison stacks cap at 10; with burn it blights
+        for _ in 0..12 {
+            g.afflict(0, Elem::Poison, 1.0);
+        }
+        assert!(g.zombies[0].st.poison <= 10);
+        // snapshot bits round-trip the visible statuses
+        let b = g.zombies[0].st.bits();
+        assert_eq!(crate::status::Status::from_bits(b).poison > 0, g.zombies[0].st.poison > 0);
     }
 }

@@ -23,9 +23,10 @@ pub enum Up {
     DashMaster,
     Backshot,
     Thorns,
+    Venom,
 }
 
-pub const ALL: [Up; 20] = [
+pub const ALL: [Up; 21] = [
     Up::Damage,
     Up::FireRate,
     Up::Multishot,
@@ -46,6 +47,7 @@ pub const ALL: [Up; 20] = [
     Up::DashMaster,
     Up::Backshot,
     Up::Thorns,
+    Up::Venom,
 ];
 
 /// 0 = common, 1 = rare, 2 = epic (superpower)
@@ -84,6 +86,7 @@ impl Up {
             Up::DashMaster => ("Shadow Step", "💨", 4, 1, "#c0c8ff"),
             Up::Backshot => ("Rear Guard", "↩️", 3, 0, "#e0c090"),
             Up::Thorns => ("Thorn Armor", "🌵", 4, 0, "#9ccf5a"),
+            Up::Venom => ("Venom Rounds", "🧪", 5, 1, "#8fff5a"),
         };
         Def {
             name,
@@ -116,21 +119,21 @@ impl Up {
             }
             Up::Lightning => {
                 if lvl == 1 {
-                    "Lightning strikes & chains between zombies".into()
+                    "Chaining lightning shocks: +25% damage taken".into()
                 } else {
                     "+1 chain, faster strikes, +damage".into()
                 }
             }
             Up::Nova => {
                 if lvl == 1 {
-                    "Pulse a freezing nova that slows & damages".into()
+                    "Pulse a nova that chills; full chill freezes solid".into()
                 } else {
                     "Bigger, stronger, more frequent novas".into()
                 }
             }
             Up::Explosive => {
                 if lvl == 1 {
-                    "Bullets explode on impact".into()
+                    "Bullets explode on impact and set zombies ablaze".into()
                 } else {
                     "+30% explosion radius & damage".into()
                 }
@@ -147,12 +150,19 @@ impl Up {
             }
             Up::Backshot => "Also fire a shot behind you".into(),
             Up::Thorns => "Zombies that hit you take heavy damage".into(),
+            Up::Venom => {
+                if lvl == 1 {
+                    "Hits may poison (stacks to 10). Fire + poison = Blight".into()
+                } else {
+                    "+13% poison chance".into()
+                }
+            }
         }
     }
 }
 
 #[derive(Clone, Default)]
-pub struct Levels(pub [u8; 20]);
+pub struct Levels(pub [u8; 21]);
 
 impl Levels {
     pub fn get(&self, u: Up) -> u8 {

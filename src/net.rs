@@ -113,7 +113,8 @@ pub struct Hit {
     pub dir: V2,
     pub knock: f32,
     pub crit: bool,
-    pub slow: bool,
+    /// element bits (status::Elem::bit) to apply on the host
+    pub fx: u8,
 }
 
 pub struct Net {

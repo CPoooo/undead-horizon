@@ -1033,7 +1033,7 @@ impl Game {
         let _ = c.set_global_composite_operation("lighter");
         let eye_col = if z.kind == ZKind::Boss {
             "#ff40ff"
-        } else if z.slow_t > 0.0 {
+        } else if z.st.chill > 0.05 || z.st.frozen() {
             "#80e0ff"
         } else {
             "#ff3020"
@@ -1046,11 +1046,61 @@ impl Game {
         let _ = c.set_global_composite_operation("source-over");
 
         // status overlays
-        if z.slow_t > 0.0 {
-            c.set_global_alpha(0.35);
+        let st = &z.st;
+        if st.frozen() {
+            // an ice shell with a highlight
+            c.set_global_alpha(0.55);
+            c.set_fill_style_str("#bff4ff");
+            circle(c, body.x, body.y - r * 0.15, r * 1.25);
+            c.set_global_alpha(0.8);
+            c.set_fill_style_str("#ffffff");
+            circle(c, body.x - r * 0.45, body.y - r * 0.6, r * 0.22);
+            c.set_global_alpha(1.0);
+        } else if st.chill > 0.05 {
+            c.set_global_alpha(d(0.2 + 0.3 * st.chill.min(1.0)));
             c.set_fill_style_str("#8fe8ff");
             circle(c, body.x, body.y, r * 1.02);
             c.set_global_alpha(1.0);
+        }
+        if st.poison > 0 {
+            c.set_global_alpha(0.3);
+            c.set_fill_style_str("#7dff3a");
+            circle(c, body.x, body.y, r * 0.95);
+            c.set_global_alpha(0.85);
+            c.set_fill_style_str("#b6ff5a");
+            for k in 0..3 {
+                let ph = t * 1.6 + k as f32 * 2.1 + z.tint * 7.0;
+                let rise = (ph.fract()) * r * 1.4;
+                let bx = body.x + (ph * 3.0).sin() * r * 0.5;
+                circle(c, bx, body.y - r * 0.4 - rise, 2.2 + k as f32 * 0.6);
+            }
+            c.set_global_alpha(1.0);
+        }
+        if st.burn_t > 0.0 {
+            let _ = c.set_global_composite_operation("lighter");
+            for k in 0..4 {
+                let ph = t * 9.0 + k as f32 * 1.7 + z.tint * 5.0;
+                let fx = body.x + (ph * 0.7).sin() * r * 0.6;
+                let fy = body.y - r * 0.5 - (ph.fract()) * r * 1.1;
+                c.set_global_alpha(d(0.7 * (1.0 - ph.fract())));
+                c.set_fill_style_str(if k % 2 == 0 { "#ff7a1f" } else { "#ffd23a" });
+                circle(c, fx, fy, r * 0.28 * (1.0 - ph.fract() * 0.6));
+            }
+            c.set_global_alpha(1.0);
+            let _ = c.set_global_composite_operation("source-over");
+        }
+        if st.shock_t > 0.0 && ((t * 20.0 + z.tint * 10.0) as i32) % 3 == 0 {
+            c.set_stroke_style_str("#cfe0ff");
+            c.set_line_width(1.6);
+            c.begin_path();
+            let a0 = t * 13.0 + z.tint * 9.0;
+            let mut q = body + V2::from_angle(a0) * r;
+            c.move_to(d(q.x), d(q.y));
+            for k in 1..4 {
+                q = body + V2::from_angle(a0 + k as f32 * 0.9) * (r * (0.8 + 0.4 * ((k * 7) % 3) as f32 / 2.0));
+                c.line_to(d(q.x), d(q.y));
+            }
+            c.stroke();
         }
         if z.flash > 0.0 {
             c.set_global_alpha(d(z.flash * 0.85));

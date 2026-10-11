@@ -157,7 +157,7 @@ Not scheduled yet; design notes for when we pick it up.
   - A maxed power plus a specific passive evolves at a chest: Blades + Speed → "Reaper Ring", Lightning + Crit → "Storm Crown", and so on (6–8).
   - Evolution table in `upgrades.rs`; render an EVOLVED card.
 - [x] C3 (M) **Chests.** Elites and bosses drop a chest with a slot-machine reveal of 1, 3 or 5 picks. Weight it so early chests are generous.
-- [ ] C4 (M) **Elements.** A status system on `Zombie`:
+- [x] C4 (M) **Elements.** A status system on `Zombie`:
   - burn (damage over time)
   - chill (slow, then freeze)
   - shock (chains)

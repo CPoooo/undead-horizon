@@ -6,6 +6,7 @@ use crate::content::{self, BossVar, GUNS, INFINITE_BOSSES};
 use crate::game::*;
 use crate::math::*;
 use crate::net::*;
+use crate::status::Elem;
 use crate::upgrades::Up;
 
 const SNAP_HZ: f64 = 20.0;
@@ -337,7 +338,6 @@ impl Game {
     /// Client: show the hit instantly and report it to the host. Kills are
     /// predicted locally (gore now), credited when the host confirms.
     pub fn client_hit(&mut self, j: usize, dmg: f32, dir: V2, knock: f32, crit: bool) -> bool {
-        let slow = false;
         let (uid, pos, dead, kind, r) = {
             let z = &mut self.zombies[j];
             if z.dead {
@@ -354,7 +354,7 @@ impl Game {
                 dir,
                 knock,
                 crit,
-                slow,
+                fx: 0,
             });
         }
         self.damage_dealt += dmg as f64;
@@ -458,7 +458,7 @@ impl Game {
                     w.f32(h.dmg);
                     w.angle(h.dir.angle());
                     w.u8((h.knock / 4.0).clamp(0.0, 255.0) as u8);
-                    w.u8(h.crit as u8 | (h.slow as u8) << 1);
+                    w.u8(h.crit as u8 | h.fx);
                 }
                 out.push((0, true, w.0));
             }
@@ -609,6 +609,15 @@ impl Game {
                     };
                     let dmg = dmg.clamp(0.0, 1.0e6);
                     if let Some(j) = self.zombies.iter().position(|z| z.uid == uid && !z.dead) {
+                        let power = self.elem_power();
+                        for e in [Elem::Burn, Elem::Chill, Elem::Shock, Elem::Poison] {
+                            if fl & e.bit() != 0 && !self.zombies[j].dead {
+                                self.afflict(j, e, power);
+                            }
+                        }
+                        if self.zombies[j].dead || dmg <= 0.0 {
+                            continue;
+                        }
                         self.hit_slot = from;
                         self.damage_zombie(
                             j,
@@ -676,10 +685,8 @@ impl Game {
             if z.flash > 0.3 {
                 fl |= 1;
             }
-            if z.slow_t > 0.0 {
-                fl |= 2;
-            }
             fl |= (z.state.min(3)) << 2;
+            fl |= z.st.bits();
             w.u8(fl);
             w.angle(z.charge_dir.angle());
             let aux = match z.kind {
@@ -817,7 +824,7 @@ impl Game {
             if fl & 1 != 0 {
                 z.flash = z.flash.max(0.6);
             }
-            z.slow_t = if fl & 2 != 0 { 1.0 } else { 0.0 };
+            z.st = crate::status::Status::from_bits(fl);
             z.state = (fl >> 2) & 3;
             z.charge_dir = V2::from_angle(charge);
             match kind {
@@ -1050,7 +1057,7 @@ fn replica(uid: u32, kind: ZKind, var: BossVar, pos: V2) -> Zombie {
         flash: 0.0,
         anim: (uid % 97) as f32 * 0.1,
         attack_cd: 0.0,
-        slow_t: 0.0,
+        st: crate::status::Status::default(),
         timer: 1.0,
         state: 0,
         charge_dir: V2::ZERO,
