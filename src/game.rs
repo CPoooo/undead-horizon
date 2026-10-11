@@ -844,6 +844,7 @@ impl Game {
         self.audio.music_on = true;
         self.audio.set_track(Track::Gameplay);
         self.best_wave = 0;
+        crate::destruct::reset();
         self.map_id.clear();
         self.variant.clear();
         self.mutators = content::Mutators::default();
@@ -2834,6 +2835,10 @@ impl Game {
         self.mode.hooks().on_kill(self, kind, pos);
     }
 
+    pub fn spawn_gem_pub(&mut self, pos: V2, value: u32) {
+        self.spawn_gem(pos, value);
+    }
+
     pub(crate) fn spawn_gem(&mut self, pos: V2, value: u32) {
         if self.gems.len() > 420 {
             // merge into a random existing gem to bound the count
@@ -3471,6 +3476,10 @@ impl Game {
             }
             b.pos += b.vel * DT;
             if b.cosmetic {
+                continue;
+            }
+            if self.bullet_vs_props(b.pos, b.dmg) {
+                b.dead = true;
                 continue;
             }
 
@@ -4692,5 +4701,35 @@ mod tests {
             seen.insert(format!("{:?}", g.weather.sky));
         }
         assert!(seen.len() >= 2, "{seen:?}");
+    }
+
+    #[test]
+    fn barrels_explode_and_crates_break() {
+        let mut g = Game::new(36);
+        g.start("diff=rookie");
+        // find a barrel in the procedural world
+        let mut barrel = None;
+        'f: for cy in -200..200 {
+            for cx in -200..200 {
+                if let Some(o) = world::obstacle_at(cx, cy) {
+                    if o.kind == world::ObKind::Barrel {
+                        barrel = Some(o);
+                        break 'f;
+                    }
+                }
+            }
+        }
+        let b = barrel.expect("town ruins have barrels");
+        g.player.pos = b.pos + v2(500.0, 0.0); // out of the blast
+        for k in 0..6 {
+            g.spawn_zombie(ZKind::Walker, b.pos + V2::from_angle(k as f32) * 70.0);
+        }
+        g.grid.build(g.player.pos, &g.zombies);
+        let kills = g.kills;
+        for _ in 0..3 {
+            g.bullet_vs_props(b.pos, 10.0);
+        }
+        assert!(g.kills >= kills + 4, "the blast takes the horde with it");
+        assert!(world::obstacle_at((b.pos.x / world::OBST_CELL).floor() as i32, (b.pos.y / world::OBST_CELL).floor() as i32).is_none(), "and it's gone");
     }
 }

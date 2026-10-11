@@ -3,6 +3,7 @@ mod audio;
 mod boss;
 mod callouts;
 mod chest;
+mod destruct;
 mod elites;
 mod content;
 mod coop;

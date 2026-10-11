@@ -165,6 +165,9 @@ pub fn obstacle_at(cx: i32, cy: i32) -> Option<Obstacle> {
         return None;
     }
     let seed = hash2(cx, cy, 7);
+    if crate::destruct::is_destroyed(seed) {
+        return None;
+    }
     let ox = 40.0 + hashf(cx, cy, 3) * (OBST_CELL - 80.0);
     let oy = 40.0 + hashf(cx, cy, 4) * (OBST_CELL - 80.0);
     let pos = v2(cx as f32 * OBST_CELL + ox, cy as f32 * OBST_CELL + oy);
