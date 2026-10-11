@@ -392,6 +392,10 @@
     const camp = settings.mode === 'campaign';
     $('chapter-box').style.display = camp ? '' : 'none';
     $('map-box').style.display = settings.mode === 'outbreak' ? '' : 'none';
+    $('siege-box').style.display = settings.mode === 'siege' ? '' : 'none';
+    const stars = settings.siegeStars || {};
+    $('siege-seg').innerHTML = SIEGE_MAPS.map((m) => `<button data-smap="${m.id}" class="${(settings.siegeMap || 'keep') === m.id ? 'on' : ''}">${m.icon} ${m.name} <span style="color:#ffd36a">${'★'.repeat(stars[m.id] || 0)}${'☆'.repeat(3 - (stars[m.id] || 0))}</span></button>`).join('');
+    $('glass').checked = !!settings.glass;
     for (const b of $('map-seg').children) b.classList.toggle('on', b.dataset.map === (settings.map || 'asylum'));
     $('mode-hint').textContent = camp ? 'Story chapters with unique boss fights.'
       : settings.mode === 'siege' ? 'The Last Keep: build towers, traps and barricades with mana, then hold the crystal for 15 waves. 1-6 to build, E to upgrade, X to sell.'
@@ -424,6 +428,13 @@
     saveSettings();
   }
   on('mode-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.mode = b.dataset.mode; renderMode(); send('equip|'); } });
+  const SIEGE_MAPS = [
+    { id: 'keep', name: 'The Last Keep', icon: '🏰' },
+    { id: 'bridge', name: 'River Crossing', icon: '🌉' },
+    { id: 'crossroads', name: 'The Crossroads', icon: '✖️' },
+  ];
+  on('siege-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.siegeMap = b.dataset.smap; renderMode(); } });
+  on('glass', 'change', (e) => { settings.glass = e.target.checked; saveSettings(); });
   on('map-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.map = b.dataset.map; renderMode(); } });
   on('diff-seg', 'click', (e) => {
     const b = e.target.closest('button');
@@ -607,7 +618,8 @@
     show(null);
     applySettings();
     pushEquip();
-    const map = settings.mode === 'outbreak' ? `;map=${settings.map || 'asylum'}` : '';
+    const map = settings.mode === 'outbreak' ? `;map=${settings.map || 'asylum'}`
+      : settings.mode === 'siege' ? `;map=${settings.siegeMap || 'keep'}${settings.glass ? ';variant=glass' : ''}` : '';
     send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}${map}`);
   }
   async function continueRun(slot) {
@@ -735,6 +747,16 @@
           speechSynthesis.cancel();
           speechSynthesis.speak(u);
         } catch {}
+        break;
+      }
+      case 'siegestars': {
+        // best stars per map; the first clear of a map is celebrated
+        const [map, n, glass] = String(data).split(':');
+        settings.siegeStars = settings.siegeStars || {};
+        const first = !settings.siegeStars[map];
+        settings.siegeStars[map] = Math.max(settings.siegeStars[map] || 0, +n);
+        saveSettings();
+        toast(first ? `🏰 First clear! ${'★'.repeat(+n)}${glass === '1' ? ' · Glass Crystal' : ''}` : `${'★'.repeat(+n)} on this map`);
         break;
       }
       case 'usebtn': $('t-use').classList.toggle('on', data === '1'); break;

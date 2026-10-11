@@ -33,6 +33,9 @@ export const CHAPTERS = [
 export function waveCoins(r: { mode: string; chapter: number; diff: string; wave: number; victory: boolean }): number {
   const m = DIFF_COINS[r.diff] ?? 1;
   let total = 0;
+  // siege: star bonus, and the Glass Crystal challenge doubles wave coins
+  if (r.mode === "siege") total += 180 * m;
+  const glassMult = r.mode === "siege" ? 2 : 1;
   // treasure chests (bosses, elites, brutes) add coins on top of wave rewards
   total += 65 * m * (Math.floor(r.wave / 5) + Math.ceil(r.wave / 2) + 1);
   if (r.mode === "campaign") {
@@ -46,5 +49,5 @@ export function waveCoins(r: { mode: string; chapter: number; diff: string; wave
     for (let n = 1; n <= r.wave; n++) total += (10 + 5 * n) * m;
     total += Math.floor(r.wave / 5) * 50 * m;
   }
-  return Math.ceil(total) + 5;
+  return Math.ceil(total * glassMult) + 5;
 }

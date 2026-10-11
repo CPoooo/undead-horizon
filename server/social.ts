@@ -395,7 +395,7 @@ async function handle(uid: string, msg: any): Promise<void> {
     case "party.mode": {
       const pa = await partyOf(uid);
       if (!pa || pa.host_id !== uid) throw new Error("Only the host can change the mode.");
-      if (!["infinite", "outbreak"].includes(msg.mode)) return;
+      if (!["infinite", "outbreak", "siege"].includes(msg.mode)) return;
       await pool.query("update parties set mode = $2 where id = $1", [pa.id, msg.mode]);
       await notify(await memberIds(pa.id), { k: "party" });
       return;
