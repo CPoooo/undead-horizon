@@ -165,7 +165,7 @@ Not scheduled yet; design notes for when we pick it up.
   - Combos: chill + shock = shatter; burn + poison = blight.
   - Rework the Frost Nova, Lightning and Explosive sources to apply them.
 - [x] C5 (M) **Elite affixes.** Shielded, hasted, splitting, vampiric, explosive-death, reflective, with a colored aura, shape icon and nameplate. They spawn by wave scaling.
-- [ ] C6 (M) **New archetypes** (via F1 data):
+- [x] C6 (M) **New archetypes** (via F1 data):
   - crawler (low, fast)
   - screamer (buffs nearby)
   - armored (front-armor, needs pierce or flank)

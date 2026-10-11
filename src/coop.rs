@@ -833,6 +833,7 @@ impl Game {
             z.affix = crate::elites::Affix::from_u8(ax & 0x7f);
             z.shield = if ax & 0x80 != 0 { 1.0 } else { 0.0 };
             z.state = (fl >> 2) & 3;
+            z.hidden = kind == ZKind::Burrower && z.state < 2;
             z.charge_dir = V2::from_angle(charge);
             match kind {
                 ZKind::Exploder => z.fuse = aux as f32 / 200.0,
@@ -1067,6 +1068,8 @@ fn replica(uid: u32, kind: ZKind, var: BossVar, pos: V2) -> Zombie {
         st: crate::status::Status::default(),
         affix: crate::elites::Affix::None,
         shield: 0.0,
+        rage_t: 0.0,
+        hidden: false,
         timer: 1.0,
         state: 0,
         charge_dir: V2::ZERO,

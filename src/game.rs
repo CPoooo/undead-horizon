@@ -33,16 +33,26 @@ pub enum ZKind {
     Spitter,
     Exploder,
     Boss,
+    Crawler,
+    Screamer,
+    Armored,
+    Bat,
+    Burrower,
 }
 
 impl ZKind {
-    pub const ALL: [ZKind; 6] = [
+    pub const ALL: [ZKind; 11] = [
         ZKind::Walker,
         ZKind::Runner,
         ZKind::Brute,
         ZKind::Spitter,
         ZKind::Exploder,
         ZKind::Boss,
+        ZKind::Crawler,
+        ZKind::Screamer,
+        ZKind::Armored,
+        ZKind::Bat,
+        ZKind::Burrower,
     ];
 
     pub fn def(self) -> &'static content::EnemyDef {
@@ -107,6 +117,10 @@ pub struct Zombie {
     pub st: crate::status::Status,
     pub affix: crate::elites::Affix,
     pub shield: f32,
+    /// screamer enrage: faster while > 0
+    pub rage_t: f32,
+    /// underground (burrowers): not in the spatial grid, so nothing can hit it
+    pub hidden: bool,
     pub timer: f32,
     pub state: u8,
     pub charge_dir: V2,
@@ -313,7 +327,7 @@ impl Grid {
         self.start.iter_mut().for_each(|s| *s = 0);
         let mut total = 0;
         for z in zs {
-            if !z.dead {
+            if !z.dead && !z.hidden {
                 let (x, y) = self.cell_xy(z.pos);
                 self.start[(y * self.n + x) as usize + 1] += 1;
                 total += 1;
@@ -326,7 +340,7 @@ impl Grid {
         self.cursor.copy_from_slice(&self.start[..n]);
         self.items.resize(total, 0);
         for (i, z) in zs.iter().enumerate() {
-            if !z.dead {
+            if !z.dead && !z.hidden {
                 let (x, y) = self.cell_xy(z.pos);
                 let c = (y * self.n + x) as usize;
                 self.items[self.cursor[c] as usize] = i as u32;
@@ -782,6 +796,20 @@ impl Game {
     }
 
     // ---------------------------------------------------------------- stats
+    /// Armored zombies shrug off 75% of damage from the front (crits punch through).
+    pub fn armor_mult(&self, j: usize, dir: V2, crit: bool) -> f32 {
+        let z = &self.zombies[j];
+        if z.kind != ZKind::Armored || crit || dir.len2() < 0.01 {
+            return 1.0;
+        }
+        // `dir` points from the shooter into the zombie; a frontal hit opposes its facing
+        if dir.dot(V2::from_angle(z.face)) < -0.4 {
+            0.25
+        } else {
+            1.0
+        }
+    }
+
     pub fn has_evo(&self, e: Evo) -> bool {
         self.evolved.contains(&e)
     }
@@ -2251,6 +2279,7 @@ impl Game {
         let hit_slot = self.hit_slot;
         let dmg = dmg * self.status_damage_mult(j);
         let dmg = self.shield_absorb(j, dmg);
+        let dmg = self.armor_mult(j, dir, crit) * dmg;
         let z = &mut self.zombies[j];
         if z.dead {
             return false;
@@ -2548,6 +2577,8 @@ impl Game {
         let mut fuses: Vec<usize> = Vec::new();
         let mut boss_summons: Vec<(V2, ZKind, u32)> = Vec::new();
         let mut blasts: Vec<V2> = Vec::new();
+        let mut screams: Vec<V2> = Vec::new();
+        let mut eruptions: Vec<(V2, f32)> = Vec::new();
         let relocate_r = self.spawn_r * 1.7;
         let playing = self.phase == Phase::Playing
             || (self.net.is_some() && matches!(self.phase, Phase::LevelUp | Phase::Paused));
@@ -2577,7 +2608,8 @@ impl Game {
                 continue;
             }
 
-            let mut spd = z.speed * z.st.speed_mult();
+            z.rage_t -= DT;
+            let mut spd = z.speed * z.st.speed_mult() * if z.rage_t > 0.0 { 1.35 } else { 1.0 };
             let mut want = if playing {
                 dir
             } else {
@@ -2619,6 +2651,52 @@ impl Game {
                         }
                     } else if dist < z.r + PR + 34.0 && playing {
                         z.fuse = 0.55;
+                    }
+                }
+                ZKind::Crawler => {
+                    // scuttles in a zigzag
+                    let wob = (z.anim * 0.9 + z.tint * 9.0).sin() * 0.7;
+                    want = (want + want.perp() * wob).norm();
+                }
+                ZKind::Screamer => {
+                    if dist < 280.0 {
+                        want = -dir;
+                    } else if dist < 380.0 {
+                        want = (dir.perp() * z.strafe).norm();
+                        spd *= 0.5;
+                    }
+                    z.timer -= DT;
+                    if z.timer <= 0.0 && playing && dist < 700.0 {
+                        z.timer = 4.5;
+                        screams.push(z.pos);
+                    }
+                }
+                ZKind::Bat => {
+                    // fluttering approach that overshoots and circles back
+                    let wob = (z.anim * 1.7 + z.tint * 11.0).sin();
+                    want = (want + want.perp() * (wob * 1.1)).norm();
+                    accel = 4.0;
+                }
+                ZKind::Burrower => {
+                    match z.state {
+                        0 => {
+                            // tunnelling: surface when close
+                            spd *= 1.3;
+                            if dist < 120.0 && playing {
+                                z.state = 1;
+                                z.timer = 0.8;
+                            }
+                        }
+                        1 => {
+                            spd = 0.0;
+                            z.timer -= DT;
+                            if z.timer <= 0.0 {
+                                z.state = 2;
+                                z.hidden = false;
+                                eruptions.push((z.pos, z.dmg));
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 ZKind::Boss => {
@@ -2747,7 +2825,7 @@ impl Game {
                 _ => {}
             }
 
-            if z.kind != ZKind::Boss || z.state == 0 {
+            if (z.kind != ZKind::Boss || z.state == 0) && z.kind != ZKind::Bat && !z.hidden {
                 if let Some(o) = world::blocking(z.pos, want, 46.0, z.r) {
                     let to_o = o.pos - z.pos;
                     let cross = want.x * to_o.y - want.y * to_o.x;
@@ -2771,7 +2849,7 @@ impl Game {
 
             // contact with player
             let rr = z.r + PR;
-            if dist < rr && playing && tslot != 255 {
+            if dist < rr && playing && tslot != 255 && !z.hidden {
                 if z.attack_cd <= 0.0 && !z.st.frozen() {
                     contacts.push((i, tslot));
                     z.attack_cd = 0.8;
@@ -2811,6 +2889,27 @@ impl Game {
                 self.spawn_zombie(kind, p);
                 self.burst(p, 6, 120.0, "#4a3a2a", 4.0, 0.5, true, false);
             }
+        }
+        for at in screams {
+            let mut n = 0;
+            for z in self.zombies.iter_mut() {
+                if !z.dead && z.kind != ZKind::Screamer && z.pos.dist2(at) < 240.0 * 240.0 {
+                    z.rage_t = 3.5;
+                    n += 1;
+                }
+            }
+            self.ring(at, 240.0, 0.5, "#ff6ab0", 5.0);
+            self.sfx(Sfx::BossRoar, at);
+            if n > 0 {
+                self.text(at + v2(0.0, -30.0), "SCREECH!".into(), "#ff8ac0", 13.0);
+            }
+        }
+        for (at, dmg) in eruptions {
+            self.ring(at, 90.0, 0.35, "#9a7a4a", 8.0);
+            self.burst(at, 24, 300.0, "#6a4a2a", 5.0, 0.8, true, false);
+            self.sfx(Sfx::Explosion, at);
+            self.add_shake(0.25);
+            self.hurt_players_in(at, 80.0, dmg);
         }
         for at in blasts {
             let dmg = 28.0 * self.difficulty().dmg;
@@ -2873,6 +2972,9 @@ impl Game {
                 continue;
             }
             z.pos += s.clamp_len(6.0) * 0.6;
+            if z.kind == ZKind::Bat {
+                continue;
+            }
             let (np, nrm) = world::resolve(z.pos, z.r);
             if nrm.len2() > 0.0 {
                 z.pos = np;
@@ -3271,6 +3373,8 @@ impl Game {
             st: crate::status::Status::default(),
             affix: crate::elites::Affix::None,
             shield: 0.0,
+            rage_t: 0.0,
+            hidden: kind == ZKind::Burrower,
             timer: if kind == ZKind::Boss {
                 3.0
             } else {
@@ -3356,11 +3460,15 @@ mod tests {
             assert_eq!(g.pick_kind(), ZKind::Walker);
         }
         g.wave.n = 12;
-        let mut seen = [false; 6];
-        for _ in 0..4000 {
+        let mut seen = [false; ZKind::ALL.len()];
+        for _ in 0..8000 {
             seen[g.pick_kind() as usize] = true;
         }
-        assert!(seen[..5].iter().all(|s| *s), "all wave kinds spawn by wave 12");
+        for k in ZKind::ALL {
+            if k != ZKind::Boss {
+                assert!(seen[k as usize], "{:?} spawns by wave 12", k);
+            }
+        }
         assert!(!seen[ZKind::Boss as usize], "bosses never come from the pool");
         // stats come from the table
         for k in ZKind::ALL {
@@ -3621,5 +3729,48 @@ mod tests {
             g.update_volatile();
         }
         assert!(g.volatile.is_empty() && g.player.hp < hp0, "telegraphed blast hurts");
+    }
+
+    #[test]
+    fn new_archetypes_behave() {
+        let mut g = Game::new(20);
+        g.start("diff=rookie");
+        g.wave.n = 14;
+        // armored: frontal hits glance off, flanking works
+        g.spawn_zombie(ZKind::Armored, v2(200.0, 0.0));
+        g.zombies[0].face = PI; // facing the player at the origin
+        g.grid.build(g.player.pos, &g.zombies);
+        let hp = g.zombies[0].hp;
+        g.damage_zombie(0, 10.0, v2(1.0, 0.0), 0.0, false);
+        let front = hp - g.zombies[0].hp;
+        let hp = g.zombies[0].hp;
+        g.damage_zombie(0, 10.0, v2(-1.0, 0.0), 0.0, false);
+        let back = hp - g.zombies[0].hp;
+        assert!(front < back * 0.5, "front {front} vs back {back}");
+        // burrower: untargetable until it erupts next to you
+        g.zombies.clear();
+        g.spawn_zombie(ZKind::Burrower, v2(400.0, 0.0));
+        g.grid.build(g.player.pos, &g.zombies);
+        assert!(g.nearest_zombie(g.player.pos, 2000.0, 0).is_none(), "hidden from the grid");
+        g.player.hp = 1.0e9;
+        g.player.max_hp = 1.0e9;
+        let mut t = 0.0;
+        for _ in 0..600 {
+            t += 16.7;
+            g.player.pos = V2::ZERO;
+            g.frame(t);
+            if !g.zombies.iter().any(|z| z.hidden) {
+                break;
+            }
+        }
+        assert!(g.zombies.iter().any(|z| z.kind == ZKind::Burrower && !z.hidden), "it surfaces");
+        // screamer: enrages its neighbours
+        g.zombies.clear();
+        g.spawn_zombie(ZKind::Screamer, v2(500.0, 0.0));
+        g.spawn_zombie(ZKind::Walker, v2(540.0, 0.0));
+        g.zombies[0].timer = 0.0;
+        g.grid.build(g.player.pos, &g.zombies);
+        g.update_zombies();
+        assert!(g.zombies[1].rage_t > 0.0);
     }
 }

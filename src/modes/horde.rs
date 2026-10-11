@@ -155,6 +155,12 @@ impl Game {
                 let k = self.pick_kind();
                 let p = base + self.rng.unit() * self.rng.range(0.0, 70.0);
                 self.spawn_zombie(k, p);
+                if k == ZKind::Bat {
+                    for _ in 0..4 {
+                        let q = p + self.rng.unit() * 40.0;
+                        self.spawn_zombie(ZKind::Bat, q);
+                    }
+                }
                 if self.rng.chance(self.elite_chance()) {
                     let a = self.roll_affix();
                     self.make_elite(a);

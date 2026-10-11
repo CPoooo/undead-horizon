@@ -536,7 +536,7 @@ impl Game {
                 let _ = c.ellipse(d(p.x), d(p.y), d(o.r * 1.1), d(o.r * 0.85), 0.0, 0.0, TAU64);
             }
         }
-        for z in self.zombies.iter() {
+        for z in self.zombies.iter().filter(|z| !z.hidden) {
             let p = z.prev.lerp(z.pos, self.za(a)) + v2(3.0, z.r * 0.55);
             c.move_to(d(p.x + z.r * 1.05), d(p.y));
             let _ = c.ellipse(d(p.x), d(p.y), d(z.r * 1.05), d(z.r * 0.5), 0.0, 0.0, TAU64);
@@ -945,6 +945,55 @@ impl Game {
         let sway = (z.anim * 1.3).sin() * 0.25;
 
         let def = z.kind.def();
+        if z.kind == ZKind::Burrower && z.state < 2 {
+            // a travelling dirt mound; it shakes and cracks before erupting
+            let shake = if z.state == 1 { (t * 50.0).sin() * 3.0 } else { 0.0 };
+            c.set_fill_style_str("#3a2a14");
+            c.begin_path();
+            let _ = c.ellipse(d(p.x + shake), d(p.y), d(r * 1.2), d(r * 0.7), 0.0, 0.0, TAU64);
+            c.fill();
+            c.set_fill_style_str("#5a4020");
+            c.begin_path();
+            let _ = c.ellipse(d(p.x + shake), d(p.y - 4.0), d(r * 0.9), d(r * 0.5), 0.0, 0.0, TAU64);
+            c.fill();
+            if z.state == 1 {
+                c.set_stroke_style_str("#ffb050");
+                c.set_line_width(2.0);
+                c.set_global_alpha(d(0.4 + 0.4 * (t * 20.0).sin().abs()));
+                c.begin_path();
+                let _ = c.arc(d(p.x), d(p.y), d(80.0), 0.0, TAU64);
+                c.stroke();
+                c.set_global_alpha(1.0);
+            }
+            return;
+        }
+        if z.kind == ZKind::Bat {
+            let flap = (z.anim * 4.0).sin();
+            let lifted = p + v2(0.0, -26.0);
+            c.set_fill_style_str(def.skin);
+            for s in [-1.0f32, 1.0] {
+                c.begin_path();
+                c.move_to(d(lifted.x), d(lifted.y));
+                c.line_to(d(lifted.x + s * r * 2.2), d(lifted.y - r * (0.6 + flap * 0.9)));
+                c.line_to(d(lifted.x + s * r * 1.4), d(lifted.y + r * 0.3));
+                c.close_path();
+                c.fill();
+            }
+            c.set_fill_style_str(def.dark);
+            circle(c, lifted.x, lifted.y, r * 0.75);
+            let _ = c.set_global_composite_operation("lighter");
+            c.set_fill_style_str("#ff3020");
+            circle(c, lifted.x - 2.5, lifted.y - 1.5, 1.6);
+            circle(c, lifted.x + 2.5, lifted.y - 1.5, 1.6);
+            let _ = c.set_global_composite_operation("source-over");
+            if z.flash > 0.0 {
+                c.set_global_alpha(d(z.flash * 0.85));
+                c.set_fill_style_str("#ffffff");
+                circle(c, lifted.x, lifted.y, r);
+                c.set_global_alpha(1.0);
+            }
+            return;
+        }
         let (cloth, skin, dark) = if z.kind == ZKind::Boss {
             z.boss_var.colors()
         } else {
@@ -1013,6 +1062,55 @@ impl Game {
                 circle(c, body.x, body.y, r * 0.75);
                 let _ = c.set_global_composite_operation("source-over");
                 c.set_global_alpha(1.0);
+            }
+            ZKind::Crawler => {
+                // splayed legs
+                c.set_stroke_style_str(skin);
+                c.set_line_width(d(r * 0.25));
+                c.begin_path();
+                for k in 0..4 {
+                    let side_s = if k < 2 { -1.0 } else { 1.0 };
+                    let along = if k % 2 == 0 { 0.5 } else { -0.4 };
+                    let swing = (z.anim * 3.0 + k as f32).sin() * 0.4;
+                    let base = body + fwd * (r * along);
+                    let foot = base + side * (r * 1.3 * side_s) + fwd * (r * swing);
+                    c.move_to(d(base.x), d(base.y));
+                    c.line_to(d(foot.x), d(foot.y));
+                }
+                c.stroke();
+            }
+            ZKind::Screamer => {
+                let open = if z.timer < 0.5 { 1.0 + (0.5 - z.timer) * 2.0 } else { 0.6 };
+                let mouth = body + fwd * (r * 0.75) + v2(0.0, -r * 0.2);
+                c.set_fill_style_str("#1a0008");
+                circle(c, mouth.x, mouth.y, r * 0.32 * open);
+                if z.rage_t > 0.0 || z.timer < 0.5 {
+                    c.set_stroke_style_str("#ff8ac0");
+                    c.set_line_width(1.5);
+                    c.set_global_alpha(0.6);
+                    for k in 1..3 {
+                        c.begin_path();
+                        let rr = r * (0.6 + k as f32 * 0.5 + (t * 3.0).fract() * 0.5);
+                        let _ = c.arc(d(mouth.x), d(mouth.y), d(rr), d(face - 0.6), d(face + 0.6));
+                        c.stroke();
+                    }
+                    c.set_global_alpha(1.0);
+                }
+            }
+            ZKind::Armored => {
+                // riveted plate across the front
+                c.set_stroke_style_str("#9aa3b0");
+                c.set_line_width(d(r * 0.38));
+                c.set_line_cap("butt");
+                c.begin_path();
+                let _ = c.arc(d(body.x), d(body.y), d(r * 0.95), d(face - 1.0), d(face + 1.0));
+                c.stroke();
+                c.set_line_cap("round");
+                c.set_fill_style_str("#d0d6e0");
+                for k in [-0.7f32, 0.0, 0.7] {
+                    let rv = body + V2::from_angle(face + k) * (r * 0.95);
+                    circle(c, rv.x, rv.y, 1.8);
+                }
             }
             ZKind::Brute => {
                 c.set_fill_style_str("#262a31");
@@ -1116,6 +1214,12 @@ impl Game {
                 c.line_to(d(q.x), d(q.y));
             }
             c.stroke();
+        }
+        if z.rage_t > 0.0 {
+            c.set_global_alpha(0.22);
+            c.set_fill_style_str("#ff3a6a");
+            circle(c, body.x, body.y, r * 1.05);
+            c.set_global_alpha(1.0);
         }
         if z.flash > 0.0 {
             c.set_global_alpha(d(z.flash * 0.85));
@@ -2155,16 +2259,19 @@ impl Game {
         }
 
         // zombies, batched by colour
-        for (col, kinds, size) in [
-            ("#ff4a3a", [ZKind::Walker, ZKind::Runner], 1.7f32),
-            ("#ff9a3a", [ZKind::Exploder, ZKind::Exploder], 2.0),
-            ("#9be04a", [ZKind::Spitter, ZKind::Spitter], 2.0),
-            ("#ff6a5a", [ZKind::Brute, ZKind::Brute], 2.8),
-        ] {
+        let groups: [(&str, &[ZKind], f32); 6] = [
+            ("#ff4a3a", &[ZKind::Walker, ZKind::Runner, ZKind::Crawler], 1.7),
+            ("#ff9a3a", &[ZKind::Exploder], 2.0),
+            ("#9be04a", &[ZKind::Spitter], 2.0),
+            ("#ff6a5a", &[ZKind::Brute, ZKind::Armored], 2.8),
+            ("#ff8ac0", &[ZKind::Screamer], 2.2),
+            ("#b48cff", &[ZKind::Bat], 1.3),
+        ];
+        for (col, kinds, size) in groups {
             c.set_fill_style_str(col);
             c.begin_path();
             for z in self.zombies.iter() {
-                if kinds.contains(&z.kind) {
+                if kinds.contains(&z.kind) && !z.hidden {
                     let m = to_map(z.prev.lerp(z.pos, self.za(a)));
                     path_circle(c, m.x, m.y, size);
                 }

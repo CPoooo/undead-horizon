@@ -468,6 +468,13 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
             if a == "chest" && g.phase == Phase::Playing {
                 g.open_chest();
             }
+            if a == "kinds" && g.phase == Phase::Playing {
+                let p = g.player.pos;
+                use game::ZKind::*;
+                for (k, kind) in [Crawler, Screamer, Armored, Bat, Burrower].iter().enumerate() {
+                    g.spawn_zombie(*kind, p + math::V2::from_angle(k as f32 * 1.25 + 0.3) * 230.0);
+                }
+            }
             if a == "elites" && g.phase == Phase::Playing {
                 let p = g.player.pos;
                 for (k, af) in elites::AFFIXES.iter().enumerate() {
