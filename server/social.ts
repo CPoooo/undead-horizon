@@ -11,11 +11,13 @@
 //   | { t: "party.invite"|"party.kick", id } | { t: "party.join"|"party.decline", partyId }
 //   | { t: "party.ready", ready } | { t: "party.diff", diff } | { t: "party.look", look }
 //   | { t: "signal", to, data } | { t: "ping" }
-// Server -> client: hello, social, party, party.start, invite, signal, toast, error, ping
+//   | { t: "chat", text } | { t: "party.voice", on } | { t: "block"|"unblock", id } | { t: "report", id, reason, message }
+// Server -> client: hello, social, party, party.start, invite, signal, chat, toast, error, ping
 import { Hono } from "hono";
 import { upgradeWebSocket } from "@neon/functions/hono";
 import { pool, verifyToken, ensureProfile } from "./shared";
 import { DIFFS } from "./catalog";
+import { cleanChat, chatAllowed } from "./chat";
 
 const MAX_PARTY = 3;
 const ONLINE_WINDOW = "45 seconds";
@@ -109,6 +111,8 @@ async function deliver(uid: string, p: any) {
       return sendUser(uid, { t: "signal", from: p.from, data: p.data });
     case "toast":
       return sendUser(uid, { t: "toast", msg: p.msg });
+    case "chat":
+      return sendUser(uid, { t: "chat", from: p.from, name: p.name, text: p.text, ts: p.ts });
   }
 }
 
@@ -143,7 +147,12 @@ async function socialState(uid: string) {
      where i.to_id = $1 and pa.status = 'open' order by i.created_at desc`,
     [uid],
   );
-  return { friends: friends.rows, incoming: incoming.rows, outgoing: outgoing.rows, invites: invites.rows };
+  const blocked = await pool.query(
+    `select p.user_id as id, p.display_name as name from blocks b join profiles p on p.user_id = b.blocked_id
+     where b.user_id = $1 order by b.created_at desc`,
+    [uid],
+  );
+  return { friends: friends.rows, incoming: incoming.rows, outgoing: outgoing.rows, invites: invites.rows, blocked: blocked.rows };
 }
 
 async function partyOf(uid: string) {
@@ -163,7 +172,7 @@ async function partyState(uid: string) {
   const pa = await partyOf(uid);
   if (!pa) return null;
   const m = await pool.query(
-    `select m.user_id as id, p.display_name as name, m.ready, m.look,
+    `select m.user_id as id, p.display_name as name, m.ready, m.look, m.voice,
             coalesce(pr.last_seen > now() - interval '${ONLINE_WINDOW}', false) as online
      from party_members m join profiles p on p.user_id = m.user_id
      left join presence pr on pr.user_id = m.user_id
@@ -413,6 +422,58 @@ async function handle(uid: string, msg: any): Promise<void> {
       return;
     }
 
+    case "chat": {
+      const pa = await partyOf(uid);
+      if (!pa) throw new Error("Join a party to chat.");
+      const text = cleanChat(msg.text);
+      if (!text) return;
+      if (!chatAllowed(uid)) throw new Error("Slow down a little!");
+      const me = await ensureProfile(uid);
+      // members who blocked the sender don't receive it
+      const r = await pool.query(
+        `select m.user_id from party_members m where m.party_id = $1
+           and not exists (select 1 from blocks b where b.user_id = m.user_id and b.blocked_id = $2)`,
+        [pa.id, uid],
+      );
+      await notify(r.rows.map((x) => x.user_id), { k: "chat", from: uid, name: me.display_name, text, ts: Date.now() });
+      return;
+    }
+    case "party.voice": {
+      const pa = await partyOf(uid);
+      if (!pa) return;
+      await pool.query("update party_members set voice = $3 where party_id = $1 and user_id = $2", [pa.id, uid, !!msg.on]);
+      await notify(await memberIds(pa.id), { k: "party" });
+      return;
+    }
+    case "block": {
+      const id = String(msg.id ?? "");
+      if (!id || id === uid) return;
+      await pool.query("insert into blocks (user_id, blocked_id) values ($1, $2) on conflict do nothing", [uid, id]);
+      await notify([uid], { k: "social" });
+      await notify([uid], { k: "toast", msg: "Player blocked. You won't see their messages or hear them." });
+      return;
+    }
+    case "unblock": {
+      await pool.query("delete from blocks where user_id = $1 and blocked_id = $2", [uid, String(msg.id ?? "")]);
+      await notify([uid], { k: "social" });
+      return;
+    }
+    case "report": {
+      const id = String(msg.id ?? "");
+      if (!id || id === uid) return;
+      const recent = await pool.query(
+        "select count(*)::int as n from reports where reporter_id = $1 and created_at > now() - interval '1 hour'",
+        [uid],
+      );
+      if (recent.rows[0].n >= 10) throw new Error("You've sent a lot of reports. Try again later.");
+      await pool.query(
+        "insert into reports (reporter_id, reported_id, reason, message) values ($1, $2, $3, $4)",
+        [uid, id, String(msg.reason ?? "").slice(0, 40), String(msg.message ?? "").slice(0, 300)],
+      );
+      await notify([uid], { k: "toast", msg: "Thanks. We've received your report." });
+      return;
+    }
+
     case "signal": {
       // WebRTC offer/answer/ICE, only between members of the same party
       const to = String(msg.to ?? "");
@@ -481,7 +542,10 @@ social.get(
           await touchPresence(uid, false).catch(() => {});
           await notify(await friendIds(uid), { k: "social" }).catch(() => {});
           const pa = await partyOf(uid).catch(() => null);
-          if (pa) await notify(await memberIds(pa.id), { k: "party" }).catch(() => {});
+          if (pa) {
+            await pool.query("update party_members set voice = false where party_id = $1 and user_id = $2", [pa.id, uid]).catch(() => {});
+            await notify(await memberIds(pa.id), { k: "party" }).catch(() => {});
+          }
         }
       },
     };

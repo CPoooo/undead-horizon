@@ -65,6 +65,7 @@
     ws.onclose = () => {
       S.ws = null;
       S.status = 'offline';
+      emit('offline');
       render();
       if (!S.closed) setTimeout(connect, Math.min(1000 * 2 ** S.retry++, 15000));
     };
@@ -77,6 +78,7 @@
     S.me = null;
     S.party = null;
     S.social = { friends: [], incoming: [], outgoing: [], invites: [] };
+    emit('party', { party: null });
     render();
   }
   const wsSend = (m) => {
@@ -90,6 +92,10 @@
     const e = window.UHData?.profile?.equipped || {};
     return { skin: e.skin, hat: e.hat, tracer: e.tracer, gun: e.gun, perk: e.perk };
   }
+
+  // other modules (chat.js, voice.js) subscribe to server messages
+  const listeners = {};
+  const emit = (t, m) => { for (const fn of listeners[t] || []) { try { fn(m); } catch (e) { console.warn('[coop] listener', t, e); } } };
 
   function onMsg(m) {
     switch (m.t) {
@@ -136,7 +142,11 @@
         showInvite(m.partyId, m.fromName);
         break;
       case 'signal':
-        onSignal(m.from, m.data);
+        if (typeof m.data?.kind === 'string' && m.data.kind.startsWith('v-')) emit('voice-signal', m);
+        else onSignal(m.from, m.data);
+        break;
+      case 'chat':
+        emit('chat', m);
         break;
       case 'toast':
         UI().toast(m.msg);
@@ -145,6 +155,7 @@
         UI().toast(m.msg);
         break;
     }
+    if (m.t === 'party' || m.t === 'party.start' || m.t === 'social' || m.t === 'hello') emit(m.t, m);
     render();
   }
 
@@ -153,6 +164,7 @@
     renderParty();
     renderFriends();
     renderLobbyMates();
+    emit('render');
   }
 
   function renderLobbyMates() {
@@ -194,7 +206,7 @@
       if (!m) return `<div class="pm empty">Open slot<span>invite a friend</span></div>`;
       return `<div class="pm ${m.online ? '' : 'offline'}">
         <span class="dot ${m.online ? 'on' : ''}"></span>
-        <b>${esc(m.name)}${m.id === p.hostId ? ' 👑' : ''}${m.id === S.me?.id ? ' (you)' : ''}</b>
+        <b ${m.id !== S.me?.id ? `data-pmenu="${esc(m.id)}" data-pname="${esc(m.name)}" class="clickable"` : ''} data-voice-uid="${esc(m.id)}">${m.voice ? '<span class="vic" title="In voice">🎙</span>' : ''}${esc(m.name)}${m.id === p.hostId ? ' 👑' : ''}${m.id === S.me?.id ? ' (you)' : ''}</b>
         <span class="rdy ${m.ready ? 'yes' : ''}">${m.ready ? 'READY' : 'not ready'}</span>
         ${amHost && m.id !== S.me?.id ? `<button class="x" data-kick="${esc(m.id)}" title="Remove from party">×</button>` : ''}
       </div>`;
@@ -202,6 +214,7 @@
     box.innerHTML = `<div class="party">
       <div class="party-head"><b>👥 Party ${p.members.length}/3</b><span class="hint">${esc(window.UHDiffName?.(p.diff) || p.diff)}${amHost ? ' · you set the difficulty' : ' · host sets difficulty'}</span></div>
       <div class="pms">${slots}</div>
+      <div id="voice-ctl"></div>
       <div class="row" style="margin-top:8px">
         <button class="btn small secondary" id="party-link" title="Anyone signed in with this link joins your party and becomes your friend">🔗 Copy invite link</button>
         <button class="btn small secondary" id="party-leave">Leave</button>
@@ -221,6 +234,7 @@
     if ($('party-ready')) $('party-ready').onclick = () => { send('sfx|click'); wsSend({ t: 'party.ready', ready: !me?.ready }); };
     if ($('party-start')) $('party-start').onclick = () => wsSend({ t: 'party.start' });
     box.querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => wsSend({ t: 'party.kick', id: b.dataset.kick })));
+    box.querySelectorAll('[data-pmenu]').forEach((b) => (b.onclick = (e) => window.UHChat?.playerMenu(b.dataset.pmenu, b.dataset.pname, e.currentTarget)));
   }
 
   function renderFriends() {
@@ -246,6 +260,8 @@
         <span>${inParty && !partyIds.has(f.id) && f.online ? `<button class="btn small blue" data-invite="${esc(f.id)}">Invite</button>` : ''}
         <button class="btn small secondary" data-remove="${esc(f.id)}" title="Remove friend">✕</button></span></div>`).join('')
         : '<div class="empty" style="padding:8px">No friends yet. Share your code, or create a party and send the invite link.</div>'}
+      ${s.blocked?.length ? `<h3>Blocked</h3>${s.blocked.map((f) => `<div class="frow offline"><span>${esc(f.name)}</span>
+        <button class="btn small secondary" data-unblock="${esc(f.id)}">Unblock</button></div>`).join('')}` : ''}
       ${s.outgoing.length ? `<h3>Sent requests</h3>${s.outgoing.map((f) => `<div class="frow offline"><span>${esc(f.name)}</span><span class="tag">pending</span></div>`).join('')}` : ''}`;
     $('copy-code').onclick = async () => { try { await navigator.clipboard.writeText(S.me?.code || ''); UI().toast('Friend code copied'); } catch {} };
     $('fadd').onsubmit = (e) => { e.preventDefault(); const c = $('fadd-code').value.trim(); if (c) { wsSend({ t: 'friends.add', code: c }); $('fadd-code').value = ''; } };
@@ -253,6 +269,7 @@
     el.querySelectorAll('[data-remove]').forEach((b) => (b.onclick = () => wsSend({ t: 'friends.remove', id: b.dataset.remove })));
     el.querySelectorAll('[data-invite]').forEach((b) => (b.onclick = () => { wsSend({ t: 'party.invite', id: b.dataset.invite }); UI().toast('Invite sent'); }));
     el.querySelectorAll('[data-join]').forEach((b) => (b.onclick = () => wsSend({ t: 'party.join', partyId: b.dataset.join, look: look() })));
+    el.querySelectorAll('[data-unblock]').forEach((b) => (b.onclick = () => wsSend({ t: 'unblock', id: b.dataset.unblock })));
     el.querySelectorAll('[data-decline]').forEach((b) => (b.onclick = () => wsSend({ t: 'party.decline', partyId: b.dataset.decline })));
   }
 
@@ -649,6 +666,13 @@
     setDiff(diff) { if (S.party && S.party.hostId === S.me?.id) wsSend({ t: 'party.diff', diff }); },
     lookChanged() { if (S.party) wsSend({ t: 'party.look', look: look() }); },
     render,
+    /** subscribe to server messages: chat, party, social, hello, voice-signal, render, offline */
+    on(t, fn) { (listeners[t] ||= []).push(fn); },
+    wsSend,
+    iceServers,
+    get party() { return S.party; },
+    get me() { return S.me; },
+    get social() { return S.social; },
     /** for tests/debugging */
     get debug() { return { slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
     inviteLink,

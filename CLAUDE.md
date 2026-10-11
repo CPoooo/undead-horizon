@@ -34,6 +34,8 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
   - Downed players can crawl. A teammate standing within 75 units for 3s revives them. Bleed-out after 30s leads to spectating, and a team wipe ends the game for everyone.
   - Connecting: the host sends an offer per client over the social socket; ICE candidates are trickled in batches. `GET /turn` (API) returns STUN plus short-lived Metered TURN credentials (`METERED_APP` + `METERED_SECRET_KEY` or `METERED_API_KEY` in `.env.local`); without them it falls back to STUN only. Signals carry a session id (`party.seed`) so stale offers/candidates are ignored.
   - Match start: everyone sees the loading screen (`#coop-load`) with per-player link status; the host gets "Start without them / Retry / Cancel" after 20s, a client gives up after 40s. Sounds: `sfx|ready` (everyone ready), `sfx|start` (launch sting), `sfx|click`.
+  - **Chat:** party text chat in the lobby panel and in matches (T or / to type, 💬 on touch), via the social socket (`chat` message). The server (`server/chat.ts`) caps length at 200, rate-limits (5-message bucket), masks profanity and skips recipients who blocked the sender. Click a name for volume / Block / Report (`blocks`, `reports` tables; unblock in Friends).
+  - **Voice:** `ui/voice.js` runs an audio-only WebRTC mesh between party members who joined voice (lower user id offers; `v-offer|v-answer|v-ice` signals; TURN from `/turn`). Mute, open mic or push-to-talk (hold V), per-player volume, speaking rings, and in-game speaker chips. Blocked players are never connected. `party_members.voice` shows 🎙 in the party list.
 - [x] 2. **Persistence in Neon DB**: profiles (coins, owned items, equipped loadout and cosmetics, campaign progress, stats), save states and every run are stored in Neon Postgres. The leaderboard is global (each player's best infinite run) and auto-refreshes every 5s while visible.
 - [x] 3. **Login / accounts**: Neon Managed Auth (Better Auth), with email and password sign-up/sign-in and Google sign-in. Sessions persist across reloads and devices. On the first sign-in, offline progress is imported once (coins capped at 5000). Guests can still play offline with browser storage.
 - [x] 4. **Shop & customizations**: coins are earned by clearing waves (scaled by difficulty) plus boss and chapter bonuses. They buy guns, perks, skins, hats and bullet tracers in the 🛒 Shop.
@@ -127,7 +129,8 @@ Not scheduled yet; design notes for when we pick it up.
   - move the wave and campaign code into `src/modes/{infinite,campaign}.rs`
   - Done when behavior is identical.
 - [ ] F4 (S) **Version fields.** Add `v` to save strings (`save_string`/`load_save`) and to net messages (a hello with protocol version, rejecting mismatches with a toast).
-- [ ] F5 (S) **Committed tests.** Move the Playwright scripts (solo, co-op two-browser, mobile) into `tests/e2e/` with an `npm run e2e` script. Document the local NSS-lib workaround.
+- [x] F5 (S) **Committed tests.** Move the Playwright scripts (solo, co-op two-browser, mobile) into `tests/e2e/` with an `npm run e2e` script. Document the local NSS-lib workaround.
+  - Done: `npm run e2e` (serve `dist/` on :8765 first: `cd dist && python3 -m http.server 8765`). In WSL without system libnss3, extract the `libnss3`/`libnspr4` debs into `~/.cache/uh-libs` (or set `UH_LIBS`); `UH_CHROME` overrides the Chromium path. Screenshots go to `tests/e2e/out/`.
 - [ ] F6 (M) **Action map.** All input goes through `Action` enums (`Move`, `Aim`, `Dash`, `Ult`, `Interact`, `Ping`, `Pause`, `Ability`) bound from a settings table. Key handlers in `main.rs` map codes to actions. Prerequisite for A1 and A2.
 
 ### M1 · Modern feel (quick wins, high impact)
@@ -257,7 +260,7 @@ Not scheduled yet; design notes for when we pick it up.
   - World markers and minimap pings, plus quick-chat emotes.
 - [ ] M6 (S) **End-of-match scoreboard.** Kills, downs, revives, points, damage, MVP; per-player stats via events.
 - [ ] M7 (M) **Public parties and Quick Play.** Opt-in public parties listed via the social server; auto-fill to 3–4.
-- [ ] M8 (S) **Lobby text chat.** Rate limit, length cap, a basic profanity filter, and block/report (server table).
+- [x] M8 (S) **Lobby text chat.** Rate limit, length cap, a basic profanity filter, and block/report (server table).
 - [ ] M9 (S) **Co-op modes.** Campaign co-op: the host's chapter, with progress credited to all who have it unlocked.
 
 ### M8 · World & presentation

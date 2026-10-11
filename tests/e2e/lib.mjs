@@ -72,3 +72,12 @@ export function check(cond, msg) {
   if (!cond) throw new Error('FAIL: ' + msg);
   console.log('  ok -', msg);
 }
+
+/** A creates a party, B joins via the invite link. */
+export async function makeParty(A, B) {
+  await A.click('#party-create');
+  await A.waitForFunction(() => window.UHCoop.debug.party, null, { timeout: 10000 });
+  const link = await A.evaluate(() => window.UHCoop.inviteLink());
+  await B.goto(link.replace(/^https?:\/\/[^?]+/, URL0.replace(/\/?$/, '/')));
+  await B.waitForFunction(() => window.UHCoop?.debug?.party?.members?.length === 2, null, { timeout: 30000 });
+}

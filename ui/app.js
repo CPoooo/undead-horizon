@@ -568,7 +568,8 @@
   tap('t-dash', 'dash'); tap('t-ult', 'ult');
 
   window.addEventListener('keydown', (e) => {
-    if (state === 'menu' && e.key === 'Enter' && document.activeElement !== $('name')) start();
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+    if (state === 'menu' && e.key === 'Enter' && !typing) start();
     else if (state === 'gameover' && e.key === 'Enter') start();
     else if (state === 'story' && e.key === 'Enter') $('story-go').click();
   });

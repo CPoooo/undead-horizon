@@ -112,3 +112,20 @@ alter table saves add column if not exists slot text not null default 'infinite'
 update saves set slot = coalesce(summary->>'mode', 'infinite') where slot is distinct from coalesce(summary->>'mode', 'infinite');
 alter table saves drop constraint if exists saves_pkey;
 alter table saves add constraint saves_pkey primary key (user_id, slot);
+
+-- Chat (party text chat) + voice presence. Messages are not stored; only reports keep a copy.
+alter table party_members add column if not exists voice boolean not null default false;
+create table if not exists blocks (
+  user_id    text not null references profiles(user_id) on delete cascade,
+  blocked_id text not null references profiles(user_id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, blocked_id)
+);
+create table if not exists reports (
+  id          bigserial primary key,
+  reporter_id text not null references profiles(user_id) on delete cascade,
+  reported_id text not null references profiles(user_id) on delete cascade,
+  reason      text not null default '',
+  message     text not null default '',
+  created_at  timestamptz not null default now()
+);

@@ -445,6 +445,7 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
                 "ready" => g.audio.play(audio::Sfx::ReadyUp),
                 "start" => g.audio.play(audio::Sfx::MatchStart),
                 "click" => g.audio.play(audio::Sfx::UiSelect),
+                "chat" => g.audio.play(audio::Sfx::UiMove),
                 _ => {}
             }
         }

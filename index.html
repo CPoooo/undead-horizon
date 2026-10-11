@@ -32,6 +32,10 @@
       <!-- left: play setup -->
       <div class="side side-play">
         <div id="party-box"></div>
+        <div id="party-chat" style="display:none">
+          <div id="pc-log" class="chat-log"></div>
+          <form id="pc-form" class="chat-form"><input id="pc-input" type="text" maxlength="200" placeholder="Message your party…" autocomplete="off" spellcheck="true" /><button class="btn small" type="submit">Send</button></form>
+        </div>
         <label class="field" for="name">Survivor name</label>
         <input id="name" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off" spellcheck="false" />
 
@@ -239,6 +243,13 @@
     </div>
   </div>
   <button id="pause-btn" aria-label="Pause">II</button>
+  <button id="chat-btn" aria-label="Chat">💬</button>
+  <button id="mic-btn" aria-label="Mute microphone" style="display:none">🎙</button>
+  <div id="game-chat"><div id="gc-feed"></div>
+    <form id="gc-form"><input id="gc-input" type="text" maxlength="200" placeholder="Say something… (Enter to send, Esc to cancel)" autocomplete="off" /></form>
+    <div class="gc-hint">Press <span class="kbd">T</span> to chat</div></div>
+  <div id="voice-hud"></div>
+  <div id="pmenu"></div>
   <div id="touch-ui">
     <button class="tbtn ult" id="t-ult">☢️</button>
     <button class="tbtn" id="t-dash">DASH</button>
@@ -248,5 +259,7 @@
   <script data-trunk src="ui/cloud.js"></script>
   <script data-trunk src="ui/app.js"></script>
   <script data-trunk src="ui/coop.js"></script>
+  <script data-trunk src="ui/chat.js"></script>
+  <script data-trunk src="ui/voice.js"></script>
 </body>
 </html>

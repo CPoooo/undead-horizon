@@ -334,3 +334,46 @@ body.touch.playing #pause-btn { display: block; }
 .cl-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; min-height: 8px; }
 .cl-tip { margin-top: 22px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .cl-tip b { color: var(--gold); letter-spacing: 2px; font-size: 11px; margin-right: 4px; }
+
+/* ---------------- chat + voice ---------------- */
+#party-chat { margin-top: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 8px; }
+.chat-log { height: 120px; overflow-y: auto; font-size: 13px; line-height: 1.4; padding: 2px 4px 6px; -webkit-user-select: text; user-select: text; }
+.cm { word-wrap: break-word; }
+.cm b { color: var(--accent); margin-right: 4px; }
+.cm b.me { color: var(--gold); }
+.cm.sys { color: var(--muted); font-style: italic; font-size: 12px; }
+.clickable { cursor: pointer; }
+.clickable:hover { text-decoration: underline; }
+.chat-form { display: flex; gap: 6px; }
+.chat-form input, #gc-input { flex: 1; min-width: 0; background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 10px; color: var(--text); padding: 8px 10px; font: inherit; font-size: 14px; outline: none; }
+.chat-form input:focus, #gc-input:focus { border-color: var(--accent); }
+#game-chat { position: fixed; left: 16px; bottom: 150px; width: min(380px, calc(100vw - 32px)); z-index: 6; display: none; pointer-events: none; }
+body.playing.in-party #game-chat { display: block; }
+#gc-feed .cm { background: rgba(5,6,12,.55); border-radius: 8px; padding: 3px 8px; margin-top: 3px; width: fit-content; max-width: 100%; font-size: 13px; text-shadow: 0 1px 2px #000; }
+#gc-form { display: none; margin-top: 6px; pointer-events: auto; }
+#game-chat.typing #gc-form { display: flex; }
+#game-chat.typing #gc-feed { pointer-events: auto; }
+.gc-hint { color: rgba(232,238,252,.35); font-size: 11px; margin-top: 4px; }
+#game-chat.typing .gc-hint, body.touch .gc-hint { display: none; }
+#chat-btn, #mic-btn { position: fixed; top: 52px; z-index: 5; display: none; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: rgba(14,17,28,.6); color: #fff; font-size: 17px; }
+#chat-btn { left: 64px; }
+#mic-btn { left: 112px; }
+body:not(.touch) #mic-btn { left: auto; right: 16px; top: 96px; }
+#mic-btn.off { opacity: .55; }
+body.touch.playing.in-party #chat-btn { display: block; }
+body.playing #mic-btn:not([style*="none"]) { display: block; }
+body:not(.playing) #mic-btn { display: none !important; }
+body.touch #game-chat { top: 100px; bottom: auto; }
+#voice-hud { position: fixed; left: 16px; top: 100px; z-index: 6; display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
+body.touch #voice-hud { top: auto; bottom: 120px; }
+body:not(.playing) #voice-hud { display: none; }
+.vchip { background: rgba(5,6,12,.6); border: 1px solid rgba(127,214,90,.5); border-radius: 99px; padding: 3px 10px; font-size: 12px; font-weight: 700; width: fit-content; }
+.vrow .btn, .chat-form .btn { width: auto; flex: 0 0 auto; margin: 0; }
+.vrow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.vic { margin-right: 4px; font-size: 12px; }
+[data-voice-uid].speaking { text-shadow: 0 0 10px var(--green); color: var(--green); }
+.btn[data-voice-uid].speaking { box-shadow: 0 0 0 2px var(--green); }
+#pmenu { position: fixed; z-index: 60; display: none; flex-direction: column; gap: 6px; width: 210px; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+#pmenu.show { display: flex; }
+.pm-vol { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.pm-vol input { flex: 1; }
