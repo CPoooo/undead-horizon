@@ -135,10 +135,13 @@ impl Game {
         let n = self.wave.n;
         let lvl = self.scale_n();
         let max_alive = (150 + 8 * lvl).min(340);
+        if n > 0 && self.director_tick() && self.wave.spawned < self.wave.total {
+            self.horde_rush();
+        }
         let alive = self.alive();
         self.wave.timer -= DT;
         if self.wave.spawned < self.wave.total && self.wave.timer <= 0.0 && alive < max_alive {
-            let interval = (1.1 - lvl as f32 * 0.045).max(0.22) / self.difficulty().count;
+            let interval = (1.1 - lvl as f32 * 0.045).max(0.22) / self.difficulty().count * self.director.spawn_mult();
             self.wave.timer = interval * self.rng.range(0.7, 1.3);
             let gmax = 3 + lvl / 2;
             let g =

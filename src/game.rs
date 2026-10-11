@@ -567,6 +567,8 @@ pub struct Game {
     pub victory_t: f32,
     /// co-op: joined mid-match, spectating until the wave is cleared
     pub late_join: bool,
+    /// AI Director: stress-driven spawn pacing (horde modes)
+    pub director: crate::director::Director,
     pub ult_queued: bool,
     // co-op networking (None in single player)
     pub net: Option<Net>,
@@ -730,6 +732,7 @@ impl Game {
             variant: String::new(),
             victory_t: -1.0,
             late_join: false,
+            director: Default::default(),
             ult_queued: false,
             net: None,
             net_in: Vec::new(),
@@ -944,6 +947,7 @@ impl Game {
         self.ult_ready_played = false;
         self.coins = 0;
         self.victory_t = -1.0;
+        self.director = Default::default();
         self.ult_queued = false;
         self.net = None;
         self.net_in.clear();
@@ -1416,7 +1420,7 @@ impl Game {
         // music intensity follows the action
         let alive = self.alive() as f32;
         let target = if matches!(self.phase, Phase::Playing | Phase::LevelUp) {
-            ((alive / 120.0) + (self.wave.n as f32 / 30.0)).min(1.0)
+            ((alive / 120.0) + (self.wave.n as f32 / 30.0) + self.director.music_bias()).clamp(0.0, 1.0)
         } else {
             0.0
         };

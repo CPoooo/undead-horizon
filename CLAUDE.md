@@ -300,6 +300,9 @@ Original design notes:
 - [x] A8 (S) **Localization.** i18n string table framework (en first).
 - [x] A9 (S) **Error reporting.** The panic hook and `window.onerror` post to `/errors` (rate-limited) for live debugging.
 
+### Beyond v2 (AAA research additions)
+- [x] **AI Director** (`src/director.rs`, Left 4 Dead style): squad stress from crowding, low HP and damage taken drives BuildUp → Peak (hold 4s) → Relax (spawns ×3.5 slower, 8–20s, mercy heart for a hurt player). Quiet build-ups get a telegraphed **horde rush** from one side. Wave totals are unchanged; music intensity follows the tempo. Host/solo only.
+
 ### Suggested order
 - M0
 - Then quick wins: J1, J5, J7, C1, C3, A9

@@ -4,6 +4,7 @@ mod boss;
 mod callouts;
 mod chest;
 mod destruct;
+mod director;
 mod elites;
 mod content;
 mod coop;
