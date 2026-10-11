@@ -142,6 +142,13 @@ impl Game {
                 c.set_global_alpha(d(m.bubble_t.min(1.0)));
                 bubble(c, m.pos, &m.bubble, "#9cffb8");
                 c.set_global_alpha(1.0);
+            } else if m.emote_t > 0.0 {
+                let pop = 1.0 + 0.3 * ((2.5 - m.emote_t) * 8.0).min(1.0).sin();
+                c.set_global_alpha(d(m.emote_t.min(1.0)));
+                c.set_font(&format!("{}px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif", (26.0 * pop).round()));
+                c.set_fill_style_str("#ffffff");
+                let _ = c.fill_text(crate::content::EMOTES[m.emote.min(crate::content::EMOTES.len() - 1)].1, d(m.pos.x), d(m.pos.y - 60.0));
+                c.set_global_alpha(1.0);
             }
         }
         // the Outskirts gate, the base turret and its zaps

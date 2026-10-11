@@ -44,6 +44,8 @@ pub struct HubMate {
     pub gun: usize,
     pub bubble: String,
     pub bubble_t: f32,
+    pub emote: usize,
+    pub emote_t: f32,
 }
 
 pub struct HubState {
@@ -358,7 +360,8 @@ impl Game {
         }
     }
 
-    /// Hub mates from the social server: name~x~y~aim~skin~hat~gun|...
+    /// Hub mates from the social server: name~x~y~aim~skin~hat~gun~emote|...
+    /// (emote is an index into `EMOTES` once, when it was just used; else -1)
     pub fn set_hub_mates(&mut self, spec: &str) {
         let Some(h) = self.hub.as_mut() else { return };
         let mut seen = Vec::new();
@@ -376,8 +379,13 @@ impl Game {
                 crate::content::gun_index(f[6]),
             );
             seen.push(name.clone());
+            let emote = f.get(7).and_then(|e| e.parse::<i32>().ok()).filter(|e| *e >= 0).map(|e| (e as usize).min(crate::content::EMOTES.len() - 1));
             match h.mates.iter_mut().find(|x| x.name == name) {
                 Some(x) => {
+                    if let Some(e) = emote {
+                        x.emote = e;
+                        x.emote_t = 2.5;
+                    }
                     x.target = pos;
                     x.aim = aim;
                     x.skin = skin;
@@ -396,6 +404,8 @@ impl Game {
                     gun,
                     bubble: String::new(),
                     bubble_t: 0.0,
+                    emote: emote.unwrap_or(0),
+                    emote_t: if emote.is_some() { 2.5 } else { 0.0 },
                 }),
             }
         }
@@ -486,6 +496,7 @@ impl Game {
             }
             m.walk += (m.pos - m.prev).len() * 0.06;
             m.bubble_t = (m.bubble_t - DT).max(0.0);
+            m.emote_t = (m.emote_t - DT).max(0.0);
         }
         // tell the UI where we are (for other players in the hub), ~4x a second
         h.pos_t -= DT;
@@ -560,6 +571,20 @@ mod tests {
         g.spawn_zombie(ZKind::Walker, v2(600.0, 0.0));
         tick(&mut g, 0.1);
         assert!(g.zombies.iter().all(|z| z.dummy || z.pos.x > GATE_X));
+    }
+
+    #[test]
+    fn hub_mates_show_emotes_once() {
+        let mut g = hub();
+        g.set_hub_mates("Ann~100~200~0~default~none~pistol~2");
+        let m = &g.hub.as_ref().unwrap().mates[0];
+        assert_eq!((m.emote, m.emote_t > 0.0), (2, true));
+        tick(&mut g, 3.0);
+        g.set_hub_mates("Ann~110~200~0~default~none~pistol~-1");
+        let m = &g.hub.as_ref().unwrap().mates[0];
+        assert_eq!(m.emote_t, 0.0, "no re-trigger without a new emote");
+        g.set_hub_mates("Ann~110~200~0~default~none~pistol~99");
+        assert!(g.hub.as_ref().unwrap().mates[0].emote < crate::content::EMOTES.len());
     }
 
     #[test]

@@ -115,7 +115,7 @@ async function deliver(uid: string, p: any) {
     case "chat":
       return sendUser(uid, { t: "chat", from: p.from, name: p.name, text: p.text, ts: p.ts });
     case "hub":
-      return sendUser(uid, { t: "hub", from: p.from, name: p.name, x: p.x, y: p.y, aim: p.aim, look: p.look });
+      return sendUser(uid, { t: "hub", from: p.from, name: p.name, x: p.x, y: p.y, aim: p.aim, look: p.look, emote: p.emote });
   }
 }
 
@@ -421,7 +421,8 @@ async function handle(uid: string, msg: any): Promise<void> {
       );
       const me = await pool.query("select display_name from profiles where user_id = $1", [uid]);
       const ids = (await memberIds(pa.id)).filter((id) => id !== uid);
-      await notify(ids, { k: "hub", from: uid, name: me.rows[0]?.display_name ?? "?", x: num(msg.x), y: num(msg.y), aim: num(msg.aim), look });
+      const emote = Number.isInteger(msg.emote) && msg.emote >= 0 && msg.emote < 32 ? msg.emote : undefined;
+      await notify(ids, { k: "hub", from: uid, name: me.rows[0]?.display_name ?? "?", x: num(msg.x), y: num(msg.y), aim: num(msg.aim), look, emote });
       return;
     }
     case "party.look": {

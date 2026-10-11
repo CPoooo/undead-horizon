@@ -99,6 +99,10 @@ impl Game {
 
     /// Share an emote with the squad (shown over our head on their screens).
     pub fn share_emote(&mut self, idx: usize) {
+        if self.hub.is_some() {
+            // Home Base: relayed to party members through the social server
+            self.ui_out.push(("hubemote", idx.to_string()));
+        }
         if self.net.is_some() {
             let p = self.player.pos;
             self.send_ping(100 + idx as u8, p);

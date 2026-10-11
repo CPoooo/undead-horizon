@@ -1185,7 +1185,12 @@
   setInterval(() => {
     if (state !== 'hub') return;
     const mates = window.UHCoop?.hubMates?.() || [];
-    send('hubmates|' + mates.map((m) => [m.name, m.x, m.y, m.aim, m.look.skin, m.look.hat, m.look.gun].map((x) => String(x ?? '').replace(/[|~]/g, '')).join('~')).join('|'));
+    send('hubmates|' + mates.map((m) => {
+      // a fresh emote goes to the game once
+      const e = m.emote && !m.emote.sent && Date.now() - m.emote.at < 2500 ? m.emote.e : -1;
+      if (m.emote) m.emote.sent = true;
+      return [m.name, m.x, m.y, m.aim, m.look.skin, m.look.hat, m.look.gun, e].map((x) => String(x ?? '').replace(/[|~]/g, '')).join('~');
+    }).join('|'));
   }, 300);
   window.UHCoop?.on?.('chat', (m) => { if (state === 'hub' && m.name) send('hubbubble|' + String(m.name).replace(/\|/g, '') + '|' + String(m.text || '').replace(/\|/g, '/')); });
   on('continues', 'click', (e) => { const b = e.target.closest('[data-continue]'); if (b) continueRun(b.dataset.continue); });
@@ -1320,6 +1325,7 @@
           .catch(() => toast('📦 Supplies secured, but the reward couldn\'t reach the server.'));
         break;
       case 'hubleave': closeStall(true); break;
+      case 'hubemote': window.UHCoop?.hubEmote?.(Number(data)); break;
       case 'hubpos': {
         const [x, y, aim] = String(data).split('~').map(Number);
         window.UHCoop?.hubPos?.(x, y, aim);

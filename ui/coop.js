@@ -162,7 +162,10 @@
         emit('chat', m);
         break;
       case 'hub':
-        S.hubMates[m.from] = { name: m.name, x: m.x, y: m.y, aim: m.aim, look: m.look || {}, at: Date.now() };
+        S.hubMates[m.from] = {
+          name: m.name, x: m.x, y: m.y, aim: m.aim, look: m.look || {}, at: Date.now(),
+          emote: Number.isInteger(m.emote) ? { e: m.emote, at: Date.now() } : S.hubMates[m.from]?.emote,
+        };
         emit('hub', m);
         return; // positions don't need a re-render
       case 'toast':
@@ -945,7 +948,8 @@
     get debug() { return { hostSlot: S.hostSlot || 0, migrations: S.migrations || 0, late: !!S.late, restarts: S.restarts || 0, restart: (slot) => { const p = S.peers.get(slot); if (p) { p.troubleAt = Date.now(); restartIce(p); } }, slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
     inviteLink,
     /** Home Base: share our position with the party, and read theirs */
-    hubPos(x, y, aim) { if (S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },
+    hubPos(x, y, aim) { S.hubAt = { x, y, aim }; if (S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },
+    hubEmote(e) { const p = S.hubAt; if (p && S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', ...p, look: look(), emote: e }); },
     hubMates() {
       const now = Date.now();
       return Object.values(S.hubMates).filter((m) => now - m.at < 3000);
