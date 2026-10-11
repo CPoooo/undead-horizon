@@ -19,6 +19,7 @@
     social: { friends: [], incoming: [], outgoing: [], invites: [] },
     party: null,
     pendingLink: null, // { partyId, token } from a ?party= URL
+    hubMates: {}, // Home Base: party members walking around (by user id)
     // game transport
     peers: new Map(), // slot -> { pc, u, r, uid, sid }
     sid: null, // current match session id
@@ -148,6 +149,10 @@
       case 'chat':
         emit('chat', m);
         break;
+      case 'hub':
+        S.hubMates[m.from] = { name: m.name, x: m.x, y: m.y, aim: m.aim, look: m.look || {}, at: Date.now() };
+        emit('hub', m);
+        return; // positions don't need a re-render
       case 'toast':
         UI().toast(m.msg);
         break;
@@ -697,6 +702,12 @@
     /** for tests/debugging */
     get debug() { return { slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
     inviteLink,
+    /** Home Base: share our position with the party, and read theirs */
+    hubPos(x, y, aim) { if (S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },
+    hubMates() {
+      const now = Date.now();
+      return Object.values(S.hubMates).filter((m) => now - m.at < 3000);
+    },
   };
 
   // ?party=<id>&t=<token> invite links

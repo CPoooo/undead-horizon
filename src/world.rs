@@ -653,6 +653,7 @@ pub fn builtin_map(id: &str) -> Option<&'static str> {
         "asylum" => Some(include_str!("../assets/maps/asylum.json")),
         "refinery" => Some(include_str!("../assets/maps/refinery.json")),
         "keep" => Some(include_str!("../assets/maps/keep.json")),
+        "hub" => Some(include_str!("../assets/maps/hub.json")),
         "bridge" => Some(include_str!("../assets/maps/bridge.json")),
         "crossroads" => Some(include_str!("../assets/maps/crossroads.json")),
         _ => None,

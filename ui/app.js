@@ -318,6 +318,7 @@
     { key: 'lookahead', label: 'Camera lookahead (leads your aim)', kind: 'toggle', def: true, cmd: (v) => 'lookahead|' + (v ? 1 : 0) },
     { key: 'haptics', label: 'Vibration', kind: 'range', min: 0, max: 1, step: 0.1, def: 0.6 },
     { key: 'announcer', label: 'Announcer voice', kind: 'toggle', def: true },
+    { key: 'vendorvoice', label: 'Vendor voices (Home Base)', kind: 'toggle', def: true },
   ];
   for (const x of XSETTINGS) if (settings[x.key] === undefined) settings[x.key] = x.def;
   function renderXSettings() {
@@ -564,6 +565,7 @@
 
   // ------------------------------------------------------------------ flow
   function toMenu() {
+    if (typeof closeStall === 'function') closeStall(true);
     state = 'menu';
     renderCoins(); renderTag(); renderMode();
     renderLB($('lb-menu'));
@@ -637,6 +639,185 @@
   }
 
   on('play', 'click', start);
+
+  // ------------------------------------------------------------------ Home Base
+  // Vendors are NPCs at stalls; their lines come from POST /vendor (Claude, with
+  // canned fallbacks) and are spoken with per-vendor voices.
+  const VENDORS = {
+    gunsmith: { name: 'Rusty Vex', title: 'Gunsmith', icon: '🔫', cats: ['gun'], pitch: 0.75, rate: 1.15 },
+    tailor: { name: 'Madame Lucienne', title: 'Tailor', icon: '🎩', cats: ['skin', 'hat'], pitch: 1.35, rate: 0.95 },
+    quartermaster: { name: 'Sergeant Dole', title: 'Quartermaster', icon: '📦', cats: ['perk', 'tracer'], pitch: 0.55, rate: 0.85 },
+    dispatcher: { name: 'Ada', title: 'Mission Dispatcher', icon: '📻', missions: true, pitch: 1.1, rate: 1.0 },
+    monument: { name: 'Hall of Survivors', title: 'Memorial', icon: '🏆', board: true },
+  };
+  const LOCAL_LINES = {
+    greet: ['Well, look who survived.', 'Courier. What do you need?'],
+    buy: ['Pleasure doing business.', 'Good choice.'],
+    broke: ['Come back with more coins.', 'Not quite enough, friend.'],
+    browse: ['That one? Solid.', 'Take your time.'],
+    owned: ['Already yours.', 'You have that one.'],
+    chat: ['Hm. Interesting.', 'If you say so.'],
+    leave: ['See you out there.', 'Stay alive.'],
+  };
+  let stall = null;
+  let talkBusy = false;
+  let browseT = 0;
+  function speak(v, line) {
+    if (!settings.vendorvoice || !window.speechSynthesis || !v.pitch) return;
+    try {
+      const u = new SpeechSynthesisUtterance(line);
+      u.pitch = v.pitch; u.rate = v.rate; u.volume = Math.min(1, (settings.vol ?? 0.7) * 1.1);
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    } catch {}
+  }
+  async function talk(id, event, extra = {}) {
+    const v = VENDORS[id];
+    if (!v || v.board) return;
+    const el = $('v-line');
+    if (stall === id) el.classList.add('thinking');
+    let line = null;
+    try {
+      const base = window.UH_CONFIG?.apiBase;
+      if (base) {
+        const tok = await window.UHCloud?.token?.().catch(() => null);
+        const r = await fetch(base + '/vendor', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) },
+          body: JSON.stringify({ vendor: id, event, coins: Data.profile.coins, name: playerName(), ...extra }),
+        });
+        if (r.ok) line = (await r.json()).line;
+      }
+    } catch (e) { console.warn('[vendor]', e); }
+    if (!line) { const pool = LOCAL_LINES[event] || LOCAL_LINES.chat; line = pool[Math.floor(Math.random() * pool.length)]; }
+    if (stall === id) { el.textContent = line; el.classList.remove('thinking'); }
+    send('npcsay|' + id + '|' + line.replace(/\|/g, '/'));
+    speak(v, line);
+    return line;
+  }
+  function renderStall() {
+    const v = VENDORS[stall];
+    if (!v) return;
+    $('v-ic').textContent = v.icon;
+    $('v-name').textContent = v.name;
+    $('v-title').textContent = v.title;
+    $('v-coins').textContent = '🪙 ' + Data.profile.coins.toLocaleString();
+    $('v-chat').style.display = v.board ? 'none' : '';
+    const p = Data.profile;
+    if (v.board) {
+      $('v-line').textContent = 'Names carved by the ones who lasted longest.';
+      $('v-body').innerHTML = '<div id="lb-hub"></div>';
+      renderLB($('lb-hub'));
+    } else if (v.missions) {
+      const ms = [
+        ['infinite', null, '♾️ Infinite survival', 'Endless waves, ranked on the board'],
+        ['campaign', null, '📖 Campaign', `Chapter ${settings.chapter + 1}: ${STORY[settings.chapter]?.title || ''}`],
+        ['outbreak', 'asylum', '🏚️ Outbreak: Hollowbrook Asylum', 'Rounds, doors, the box, perks'],
+        ['outbreak', 'refinery', '🏭 Outbreak: Ashfall Refinery', 'Rounds on the burning refinery'],
+        ['siege', 'keep', '🏰 Siege: The Last Keep', 'Build defenses, hold the crystal'],
+        ['siege', 'bridge', '🌉 Siege: River Crossing', 'Hold the bridges'],
+        ['siege', 'crossroads', '✖️ Siege: The Crossroads', 'Four portals, one crystal'],
+      ];
+      $('v-body').innerHTML = `<div class="mission">${ms.map(([m, map, t, d]) =>
+        `<button class="btn secondary" data-mission="${m}" data-map="${map || ''}"><b>${t}</b><br><span class="hint">${d} · ${DIFF[settings.diff].name}</span></button>`).join('')}</div>`;
+    } else {
+      $('v-body').innerHTML = v.cats.map((cat) => `<h3>${CAT_LABEL[cat] || cat}</h3><div class="items">${CATALOG[cat].map((it) => {
+        const owned = p.owned.includes(`${cat}:${it.id}`);
+        const eq = p.equipped[cat] === it.id;
+        return `<div class="item ${eq ? 'equipped' : ''}" data-look="${cat}:${it.id}">${rarityTag(it)}${visual(cat, it)}<div class="nm">${esc(it.name)}</div>
+          ${owned ? `<button class="btn small secondary" data-equip="${cat}:${it.id}" ${eq ? 'disabled' : ''}>${eq ? 'Equipped' : 'Equip'}</button>`
+            : `<button class="btn small gold" data-vbuy="${cat}:${it.id}">🪙 ${it.price.toLocaleString()}</button>`}</div>`;
+      }).join('')}</div>`).join('');
+    }
+  }
+  function openStall(id) {
+    stall = id;
+    $('v-you').textContent = '';
+    $('v-line').textContent = '…';
+    renderStall();
+    $('vendor').classList.add('show');
+    talk(id, 'greet');
+  }
+  function closeStall(silent) {
+    if (!stall) return;
+    const id = stall;
+    stall = null;
+    $('vendor').classList.remove('show');
+    send('hubclose');
+    if (!silent) talk(id, 'leave');
+    $('v-say').blur();
+  }
+  on('v-close', 'click', () => closeStall());
+  on('vendor', 'click', async (e) => {
+    const buy = e.target.closest('[data-vbuy]');
+    const eq = e.target.closest('[data-equip]');
+    const lookAt = e.target.closest('[data-look]');
+    const mission = e.target.closest('[data-mission]');
+    if (mission) {
+      settings.mode = mission.dataset.mission;
+      if (settings.mode === 'outbreak') settings.map = mission.dataset.map;
+      if (settings.mode === 'siege') settings.siegeMap = mission.dataset.map;
+      saveSettings();
+      talk('dispatcher', 'buy', { item: mission.textContent.trim().slice(0, 40) });
+      closeStall(true);
+      setTimeout(() => start(), 600);
+      return;
+    }
+    if (buy) {
+      const [cat, id] = buy.dataset.vbuy.split(':');
+      const it = find(cat, id);
+      if (Data.profile.coins < it.price) { talk(stall, 'broke', { item: it.name }); return; }
+      buy.disabled = true;
+      try { await Data.buy(cat, id, it.price); }
+      catch { talk(stall, 'broke', { item: it.name }); renderStall(); return; }
+      pushEquip(); window.UHCoop?.lookChanged();
+      renderCoins(); renderTag(); renderStall();
+      send('sfx|start');
+      talk(stall, 'buy', { item: it.name });
+      return;
+    }
+    if (eq) {
+      const [cat, id] = eq.dataset.equip.split(':');
+      try { await Data.equip(cat, id); } catch { return; }
+      pushEquip(); window.UHCoop?.lookChanged();
+      renderTag(); renderStall();
+      talk(stall, 'owned', { item: find(cat, id).name });
+      return;
+    }
+    if (lookAt && Date.now() - browseT > 2500) {
+      browseT = Date.now();
+      const [cat, id] = lookAt.dataset.look.split(':');
+      talk(stall, Data.profile.owned.includes(`${cat}:${id}`) ? 'owned' : 'browse', { item: find(cat, id).name });
+    }
+  });
+  on('v-chat', 'submit', async (e) => {
+    e.preventDefault();
+    const text = $('v-say').value.trim();
+    if (!text || !stall || talkBusy) return;
+    talkBusy = true;
+    $('v-say').value = '';
+    $('v-you').textContent = 'You: ' + text;
+    await talk(stall, 'chat', { text });
+    setTimeout(() => (talkBusy = false), 1200);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && stall) { e.stopPropagation(); closeStall(); } }, true);
+  function enterHub() {
+    settings.name = playerName(); saveSettings();
+    runCtx = { mode: 'hub', chapter: 0, diff: settings.diff };
+    state = 'hub';
+    show(null);
+    applySettings();
+    pushEquip();
+    send(`start|mode=hub;name=${playerName()};diff=${settings.diff};${equipString()}`);
+  }
+  on('hub-btn', 'click', enterHub);
+  // party members walking around the hub, and their chat as speech bubbles
+  setInterval(() => {
+    if (state !== 'hub') return;
+    const mates = window.UHCoop?.hubMates?.() || [];
+    send('hubmates|' + mates.map((m) => [m.name, m.x, m.y, m.aim, m.look.skin, m.look.hat, m.look.gun].map((x) => String(x ?? '').replace(/[|~]/g, '')).join('~')).join('|'));
+  }, 300);
+  window.UHCoop?.on?.('chat', (m) => { if (state === 'hub' && m.name) send('hubbubble|' + String(m.name).replace(/\|/g, '') + '|' + String(m.text || '').replace(/\|/g, '/')); });
   on('continues', 'click', (e) => { const b = e.target.closest('[data-continue]'); if (b) continueRun(b.dataset.continue); });
   on('name', 'keydown', (e) => { if (e.key === 'Enter') start(); });
   on('resume', 'click', () => send('resume'));
@@ -759,6 +940,17 @@
         toast(first ? `🏰 First clear! ${'★'.repeat(+n)}${glass === '1' ? ' · Glass Crystal' : ''}` : `${'★'.repeat(+n)} on this map`);
         break;
       }
+      case 'hubopen': openStall(data); break;
+      case 'hubleave': closeStall(true); break;
+      case 'hubpos': {
+        const [x, y, aim] = String(data).split('~').map(Number);
+        window.UHCoop?.hubPos?.(x, y, aim);
+        break;
+      }
+      case 'hubmenu':
+        if (stall) { closeStall(); break; }
+        if (confirm('Leave the Home Base and return to the lobby?')) { toMenu(); }
+        break;
       case 'usebtn': $('t-use').classList.toggle('on', data === '1'); break;
       case 'readybtn': $('t-ready').classList.toggle('on', data === '1'); break;
       case 'haptic': {

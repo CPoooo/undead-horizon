@@ -129,6 +129,8 @@ pub struct Zombie {
     pub rage_t: f32,
     /// Outbreak: index of the window it is breaking in through (-1 = inside)
     pub win: i8,
+    /// Home Base firing-range dummy: never moves, never dies, never hurts
+    pub dummy: bool,
     /// boss phase (1..3) and lifetime, for phases and the enrage timer
     pub phase: u8,
     pub age: f32,
@@ -451,6 +453,7 @@ pub struct Game {
     /// Outbreak traps, buildables and the easter egg
     pub secrets: Option<Box<crate::secrets::Secrets>>,
     pub siege: Option<Box<crate::modes::siege::SiegeState>>,
+    pub hub: Option<Box<crate::modes::hub::HubState>>,
     /// the touch USE button is visible
     pub use_shown: bool,
     pub ready_shown: bool,
@@ -605,6 +608,7 @@ impl Game {
             nuke_pending: false,
             secrets: None,
             siege: None,
+            hub: None,
             use_shown: false,
             ready_shown: false,
             boss_intro: None,
@@ -735,6 +739,7 @@ impl Game {
                         "campaign" => Mode::Campaign(self.chapter()),
                         "outbreak" => Mode::Outbreak,
                         "siege" => Mode::Siege,
+                        "hub" => Mode::Hub,
                         _ => Mode::Infinite,
                     }
                 }
@@ -835,6 +840,7 @@ impl Game {
         self.nuke_pending = false;
         self.secrets = None;
         self.siege = None;
+        self.hub = None;
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -1373,6 +1379,7 @@ impl Game {
                         s.build_sel = None;
                     }
                 }
+                Action::Pause if self.hub.is_some() => self.ui_out.push(("hubmenu", String::new())),
                 Action::Pause => self.pause(),
                 Action::Dash => self.player.dash_buf = 0.18,
                 Action::Interact => return self.try_interact(),
@@ -1463,6 +1470,9 @@ impl Game {
         if self.siege.is_some() {
             return self.siege_interact();
         }
+        if self.hub.is_some() {
+            return self.hub_interact();
+        }
         false
     }
 
@@ -1488,6 +1498,7 @@ impl Game {
         self.ob = None;
         self.flow = None;
         self.siege = None;
+        self.hub = None;
         self.audio.set_track(Track::Lobby);
         self.audio.music_on = true;
         self.net = None;
@@ -1679,6 +1690,9 @@ impl Game {
     }
 
     pub(crate) fn try_ult(&mut self) {
+        if self.hub.is_some() {
+            return;
+        }
         if self.player.ult < 1.0 {
             if self.player.ult < 0.999 {
                 self.toast = Some((
@@ -2227,6 +2241,7 @@ impl Game {
         } else {
             enemies_near || self.input.mouse_down
         };
+        let want_fire = want_fire && (self.hub.is_none() || self.in_range_zone());
         if want_fire && self.player.fire_cd <= 0.0 && self.ob_can_fire() {
             self.player.fire_cd += self.fire_interval();
             if self.player.fire_cd < 0.0 {
@@ -2490,6 +2505,7 @@ impl Game {
             return false;
         }
         z.last_hitter = hit_slot;
+        let dummy = z.dummy;
         z.hp -= dmg;
         z.flash = 1.0;
         z.vel += dir * knock * z.kind.def().knock;
@@ -2530,6 +2546,9 @@ impl Game {
             self.sfx(Sfx::Crit, pos);
         } else {
             self.sfx(Sfx::Hit, pos);
+        }
+        if dummy {
+            self.log_dummy_damage(dmg);
         }
         if hit_slot == self.my_slot() {
             self.ob_on_hit(pos, dead, crit);
@@ -2815,8 +2834,8 @@ impl Game {
             if z.dead {
                 continue;
             }
-            if z.win >= 0 {
-                continue; // breaking in through a window (see outbreak.rs)
+            if z.win >= 0 || z.dummy {
+                continue; // breaking in through a window (outbreak.rs) / range dummy (hub.rs)
             }
             let (tslot, ppos, pvel) = Game::nearest_target(&targets, z.pos);
             z.prev = z.pos;
@@ -3731,6 +3750,7 @@ impl Game {
             shield: 0.0,
             rage_t: 0.0,
             win: -1,
+            dummy: false,
             phase: 0,
             age: 0.0,
             hidden: kind == ZKind::Burrower,
@@ -4395,5 +4415,47 @@ mod tests {
         g.grid.build(g.player.pos, &g.zombies);
         g.update_defenses();
         assert_eq!(g.phase, Phase::Dying);
+    }
+
+    #[test]
+    fn home_base() {
+        let mut g = Game::new(31);
+        g.start("mode=hub");
+        assert_eq!(g.mode, Mode::Hub);
+        let h = g.hub.as_ref().unwrap();
+        assert_eq!(h.npcs.len(), 4);
+        let smith = h.npcs.iter().find(|n| n.id == "gunsmith").unwrap().pos;
+        // no shooting in the plaza
+        let mut t = 0.0;
+        for _ in 0..120 {
+            t += 16.7;
+            g.frame(t);
+        }
+        assert!(g.zombies.iter().all(|z| z.dummy), "only range dummies");
+        assert!(g.bullets.is_empty(), "no shooting outside the range");
+        // walk up to the gunsmith and talk
+        g.player.pos = smith + v2(0.0, 60.0);
+        assert!(g.hub_interact());
+        assert!(g.ui_out.iter().any(|e| e.0 == "hubopen" && e.1 == "gunsmith"));
+        g.npc_say("gunsmith", "Keep your voice down.");
+        assert!(g.hub.as_ref().unwrap().npcs.iter().any(|n| n.line_t > 0.0));
+        // walking away closes the stall
+        g.ui_out.clear();
+        g.player.pos = v2(0.0, 300.0);
+        g.frame(t + 16.7);
+        assert!(g.ui_out.iter().any(|e| e.0 == "hubleave"));
+        // the firing range: shooting dummies registers DPS, dummies never die
+        let range = g.hub.as_ref().unwrap().range;
+        g.player.pos = v2((range[0] + range[2]) * 0.5, range[1] + 120.0);
+        g.auto_aim = true;
+        for _ in 0..240 {
+            t += 16.7;
+            g.frame(t);
+        }
+        assert!(g.dps() > 0.0, "dummies take hits");
+        assert_eq!(g.zombies.iter().filter(|z| z.dummy && !z.dead).count(), 3);
+        // party members show up
+        g.set_hub_mates("Mara~10~20~0.5~crimson~cap~smg|Doc~-50~40~1~default~none~pistol");
+        assert_eq!(g.hub.as_ref().unwrap().mates.len(), 2);
     }
 }

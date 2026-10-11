@@ -15,6 +15,7 @@ mod nav;
 mod net;
 mod outbreak_interact;
 mod render;
+mod render_hub;
 mod render_light;
 mod render_outbreak;
 mod render_siege;
@@ -523,6 +524,23 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
                     g.spawn_zombie(kind, p + math::V2::from_angle(k as f32 * 1.05) * 260.0);
                     g.make_elite(*af);
                 }
+            }
+        }
+        // Home Base: vendor lines, other players, chat bubbles, closing a stall
+        "npcsay" => {
+            if let Some((id, text)) = a.split_once('|') {
+                g.npc_say(id, text);
+            }
+        }
+        "hubmates" => g.set_hub_mates(a),
+        "hubbubble" => {
+            if let Some((name, text)) = a.split_once('|') {
+                g.hub_bubble(name, text);
+            }
+        }
+        "hubclose" => {
+            if let Some(h) = g.hub.as_mut() {
+                h.open = None;
             }
         }
         // a one-shot action from a gamepad or an on-screen button

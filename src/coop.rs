@@ -1171,6 +1171,7 @@ fn replica(uid: u32, kind: ZKind, var: BossVar, pos: V2) -> Zombie {
         shield: 0.0,
         rage_t: 0.0,
         win: -1,
+        dummy: false,
         phase: 0,
         age: 0.0,
         hidden: false,

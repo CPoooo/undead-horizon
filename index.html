@@ -77,6 +77,7 @@
         <div class="hint" id="diff-hint"></div>
 
         <span class="tip-wrap"><button id="play" class="btn play-big">▶ PLAY</button><span class="tip" id="play-tip" role="tooltip"></span></span>
+        <button id="hub-btn" class="btn secondary" style="margin-top:10px">🏠 Enter Home Base</button>
         <div class="hint" id="play-warn" style="text-align:center;color:#ffb070"></div>
         <div id="continues"></div>
       </div>
@@ -161,6 +162,23 @@
         <button id="story-go" class="btn">Begin ▶</button>
       </div>
     </div>
+  </div>
+
+  <!-- ============ HOME BASE VENDOR STALL ============ -->
+  <div id="vendor">
+    <div class="v-head">
+      <div class="v-ic" id="v-ic">🔧</div>
+      <div><div class="v-name" id="v-name">Vendor</div><div class="v-title" id="v-title"></div></div>
+      <div class="v-coins" id="v-coins"></div>
+      <button class="x" id="v-close" title="Close (Esc)">×</button>
+    </div>
+    <div class="v-line" id="v-line">…</div>
+    <div class="v-you" id="v-you"></div>
+    <div class="v-body" id="v-body"></div>
+    <form class="v-chat" id="v-chat" autocomplete="off">
+      <input id="v-say" maxlength="160" placeholder="Say something…" />
+      <button class="btn small" type="submit">Say</button>
+    </form>
   </div>
 
   <!-- ============ PAUSE ============ -->

@@ -1,6 +1,7 @@
 // Undead Horizon API, a Neon Function (Hono + node-postgres).
 //
-// Public:   GET  /health, GET /leaderboard?diff=, POST /errors (client crash reports)
+// Public:   GET  /health, GET /leaderboard?diff=, POST /errors (client crash reports),
+//           POST /vendor (Home Base vendor lines; signed-in callers get a higher rate limit)
 // Signed-in (Neon Auth JWT in `Authorization: Bearer`):
 //           GET  /me                     profile (+ save summary), created on first call
 //           POST /me/import              one-time import of offline progress
@@ -17,6 +18,7 @@ import { cors } from "hono/cors";
 import { PRICES, CHAPTERS, DIFFS, CATEGORIES, waveCoins } from "./catalog";
 import { pool, verifyToken, cleanName, ensureProfile } from "./shared";
 import { social } from "./social";
+import { vendor } from "./vendor";
 
 type Env = { Variables: { userId: string } };
 const app = new Hono<Env>();
@@ -47,6 +49,7 @@ app.onError((err, c) => {
 
 // ---------------------------------------------------------------- public
 app.get("/health", (c) => c.json({ ok: true }));
+app.route("/", vendor);
 
 // Client crash reports. Rate-limited per address (in this isolate) and capped
 // globally per hour so a crash loop can't flood the table.

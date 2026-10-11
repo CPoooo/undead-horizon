@@ -3,6 +3,7 @@
 //! branches in `game.rs`.
 
 pub mod campaign;
+pub mod hub;
 pub mod horde;
 pub mod infinite;
 pub mod outbreak;
@@ -20,6 +21,8 @@ pub enum Mode {
     Outbreak,
     /// defend the crystal on an authored map (`Game::map_id`)
     Siege,
+    /// the walkable Home Base between missions
+    Hub,
 }
 
 impl Mode {
@@ -29,6 +32,7 @@ impl Mode {
             Mode::Campaign(_) => "campaign",
             Mode::Outbreak => "outbreak",
             Mode::Siege => "siege",
+            Mode::Hub => "hub",
         }
     }
 
@@ -37,6 +41,7 @@ impl Mode {
             Mode::Campaign(_) => &campaign::Campaign,
             Mode::Outbreak => &outbreak::Outbreak,
             Mode::Siege => &siege::Siege,
+            Mode::Hub => &hub::Hub,
             _ => &infinite::Infinite,
         }
     }

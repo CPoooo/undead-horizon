@@ -113,6 +113,8 @@ async function deliver(uid: string, p: any) {
       return sendUser(uid, { t: "toast", msg: p.msg });
     case "chat":
       return sendUser(uid, { t: "chat", from: p.from, name: p.name, text: p.text, ts: p.ts });
+    case "hub":
+      return sendUser(uid, { t: "hub", from: p.from, name: p.name, x: p.x, y: p.y, aim: p.aim, look: p.look });
   }
 }
 
@@ -372,6 +374,19 @@ async function handle(uid: string, msg: any): Promise<void> {
       if (!pa) return;
       await pool.query("update party_members set ready = $3 where party_id = $1 and user_id = $2", [pa.id, uid, !!msg.ready]);
       await notify(await memberIds(pa.id), { k: "party" });
+      return;
+    }
+    // Home Base: where you are, relayed to your party (a few times a second)
+    case "hub.pos": {
+      const pa = await partyOf(uid);
+      if (!pa) return;
+      const num = (v: unknown) => (Number.isFinite(Number(v)) ? Math.round(Number(v) * 100) / 100 : 0);
+      const look = Object.fromEntries(
+        ["skin", "hat", "gun"].map((k) => [k, String(msg.look?.[k] ?? "").slice(0, 20)]),
+      );
+      const me = await pool.query("select display_name from profiles where user_id = $1", [uid]);
+      const ids = (await memberIds(pa.id)).filter((id) => id !== uid);
+      await notify(ids, { k: "hub", from: uid, name: me.rows[0]?.display_name ?? "?", x: num(msg.x), y: num(msg.y), aim: num(msg.aim), look });
       return;
     }
     case "party.look": {

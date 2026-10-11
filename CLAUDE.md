@@ -74,9 +74,15 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
 - Game to UI events: `ready`, `pause` (run JSON), `resume`, `saved` (save string), `gameover` and `victory` (stats JSON), `autoaim`, `wave`.
 - Player profile, leaderboard and saves go through `Data` in `ui/app.js`: localStorage when signed out, and the cloud API when signed in (`window.UHCloud`, from `ui/cloud-src.js`).
 
-## Future plan: Home Base (free-roam social hub, à la Destiny's Tower)
+## Home Base (free-roam social hub, à la Destiny's Tower)
 
-Not scheduled yet; design notes for when we pick it up.
+**Built (v1):** `modes/hub.rs`, `render_hub.rs`, `assets/maps/hub.json`, the vendor stall UI in `ui/app.js`, and `server/vendor.ts`.
+- Lobby "🏠 Enter Home Base" starts `mode=hub`. Vendor NPCs: Rusty Vex (guns), Madame Lucienne (skins/hats), Sgt. Dole (perks/tracers), Ada (missions terminal); the memorial shows the leaderboard; a firing range has unkillable dummies and a DPS meter (shooting is only allowed there).
+- E opens a stall (docked panel): items to buy/equip, the vendor's line, and a "Say something" box. Lines come from `POST /vendor` (Claude `claude-opus-5-5` at low effort via `@anthropic-ai/sdk`, cached persona prompt, server-side refusal fallback, per-caller rate limits, a reuse cache) and fall back to canned lines without `ANTHROPIC_API_KEY`. Lines show as speech bubbles and are spoken with per-vendor Web Speech voices (Settings toggle).
+- Party members in the hub are relayed through the social socket (`hub.pos` → `{t:'hub'}`), drawn walking around, with chat as speech bubbles.
+- **Still open:** instanced hubs with strangers (16–24), emotes, a free-roam zone, hub-wide proximity voice.
+
+Original design notes:
 
 - **What:** a walkable, persistent hub world that replaces (or sits behind) the menu lobby. You spawn in as your equipped character and can see and walk around with other players who are in the Home Base at the same time, not only party members.
 - **Vendors replace menu screens:** everything bought in the main menu today (guns, perks, skins, hats, tracers, later relics/permanent upgrades/season pass) is sold by in-world vendor NPCs at stalls. Walk up, press Interact, and a shop panel opens anchored to that vendor; the menu Shop stays as a fallback on mobile/accessibility.

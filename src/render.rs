@@ -116,6 +116,8 @@ enum Draw {
     Zombie(usize),
     Ob(Obstacle),
     Wall(crate::render_map::WallChunk),
+    Npc(usize),
+    Mate(usize),
 }
 
 impl Game {
@@ -245,6 +247,14 @@ impl Game {
         for o in obs.iter() {
             list.push((o.pos.y, Draw::Ob(*o)));
         }
+        if let Some(hb) = &self.hub {
+            for (i, n) in hb.npcs.iter().enumerate() {
+                list.push((n.pos.y, Draw::Npc(i)));
+            }
+            for (i, m) in hb.mates.iter().enumerate() {
+                list.push((m.pos.y, Draw::Mate(i)));
+            }
+        }
         if let Some(m) = &map {
             let mut chunks = Vec::new();
             self.map_wall_chunks(m, vmin, vmax, &mut chunks);
@@ -266,6 +276,16 @@ impl Game {
                 }
                 Draw::Zombie(i) => self.draw_zombie(c, *i, a, t),
                 Draw::Ob(o) => self.draw_obstacle_base(c, o),
+                Draw::Npc(i) => {
+                    if let Some(hb) = &self.hub {
+                        self.draw_player(c, hb.npcs[*i].pos, t, &self.npc_view(*i, t));
+                    }
+                }
+                Draw::Mate(i) => {
+                    if let Some(hb) = &self.hub {
+                        self.draw_player(c, hb.mates[*i].pos, t, &self.mate_view(*i));
+                    }
+                }
                 Draw::Wall(w) => {
                     if let Some(m) = &map {
                         self.draw_wall_chunk(c, m, w);
@@ -362,6 +382,7 @@ impl Game {
             c.restore();
         }
         self.draw_bolts(c, t);
+        self.draw_hub_overlays(c, t);
         self.draw_texts(c);
         self.draw_teammate_tags(c, t);
         c.restore();
@@ -376,6 +397,9 @@ impl Game {
         if self.coop() && !matches!(self.phase, Phase::Menu) {
             self.draw_coop_hud(c, w, h, t);
         }
+        if self.hub.is_some() && self.phase == Phase::Playing {
+            self.draw_hub_prompt(c, w, cy);
+        }
         if self.siege.is_some() && matches!(self.phase, Phase::Playing | Phase::Paused) {
             self.draw_siege_hud(c, w, h, cy, t);
         }
@@ -385,7 +409,9 @@ impl Game {
         }
         // the touch USE button follows the prompt
         let show_use = self.phase == Phase::Playing
-            && ((self.ob.is_some() && self.ob_prompt().is_some()) || (self.siege.is_some() && self.defense_in_reach().is_some()));
+            && ((self.ob.is_some() && self.ob_prompt().is_some())
+                || (self.siege.is_some() && self.defense_in_reach().is_some())
+                || (self.hub.is_some() && self.hub_target().is_some()));
         let show_ready = self.phase == Phase::Playing
             && self.siege.as_ref().is_some_and(|s| s.phase == crate::modes::siege::SiegePhase::Build);
         if show_ready != self.ready_shown {
@@ -2042,7 +2068,7 @@ impl Game {
         let center = v2(w * 0.5, h * 0.5);
         let margin = 34.0;
         for z in self.zombies.iter() {
-            if !(few || z.kind == ZKind::Boss) {
+            if !(few || z.kind == ZKind::Boss) || z.dummy {
                 continue;
             }
             let zp = z.prev.lerp(z.pos, self.za(a));
@@ -2191,7 +2217,9 @@ impl Game {
         );
         c.set_font(&format!("600 13px {}", font));
         c.set_fill_style_str("#c8d2e8");
-        let info = if self.wave.intermission > 0.0 && self.wave.n > 0 {
+        let info = if self.hub.is_some() {
+            format!("🪙 {} · E to talk · Esc to leave", self.coins)
+        } else if self.wave.intermission > 0.0 && self.wave.n > 0 {
             format!("Next wave in {:.1}s", self.wave.intermission.max(0.0))
         } else {
             format!("{} undead remain", self.remaining())
@@ -2654,7 +2682,7 @@ impl Game {
         const SECTORS: usize = 24;
         let mut threat = [0f32; SECTORS];
         let mut boss_dir = None;
-        for z in self.zombies.iter() {
+        for z in self.zombies.iter().filter(|z| !z.dummy) {
             let d0 = z.pos - cam;
             let off_screen = d0.x.abs() > half.x || d0.y.abs() > half.y;
             if z.kind == ZKind::Boss {

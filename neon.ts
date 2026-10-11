@@ -12,6 +12,8 @@ export default defineConfig({
       env: {
         METERED_APP: process.env.METERED_APP!,
         METERED_SECRET_KEY: process.env.METERED_SECRET_KEY!,
+        // Home Base vendor dialogue (POST /vendor); without it vendors use canned lines
+        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
       },
     },
   },

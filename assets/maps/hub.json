@@ -1,0 +1,44 @@
+{
+  "name": "Home Base",
+  "bounds": [-1000, -800, 1000, 800],
+  "spawn": [0, 260],
+  "wall_h": 90,
+  "zones": [
+    { "id": "plaza", "name": "Market Square", "rect": [-1000, -800, 1000, 800], "floor": "tile", "start": true },
+    { "id": "range", "name": "Firing Range", "rect": [-1000, 300, -380, 800], "floor": "dirt", "start": true },
+    { "id": "garden", "name": "Memorial Garden", "rect": [-200, -200, 200, 200], "floor": "grass", "start": true }
+  ],
+  "walls": [
+    { "pts": [[-380, 300], [-380, 520]], "t": 18 },
+    { "pts": [[-1000, 300], [-560, 300]], "t": 18 },
+    { "pts": [[-760, -560], [-760, -260]], "t": 22 },
+    { "pts": [[760, -560], [760, -260]], "t": 22 },
+    { "pts": [[-180, -700], [180, -700]], "t": 22 }
+  ],
+  "props": [
+    { "kind": "crate", "pos": [-640, -230] },
+    { "kind": "crate", "pos": [-640, -170] },
+    { "kind": "barrel", "pos": [-880, -620] },
+    { "kind": "crate", "pos": [640, -230] },
+    { "kind": "barrel", "pos": [880, -620] },
+    { "kind": "crate", "pos": [-60, -560] },
+    { "kind": "crate", "pos": [60, -560] },
+    { "kind": "tree", "pos": [-140, 140] },
+    { "kind": "tree", "pos": [140, -140] },
+    { "kind": "pillar", "pos": [0, 0], "r": 34 },
+    { "kind": "tree", "pos": [800, 600] },
+    { "kind": "tree", "pos": [-860, -760] },
+    { "kind": "barrel", "pos": [560, 520] },
+    { "kind": "crate", "pos": [-420, 560] }
+  ],
+  "interact": [
+    { "kind": "vendor", "pos": [-640, -320], "id": "gunsmith" },
+    { "kind": "vendor", "pos": [640, -320], "id": "tailor" },
+    { "kind": "vendor", "pos": [0, -620], "id": "quartermaster" },
+    { "kind": "vendor", "pos": [520, 400], "id": "dispatcher" },
+    { "kind": "monument", "pos": [0, 0], "id": "monument" },
+    { "kind": "dummy", "pos": [-900, 700] },
+    { "kind": "dummy", "pos": [-760, 720] },
+    { "kind": "dummy", "pos": [-620, 700] }
+  ]
+}

@@ -384,3 +384,26 @@ body:not(.playing) #voice-hud { display: none; }
 #pmenu.show { display: flex; }
 .pm-vol { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .pm-vol input { flex: 1; }
+
+/* Home Base vendor stall: docked right so the NPC stays visible */
+#vendor { position: fixed; right: 16px; top: 70px; width: min(420px, calc(100% - 32px)); max-height: calc(100% - 100px); z-index: 9;
+  display: none; flex-direction: column; gap: 10px; padding: 16px; border-radius: 18px; background: var(--panel);
+  border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0,0,0,.55); backdrop-filter: blur(10px); }
+#vendor.show { display: flex; }
+#vendor .v-head { display: flex; align-items: center; gap: 12px; }
+#vendor .v-ic { font-size: 34px; width: 52px; height: 52px; display: grid; place-items: center; border-radius: 14px; background: rgba(255,211,106,.12); }
+#vendor .v-name { font-weight: 900; font-size: 18px; }
+#vendor .v-title { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+#vendor .v-coins { margin-left: auto; font-weight: 800; color: #ffd36a; }
+#vendor .x { background: none; border: 0; color: #fff; font-size: 26px; cursor: pointer; }
+#vendor .v-line { position: relative; background: rgba(250,248,240,.95); color: #1a1c24; border-radius: 12px; padding: 10px 12px; font-weight: 600; font-size: 14px; min-height: 40px; }
+#vendor .v-line.thinking { opacity: .6; }
+#vendor .v-you { color: #9cffb8; font-size: 12px; min-height: 0; }
+#vendor .v-body { overflow-y: auto; min-height: 80px; }
+#vendor .v-body .items { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+#vendor .v-chat { display: flex; gap: 8px; }
+#vendor .v-chat input { flex: 1 1 auto; min-width: 0; width: auto; }
+#vendor .v-chat .btn { flex: 0 0 auto; width: auto; padding: 8px 16px; }
+#vendor .mission { display: flex; flex-direction: column; gap: 8px; }
+#vendor .mission button { text-align: left; }
+@media (max-width: 640px) { #vendor { top: auto; bottom: 12px; max-height: 62%; } }
