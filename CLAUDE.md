@@ -89,6 +89,7 @@ node tests/e2e/<suite>.mjs                               # or: npm run e2e (all 
 - **The level-up screen freezes the sim:** don't let the Home Base drop XP (it doesn't: `spawn_gem` is a no-op in the hub). Tests that farm kills must pick cards (`Digit1`).
 - **The UI → game command queue runs before net messages each frame,** so a `coop|…late=1` start lands before the late-join sync.
 - **CLUSTER sizes:** `CLUSTER_W`/`CLUSTER_H` in `src/hud_layout.rs` must match the `#touch-ui` box in `ui/style.css`.
+- **Trunk is pinned to v0.21.14 in CI, and UI scripts are `data-no-minify`:** a newer trunk's JS minifier turned `get cloud()` into a plain method, so `Data.cloud` was always truthy and the account panel broke for signed-out players (it showed only "Your account"). Don't unpin it or drop the attribute without checking that `dist/app-*.js` still contains `get cloud(`.
 - **Bump `PROTOCOL` (net) / `SAVE_VERSION` (saves)** whenever their formats change. They are 14 and 3 now.
 
 ## 1. Status at a glance
