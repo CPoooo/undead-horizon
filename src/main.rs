@@ -6,6 +6,7 @@ mod chest;
 mod elites;
 mod content;
 mod coop;
+mod corpses;
 mod game;
 mod input;
 mod math;

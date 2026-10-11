@@ -373,6 +373,7 @@ impl Game {
         if dead {
             self.zombies[j].dead = true;
             self.predicted.push((uid, self.real_time));
+            self.add_corpse(j);
             self.kill_effects(pos, kind, r);
             if crit {
                 self.headshot(pos);
@@ -929,6 +930,7 @@ impl Game {
                         let r_ = self.zombies[j].r;
                         self.zombies[j].dead = true;
                         if !was_predicted {
+                            self.add_corpse(j);
                             self.kill_effects(pos, kind, r_);
                         }
                     } else if !was_predicted {

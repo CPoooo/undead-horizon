@@ -209,6 +209,7 @@ impl Game {
             None => self.draw_ground(c, vmin, vmax),
         }
         self.draw_decals(c, vmin, vmax);
+        self.draw_corpses(c);
 
         let mut obs: Vec<Obstacle> = Vec::new();
         world::for_obstacles_in(vmin - v2(150.0, 150.0), vmax + v2(150.0, 150.0), |o| {
@@ -1016,7 +1017,53 @@ impl Game {
         }
     }
 
+    /// Squash & stretch on hit, and a lean in the direction it's being knocked.
     fn draw_zombie(&self, c: &Ctx, i: usize, a: f32, t: f32) {
+        let z = &self.zombies[i];
+        let p = z.prev.lerp(z.pos, self.za(a));
+        let f = z.flash.clamp(0.0, 1.0);
+        let lean = (z.vel.x / 900.0).clamp(-0.22, 0.22) * if z.kind == ZKind::Boss { 0.3 } else { 1.0 };
+        if f < 0.01 && lean.abs() < 0.01 {
+            return self.draw_zombie_body(c, i, a, t);
+        }
+        c.save();
+        let _ = c.translate(d(p.x), d(p.y));
+        let _ = c.rotate(d(lean));
+        let _ = c.scale(d(1.0 + 0.16 * f), d(1.0 - 0.13 * f));
+        let _ = c.translate(d(-p.x), d(-p.y));
+        self.draw_zombie_body(c, i, a, t);
+        c.restore();
+    }
+
+    fn draw_corpses(&self, c: &Ctx) {
+        for co in self.corpses.iter() {
+            let k = (co.t / crate::corpses::CORPSE_T).clamp(0.0, 1.0);
+            let fall = (co.t / 0.25).min(1.0);
+            let (cloth, skin) = if co.kind == ZKind::Boss {
+                let (cl, sk, _) = co.boss_var.colors();
+                (cl, sk)
+            } else {
+                let def = co.kind.def();
+                let n = def.cloth.len();
+                (def.cloth[((co.tint * n as f32) as usize).min(n - 1)], def.skin)
+            };
+            let frozen = co.elem & crate::status::FROZEN_BIT != 0;
+            let burnt = co.elem & crate::status::Elem::Burn.bit() != 0;
+            c.save();
+            let _ = c.translate(d(co.pos.x), d(co.pos.y));
+            let _ = c.rotate(d(co.face + fall * 1.2));
+            let _ = c.scale(1.0, d(1.0 - 0.45 * fall));
+            c.set_global_alpha(d((1.0 - k) * 0.95));
+            c.set_fill_style_str(if burnt { "#2a2a2a" } else if frozen { "#bff4ff" } else { cloth });
+            circle(c, 0.0, 0.0, co.r * (1.0 - 0.25 * k));
+            c.set_fill_style_str(if burnt { "#1a1a1a" } else if frozen { "#e0fbff" } else { skin });
+            circle(c, co.r * 0.7, 0.0, co.r * 0.5 * (1.0 - 0.25 * k));
+            c.restore();
+        }
+        c.set_global_alpha(1.0);
+    }
+
+    fn draw_zombie_body(&self, c: &Ctx, i: usize, a: f32, t: f32) {
         let z = &self.zombies[i];
         let p = z.prev.lerp(z.pos, self.za(a));
         let r = z.r;

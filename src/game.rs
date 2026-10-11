@@ -413,6 +413,7 @@ pub struct Game {
     /// volatile elite blasts waiting to go off: (pos, fuse, damage)
     pub volatile: Vec<(V2, f32, f32)>,
     pub slams: Vec<crate::boss::Slam>,
+    pub corpses: Vec<crate::corpses::Corpse>,
     pub boss_intro: Option<crate::boss::BossIntro>,
     /// chests picked up while another overlay was open
     pub pending_chests: u32,
@@ -556,6 +557,7 @@ impl Game {
             evolved: Vec::new(),
             volatile: Vec::new(),
             slams: Vec::new(),
+            corpses: Vec::new(),
             boss_intro: None,
             pending_chests: 0,
             rng: Rng::new(seed),
@@ -775,6 +777,7 @@ impl Game {
         self.evolved.clear();
         self.volatile.clear();
         self.slams.clear();
+        self.corpses.clear();
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -1160,6 +1163,9 @@ impl Game {
         self.zoom_punch = (self.zoom_punch - real_dt * 0.6).max(0.0);
         self.tick_callouts(real_dt);
         self.tick_boss_intro(real_dt);
+        if self.phase != Phase::Paused {
+            self.update_corpses(real_dt);
+        }
         let look = if matches!(self.phase, Phase::Playing) && !self.player.downed {
             V2::from_angle(self.player.aim) * (55.0 * self.lookahead)
         } else {
@@ -2426,6 +2432,7 @@ impl Game {
         if affix != crate::elites::Affix::None {
             self.elite_death(pos, kind, affix, r);
         }
+        self.add_corpse(j);
         self.kill_effects(pos, kind, r);
         let big = kind.def().big;
         self.drop_loot(pos, kind, xp, r, big);
@@ -4000,5 +4007,24 @@ mod tests {
         let mut k = Game::new(25);
         k.load_save(&g.save_string());
         assert_eq!(content::CHARACTERS[k.character].id, "mara");
+    }
+
+    #[test]
+    fn corpses_fade_and_elemental_deaths() {
+        let mut g = Game::new(26);
+        g.start("diff=rookie");
+        g.spawn_zombie(ZKind::Walker, v2(200.0, 0.0));
+        g.grid.build(g.player.pos, &g.zombies);
+        g.afflict(0, Elem::Chill, 1.0);
+        g.afflict(0, Elem::Chill, 1.0);
+        let parts = g.particles.len();
+        g.damage_zombie(0, 1.0e9, v2(1.0, 0.0), 0.0, false);
+        assert_eq!(g.corpses.len(), 1);
+        assert!(g.corpses[0].elem & crate::status::FROZEN_BIT != 0);
+        assert!(g.particles.iter().skip(parts).any(|p| p.color == "#d8fbff"), "ice shards");
+        g.update_corpses(1.0);
+        assert_eq!(g.corpses.len(), 1);
+        g.update_corpses(1.0);
+        assert!(g.corpses.is_empty(), "faded away");
     }
 }

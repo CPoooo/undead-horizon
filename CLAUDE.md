@@ -136,7 +136,7 @@ Not scheduled yet; design notes for when we pick it up.
 ### M1 · Modern feel (quick wins, high impact)
 - [x] J1 (S) **Weapon feel.** Per-gun recoil camera kick, shell-casing particles, muzzle light flash.
   - These go in the `GUNS` table (`content.rs`) and `fire()`.
-- [ ] J2 (M) **Hit reactions.**
+- [x] J2 (M) **Hit reactions.**
   - Squash and stretch on hit, plus directional knockback tilt.
   - Death variety: gib limbs or dissolve on elemental kills.
   - Corpses fade instead of popping.
