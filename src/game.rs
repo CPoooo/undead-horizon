@@ -533,6 +533,8 @@ pub struct Game {
     pub mutators: content::Mutators,
     /// daily run: everyone gets the same seed
     pub daily: String,
+    /// what landed the killing blow (balance telemetry)
+    pub death_cause: String,
     pub want_tutorial: bool,
     pub relics: content::RelicBonus,
     pub camo: usize,
@@ -688,6 +690,7 @@ impl Game {
             access: content::Access::default(),
             mutators: content::Mutators::default(),
             daily: String::new(),
+            death_cause: String::new(),
             want_tutorial: false,
             relics: content::RelicBonus::default(),
             camo: 0,
@@ -887,6 +890,7 @@ impl Game {
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
+        self.death_cause.clear();
         self.kind_kills = [0; 15];
         self.bosses_killed = 0;
         self.score = 0;
@@ -1821,7 +1825,7 @@ impl Game {
         let name = self.player_name.replace(['\\', '"'], "");
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{},\"mutated\":{},\"daily\":\"{}\"}}",
+            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{},\"mutated\":{},\"daily\":\"{}\",\"cause\":\"{}\",\"build\":\"{}\"}}",
             self.net.as_ref().map(|n| n.players()).unwrap_or(1),
             name,
             self.wave.n.max(1),
@@ -1845,7 +1849,9 @@ impl Game {
             self.meta.is_pure() && self.relics == content::RelicBonus::default(),
             if self.victory_t >= 0.0 && self.siege.is_some() { self.siege_stars() } else { 0 },
             self.mutators.any(),
-            self.daily
+            self.daily,
+            self.death_cause.replace('"', ""),
+            self.ups.0.iter().enumerate().filter(|(_, l)| **l > 0).map(|(i, l)| format!("{}:{}", i, l)).collect::<Vec<_>>().join(",")
         )
     }
 
@@ -2884,6 +2890,16 @@ impl Game {
         self.sfx(Sfx::Hurt, pos);
         self.haptic(70, 0.6);
         self.combo = 0;
+        if self.player.hp <= 0.0 {
+            // remember what got us (balance telemetry)
+            self.death_cause = self
+                .zombies
+                .iter()
+                .filter(|z| !z.dead && z.pos.dist(from) < z.r + 40.0)
+                .min_by(|a, b| a.pos.dist2(from).partial_cmp(&b.pos.dist2(from)).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|z| if z.kind == ZKind::Boss { z.boss_var.name().to_string() } else { z.kind.def().name.to_string() })
+                .unwrap_or_else(|| "projectile".into());
+        }
         if self.player.hp <= 0.0 && self.net.is_some() {
             self.go_down();
         } else if self.player.hp <= 0.0 && self.second_wind() {

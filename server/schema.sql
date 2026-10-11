@@ -170,3 +170,20 @@ alter table profiles add column if not exists last_bonus timestamptz;
 
 -- Settings sync across devices (A6).
 alter table profiles add column if not exists settings jsonb not null default '{}';
+
+-- Balance telemetry (A7): what killed the player and the build they had. No personal data.
+alter table runs add column if not exists cause text not null default '';
+alter table runs add column if not exists build text not null default '';
+create or replace view balance_deaths as
+  select mode, diff, cause, count(*) as deaths, round(avg(wave), 1) as avg_wave
+  from runs where cause <> '' and created_at > now() - interval '30 days'
+  group by mode, diff, cause order by deaths desc;
+create or replace view balance_guns as
+  select mode, diff, gun, count(*) as runs, round(avg(wave), 1) as avg_wave, round(avg(kills)) as avg_kills
+  from runs where not abandoned and created_at > now() - interval '30 days'
+  group by mode, diff, gun order by avg_wave desc;
+create or replace view balance_upgrades as
+  select split_part(pick, ':', 1)::int as upgrade, count(*) as runs_with_it, round(avg(r.wave), 1) as avg_wave
+  from runs r, unnest(string_to_array(nullif(r.build, ''), ',')) as pick
+  where r.mode = 'infinite' and r.created_at > now() - interval '30 days'
+  group by 1 order by avg_wave desc;

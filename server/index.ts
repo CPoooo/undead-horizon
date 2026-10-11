@@ -397,10 +397,12 @@ app.post("/runs", async (c) => {
     const daily = r.daily === today ? today : "";
     const mutated = !!r.mutated;
     const pure = !!r.pure;
+    const cause = String(r.cause || "").slice(0, 40);
+    const build = String(r.build || "").replace(/[^0-9:,]/g, "").slice(0, 200);
     const ins = await client.query(
-      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map, daily, mutated, pure)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning id`,
-      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map, daily, mutated, pure],
+      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map, daily, mutated, pure, cause, build)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) returning id`,
+      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map, daily, mutated, pure, cause, build],
     );
     const campaign = p.campaign as { unlocked: number; cleared: number[] };
     if (victory) {

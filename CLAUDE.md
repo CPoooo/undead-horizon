@@ -290,7 +290,7 @@ Original design notes:
 - [ ] A4 (M) **Performance.** Pool particles, bullets and texts; batch draws; add a perf budget test (1,000 zombies at 60 fps). Evaluate a WebGL renderer if Canvas2D tops out (spike only).
 - [x] A5 (S) **Onboarding.** First-run interactive tutorial (move, dash, level-up, revive), contextual tips, and loading tips.
 - [x] A6 (S) **Settings sync.** Sync settings to the cloud profile.
-- [ ] A7 (S) **Balance telemetry.** Privacy-light: run summaries (mode, wave, build, cause of death) to Neon, plus a SQL view for balancing.
+- [x] A7 (S) **Balance telemetry.** Privacy-light: run summaries (mode, wave, build, cause of death) to Neon, plus a SQL view for balancing.
 - [ ] A8 (S) **Localization.** i18n string table framework (en first).
 - [x] A9 (S) **Error reporting.** The panic hook and `window.onerror` post to `/errors` (rate-limited) for live debugging.
 
