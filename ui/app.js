@@ -4,6 +4,13 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
+  // Bind without throwing if the element is missing (e.g. a stale cached page),
+  // so one mismatch can't take down the whole UI and the game bridge.
+  const on = (id, ev, fn, opts) => {
+    const el = $(id);
+    if (el) el.addEventListener(ev, fn, opts);
+    else console.warn(`[ui] #${id} not found`);
+  };
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
@@ -343,23 +350,23 @@
     $('play-warn').textContent = existing ? 'Overwrites your saved run: hover Play for details' : '';
     saveSettings();
   }
-  $('mode-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { settings.mode = b.dataset.mode; renderMode(); send('equip|'); } });
-  $('diff-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { settings.diff = b.dataset.diff; renderMode(); } });
-  $('chapters').addEventListener('click', (e) => {
+  on('mode-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.mode = b.dataset.mode; renderMode(); send('equip|'); } });
+  on('diff-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.diff = b.dataset.diff; renderMode(); } });
+  on('chapters', 'click', (e) => {
     const c = e.target.closest('.chapter');
     if (!c || c.classList.contains('locked')) return;
     settings.chapter = +c.dataset.ch;
     renderMode();
   });
-  $('name').addEventListener('input', () => { settings.name = $('name').value; saveSettings(); renderTag(); });
-  $('name').addEventListener('change', async () => {
+  on('name', 'input', () => { settings.name = $('name').value; saveSettings(); renderTag(); });
+  on('name', 'change', async () => {
     if (!Data.cloud) return;
     try { Data.applyCloud(await Data.cloud.api('/me/name', { method: 'POST', body: { name: playerName() } })); toast('Name updated'); }
     catch { toast('Name must be 2-16 letters or numbers.'); $('name').value = Data.profile.name; }
   });
 
   // tabs
-  $('tabs').addEventListener('click', (e) => {
+  on('tabs', 'click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     for (const x of $('tabs').children) x.classList.toggle('on', x === b);
@@ -372,7 +379,7 @@
   // ------------------------------------------------------------------ shop
   let shopCat = 'gun';
   $('shop-cats').innerHTML = Object.keys(CATALOG).map((c) => `<button data-c="${c}" class="${c === shopCat ? 'on' : ''}">${CAT_LABEL[c]}</button>`).join('');
-  $('shop-cats').addEventListener('click', (e) => {
+  on('shop-cats', 'click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     shopCat = b.dataset.c;
@@ -392,7 +399,7 @@
           : `<button class="btn small gold" data-buy="${it.id}" ${afford ? '' : 'disabled'}>🪙 ${it.price.toLocaleString()}</button>`}</div>`;
     }).join('');
   }
-  $('shop-items').addEventListener('click', async (e) => {
+  on('shop-items', 'click', async (e) => {
     const b = e.target.closest('[data-buy]');
     if (!b) return;
     const it = find(shopCat, b.dataset.buy);
@@ -423,7 +430,7 @@
        <h2 style="margin-top:20px">Character</h2>${group('skin', 'Outfit')}${group('hat', 'Headgear')}${group('tracer', 'Bullet tracers')}
        <div class="hint" style="margin-top:12px">Buy more in the 🛒 Shop with coins earned by surviving waves.</div>`;
   }
-  $('locker').addEventListener('click', async (e) => {
+  on('locker', 'click', async (e) => {
     const it = e.target.closest('[data-eq]');
     if (!it) return;
     const [cat, id] = it.dataset.eq.split(':');
@@ -434,7 +441,7 @@
 
   // ------------------------------------------------------------------ leaderboard
   let lbFilter = 'all';
-  $('lb-filter').addEventListener('click', (e) => {
+  on('lb-filter', 'click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     lbFilter = b.dataset.f;
@@ -496,7 +503,7 @@
     show('story');
     return new Promise((res) => { storyResolve = res; });
   }
-  $('story-go').addEventListener('click', () => { clearInterval(storyTimer); const r = storyResolve; storyResolve = null; r && r(); });
+  on('story-go', 'click', () => { clearInterval(storyTimer); const r = storyResolve; storyResolve = null; r && r(); });
 
   let runCtx = null;
   async function start() {
@@ -528,22 +535,22 @@
     send('load|' + data);
   }
 
-  $('play').addEventListener('click', start);
-  $('continues').addEventListener('click', (e) => { const b = e.target.closest('[data-continue]'); if (b) continueRun(b.dataset.continue); });
-  $('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
-  $('resume').addEventListener('click', () => send('resume'));
+  on('play', 'click', start);
+  on('continues', 'click', (e) => { const b = e.target.closest('[data-continue]'); if (b) continueRun(b.dataset.continue); });
+  on('name', 'keydown', (e) => { if (e.key === 'Enter') start(); });
+  on('resume', 'click', () => send('resume'));
   let afterSave = null;
-  $('save').addEventListener('click', () => { afterSave = 'stay'; send('save'); });
-  $('save-quit').addEventListener('click', () => { afterSave = 'quit'; send('save'); });
-  $('quit').addEventListener('click', async () => {
+  on('save', 'click', () => { afterSave = 'stay'; send('save'); });
+  on('save-quit', 'click', () => { afterSave = 'quit'; send('save'); });
+  on('quit', 'click', async () => {
     if (!confirm('Abandon this run? Coins earned so far are kept, but progress is lost.')) return;
     if (lastPause) await Data.finishRun(lastPause.run, true).catch((e) => console.warn(e));
     toMenu();
   });
-  $('again').addEventListener('click', start);
-  $('tomenu').addEventListener('click', toMenu);
-  $('next-ch').addEventListener('click', () => { settings.chapter = Math.min(settings.chapter + 1, STORY.length - 1); start(); });
-  $('pause-btn').addEventListener('click', () => send('pause'));
+  on('again', 'click', start);
+  on('tomenu', 'click', toMenu);
+  on('next-ch', 'click', () => { settings.chapter = Math.min(settings.chapter + 1, STORY.length - 1); start(); });
+  on('pause-btn', 'click', () => send('pause'));
   const tap = (id, cmd) => $(id).addEventListener('touchstart', (e) => { e.preventDefault(); send(cmd); }, { passive: false });
   tap('t-dash', 'dash'); tap('t-ult', 'ult');
 
@@ -774,7 +781,7 @@
     };
     draw();
   }
-  $('account-pill').addEventListener('click', openAccount);
-  $('auth-x').addEventListener('click', () => toMenu());
+  on('account-pill', 'click', openAccount);
+  on('auth-x', 'click', () => toMenu());
   window.UHUI = { show, toMenu, toast, renderLB, renderCoins, renderMode, renderTag, pushEquip, state: () => state, setState: (s) => { state = s; } };
 })();

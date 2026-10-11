@@ -11,9 +11,6 @@
   <link data-trunk rel="rust" data-wasm-opt="3" />
   <link data-trunk rel="css" href="ui/style.css" />
   <link data-trunk rel="copy-file" href="assets/favicon.svg" />
-  <link data-trunk rel="copy-file" href="ui/app.js" />
-  <link data-trunk rel="copy-file" href="ui/config.js" />
-  <link data-trunk rel="copy-file" href="ui/cloud.js" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
 </head>
 <body>
@@ -218,8 +215,8 @@
     <button class="tbtn" id="t-dash">DASH</button>
   </div>
 
-  <script src="config.js"></script>
-  <script src="cloud.js"></script>
-  <script src="app.js"></script>
+  <script data-trunk src="ui/config.js"></script>
+  <script data-trunk src="ui/cloud.js"></script>
+  <script data-trunk src="ui/app.js"></script>
 </body>
 </html>
