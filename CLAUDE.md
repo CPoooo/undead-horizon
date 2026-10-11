@@ -25,6 +25,7 @@ Legend:
 | Core | Nemesis system | ✅ (synced across devices once settings sync 🟡 is deployed) |
 | Core | Death recap ("Killed by …", last 8s) | ✅ |
 | Core | Photo mode | ✅ (phone share sheet 📱) |
+| Platform | Phone HUD layout: player, crystal and boss health readable at once; thumb cluster clear of the Siege build bar | ✅ (📱 real-device check) |
 | Feel | Weapon feel, hit reactions, corpses, dynamic light, audio 2.0, camera, haptics, callouts | ✅ |
 | World | Day/night + weather, biomes, destructibles, character polish + cosmetic slots, lobby music picker, cutscenes | ✅ |
 | Platform | Gamepad + remap, accessibility suite, PWA/offline, perf/LOD, tutorial, i18n (en/es) | ✅ |
@@ -92,14 +93,14 @@ Legend:
 trunk serve --release                              # local dev at http://127.0.0.1:8080
 trunk build --release                              # production bundle in dist/
 cargo build --target wasm32-unknown-unknown        # fast type-check (must have no warnings)
-cargo test --release                               # native sim tests (52 as of 2026-10-11)
+cargo test --release                               # native sim tests (53 as of 2026-10-11)
 for f in ui/*.js; do node --check "$f"; done       # JS syntax check
 npm run build:cloud                                # after editing ui/cloud-src.js (CI also does it)
 ```
 
 **End-to-end (Playwright, real Chromium):**
 - First serve `dist/` on :8765 with `cd dist && python3 -m http.server 8765`, then run `npm run e2e`.
-- Suites, in order: `turn`, `coop`, `chat-voice`, `outbreak`, `hub`, `career`, `photo`, `nemesis`, `event`. Shared helpers are in `tests/e2e/lib.mjs`. Screenshots go to `tests/e2e/out/`.
+- Suites, in order: `turn`, `coop`, `chat-voice`, `outbreak`, `hub`, `career`, `photo`, `nemesis`, `event`, `mobile-hud`. Shared helpers are in `tests/e2e/lib.mjs`. Screenshots go to `tests/e2e/out/`.
 - `coop`, `chat-voice` and `turn` sign up fresh accounts (`uh-test-<name>-<ts>@example.com`) against the live Neon Auth and social server.
 - Suites fail only on page errors. Failed fetches (e.g. routes not deployed yet) are logged but tolerated.
 - WSL without system libnss3: extract the `libnss3`/`libnspr4` debs into `~/.cache/uh-libs` (or set `UH_LIBS`). `UH_CHROME` overrides the Chromium path.
@@ -312,6 +313,19 @@ npm run build:cloud                                # after editing ui/cloud-src.
     - PWA install
     - level-up power icons now visible on phones (solid card fill)
   - **To verify on a real device:** see §2.4.
+
+### 7.1b Phone HUD (`src/hud_layout.rs`)
+- `Game::hud_layout()` gives every HUD piece its place. Desktop keeps the classic layout. Phones (touch, or narrower than 640px, or shorter than 500px) get the **compact** layout:
+  - **Top-left:** level badge + HP bar, ending above the HTML pause/chat row (`top: 52px`).
+  - **Top-right:** a tight wave/remaining/stats/score column. Outbreak shows "ROUND n" (no chalk tallies on phones).
+  - **Status stack:** boss and crystal bars with labels inside, plus a short phase line (`stack_bar`). Full width at y=112 in portrait; centred between the side panels in landscape.
+  - **Under the stack:** teammate cards + kill feed on the left, the minimap on the right (no caption). The tutorial card goes under the minimap.
+  - **Bottom-right thumb cluster** (`#touch-ui`, absolute positions in `ui/style.css`): DASH, ☢ above it, Q diagonally up-left, USE / READY beside DASH. ☢ and Q show charge/cooldown rings from the game's `abil` event (`ult|abilK|cd|icon|active`); the canvas copies are hidden on touch. `CLUSTER_W`/`CLUSTER_H` in `hud_layout.rs` must match the CSS box.
+  - **Siege build bar:** full width above the cluster (portrait), or bottom-centre left of it (landscape). Portal labels are clamped into the free area.
+  - **Outbreak:** points/weapon/perks above the cluster (portrait) or left of it (landscape); power-up timers under the stack.
+  - **Subtitles** (`#subs`) lift above the build bar and the cluster (`body[data-mode]`).
+- A native test (`hud_layout::tests`) checks for overlaps on six phone sizes. The e2e `mobile-hud.mjs` checks portrait, landscape and small phones.
+- Fixed along the way: on short landscape phones (≤400px tall) the Siege portal labels called `f32::clamp` with min > max, which crashed the game.
 
 ### 7.2 Home Base (Destiny-style social hub)
 Files: `modes/hub.rs`, `render_hub.rs`, `assets/maps/hub.json`, the stall UI in `ui/app.js`, `server/vendor.ts`.

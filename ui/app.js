@@ -554,6 +554,8 @@
   let state = 'loading';
   function show(id) {
     for (const o of ['menu', 'pause', 'gameover', 'story', 'auth']) $(o).classList.toggle('show', o === id);
+    // lets CSS keep overlays (subtitles) clear of mode-specific HUD such as the Siege build bar
+    document.body.dataset.mode = id === null ? (runCtx?.mode || '') : '';
     document.body.classList.toggle('playing', id === null);
     document.body.classList.toggle('in-menu', id === 'menu');
   }
@@ -1388,6 +1390,18 @@
         break;
       case 'hubleave': closeStall(true); break;
       case 'hubemote': window.UHCoop?.hubEmote?.(Number(data)); break;
+      case 'abil': {
+        // touch thumb buttons: ultimate charge and class-ability cooldown rings
+        const [ult, ak, cd, icon, active] = String(data).split('|');
+        const u = $('t-ult'), q = $('t-abil');
+        u.style.setProperty('--k', ult);
+        u.classList.toggle('full', Number(ult) >= 1);
+        q.style.setProperty('--k', ak);
+        q.classList.toggle('cooling', Number(cd) > 0);
+        q.classList.toggle('active', active === '1');
+        q.innerHTML = `<span>${esc(icon || 'Q')}</span>${Number(cd) > 0 ? `<b class="cd">${Number(cd)}</b>` : ''}`;
+        break;
+      }
       case 'nemesis': nemesisLine = onNemesisDeath(data); break;
       case 'nemesisslain':
         if (settings.nemesis) { settings.nemesis.slain = true; saveSettings(); }

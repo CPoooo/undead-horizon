@@ -10,6 +10,7 @@ mod content;
 mod coop;
 mod corpses;
 mod game;
+mod hud_layout;
 mod input;
 mod math;
 mod modes;

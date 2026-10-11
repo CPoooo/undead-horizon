@@ -204,33 +204,71 @@ impl Game {
         c.set_text_baseline("alphabetic");
         c.set_stroke_style_str("rgba(0,0,0,0.85)");
         c.set_line_join("round");
-        // crystal bar (top centre)
-        let bw = (w * 0.4).min(440.0);
-        let bx = w * 0.5 - bw * 0.5;
-        let by = if self.zombies.iter().any(|z| z.kind == ZKind::Boss) { 86.0 } else { 34.0 };
-        c.set_font(&format!("800 12px {}", FONT));
-        c.set_fill_style_str("#7ad7ff");
-        outlined(c, &format!("💎 CRYSTAL {} / {}", s.crystal_hp.max(0.0) as i32, s.crystal_max as i32), w * 0.5, by - 6.0, 3.0);
-        c.set_fill_style_str("rgba(0,10,20,0.8)");
-        c.fill_rect(d(bx), d(by), d(bw), 10.0);
-        let k = (s.crystal_hp / s.crystal_max).clamp(0.0, 1.0);
-        c.set_fill_style_str(if k > 0.4 { "#4ab8ff" } else { "#ff5a5a" });
-        c.fill_rect(d(bx + 1.0), d(by + 1.0), d((bw - 2.0) * k), 8.0);
-        // phase line
-        c.set_font(&format!("800 {}px {}", if small { 13 } else { 15 }, FONT));
-        let line = match s.phase {
-            SiegePhase::Build => {
-                let key = if self.input.is_touch { "tap READY" } else { "Enter" };
-                format!("BUILD PHASE {}s · {} when ready", s.build_t.ceil() as i32, key)
+        let lay = self.hud_layout();
+        if lay.compact {
+            // phones: a row in the status stack, under the boss bar if there is one
+            let boss = self.zombies.iter().any(|z| z.kind == ZKind::Boss);
+            let row = boss as usize;
+            let k = (s.crystal_hp / s.crystal_max).clamp(0.0, 1.0);
+            let col = if k > 0.4 { "#3aa8f0" } else { "#ff5a5a" };
+            let flash = s.crystal_flash > 0.0 && (t * 20.0).sin() > 0.0;
+            self.stack_bar(
+                c,
+                &lay,
+                row,
+                "💎 CRYSTAL",
+                &format!("{} / {}", s.crystal_hp.max(0.0) as i32, s.crystal_max as i32),
+                k,
+                if flash { "#ffffff" } else { col },
+                "#e6f6ff",
+                &[0.4, 0.8],
+                false,
+            );
+            let line = match s.phase {
+                SiegePhase::Build => {
+                    let key = if self.input.is_touch { "tap READY" } else { "Enter" };
+                    format!("🔨 BUILD {}s · {}", s.build_t.ceil() as i32, key)
+                }
+                SiegePhase::Combat => format!("⚔ {} enemies left", s.queue.iter().map(|q| q.len()).sum::<usize>() + self.zombies.len()),
+            };
+            let y = lay.stack_y + (row + 1) as f32 * crate::hud_layout::ROW_H + 9.0;
+            c.set_text_align("center");
+            c.set_text_baseline("middle");
+            c.set_font(&format!("800 12px {}", FONT));
+            c.set_stroke_style_str("rgba(0,0,0,0.85)");
+            c.set_fill_style_str(if s.walled_in { "#ff8a8a" } else if s.phase == SiegePhase::Build { "#9cffb8" } else { "#ffb070" });
+            let line = if s.walled_in { format!("{} · paths blocked!", line) } else { line };
+            outlined(c, &line, lay.stack_x + lay.stack_w * 0.5, y, 3.0);
+            c.set_text_baseline("alphabetic");
+        } else {
+            // crystal bar (top centre)
+            let bw = (w * 0.4).min(440.0);
+            let bx = w * 0.5 - bw * 0.5;
+            let by = if self.zombies.iter().any(|z| z.kind == ZKind::Boss) { 86.0 } else { 34.0 };
+            c.set_font(&format!("800 12px {}", FONT));
+            c.set_fill_style_str("#7ad7ff");
+            outlined(c, &format!("💎 CRYSTAL {} / {}", s.crystal_hp.max(0.0) as i32, s.crystal_max as i32), w * 0.5, by - 6.0, 3.0);
+            c.set_fill_style_str("rgba(0,10,20,0.8)");
+            c.fill_rect(d(bx), d(by), d(bw), 10.0);
+            let k = (s.crystal_hp / s.crystal_max).clamp(0.0, 1.0);
+            c.set_fill_style_str(if k > 0.4 { "#4ab8ff" } else { "#ff5a5a" });
+            c.fill_rect(d(bx + 1.0), d(by + 1.0), d((bw - 2.0) * k), 8.0);
+            // phase line
+            c.set_font(&format!("800 {}px {}", if small { 13 } else { 15 }, FONT));
+            let line = match s.phase {
+                SiegePhase::Build => {
+                    let key = if self.input.is_touch { "tap READY" } else { "Enter" };
+                    format!("BUILD PHASE {}s · {} when ready", s.build_t.ceil() as i32, key)
+                }
+                SiegePhase::Combat => format!("{} enemies left", s.queue.iter().map(|q| q.len()).sum::<usize>() + self.zombies.len()),
+            };
+            c.set_fill_style_str(if s.phase == SiegePhase::Build { "#9cffb8" } else { "#ffb070" });
+            outlined(c, &line, w * 0.5, by + 30.0, 3.0);
+            if s.walled_in {
+                c.set_fill_style_str("#ff8a8a");
+                c.set_font(&format!("700 12px {}", FONT));
+                outlined(c, "Every path is walled off: they'll smash through your barricades!", w * 0.5, by + 48.0, 3.0);
             }
-            SiegePhase::Combat => format!("{} enemies left", s.queue.iter().map(|q| q.len()).sum::<usize>() + self.zombies.len()),
-        };
-        c.set_fill_style_str(if s.phase == SiegePhase::Build { "#9cffb8" } else { "#ffb070" });
-        outlined(c, &line, w * 0.5, by + 30.0, 3.0);
-        if s.walled_in {
-            c.set_fill_style_str("#ff8a8a");
-            c.set_font(&format!("700 12px {}", FONT));
-            outlined(c, "Every path is walled off: they'll smash through your barricades!", w * 0.5, by + 48.0, 3.0);
         }
         // mana + build bar
         let bar = self.build_bar();
@@ -293,7 +331,21 @@ impl Game {
             let open = if next >= 5 { s.portals.len() } else if next >= 3 { s.portals.len().min(2) } else { 1 };
             for (k, (p, _)) in s.portals.iter().enumerate() {
                 let sp = v2(w * 0.5, cy) + (*p - self.cam) * self.zoom;
-                let sp = v2(sp.x.clamp(90.0, w - 90.0), sp.y.clamp(160.0, h - 240.0));
+                // keep the label on screen and clear of the HUD: below the status
+                // stack (and the minimap on the right), above the build bar.
+                // (f32::clamp panics if min > max on short screens, hence max/min)
+                let (top, bottom, right) = if lay.landscape {
+                    // the right side is minimap + thumb cluster; the top-left is the pause row
+                    (lay.stack_end.max(92.0) + 14.0, self.build_bar()[0].1 - 34.0, w - crate::hud_layout::CLUSTER_W - 80.0)
+                } else if lay.compact {
+                    let (mx, my, mr) = lay.minimap;
+                    let under_map = sp.x > mx - mr - 80.0;
+                    let top = if under_map { my + mr + 16.0 } else { lay.stack_end + 14.0 };
+                    (top, self.build_bar()[0].1 - 34.0, w - 90.0)
+                } else {
+                    (160.0, h - 240.0, w - 90.0)
+                };
+                let sp = v2(sp.x.max(90.0).min(right.max(90.0)), sp.y.max(top).min(bottom.max(top)));
                 c.set_font(&format!("800 12px {}", FONT));
                 c.set_stroke_style_str("rgba(0,0,0,0.85)");
                 if k < open {

@@ -383,11 +383,23 @@ impl Game {
 
     /// Build bar under the HUD: one button per defense (screen px).
     pub fn build_bar(&self) -> [(f32, f32, f32, f32); 6] {
-        let bw = if self.screen.x < 640.0 { 50.0 } else { 58.0 };
+        let (w, h) = (self.screen.x, self.screen.y);
+        let l = self.hud_layout();
         let gap = 6.0;
+        let (bw, x_mid, y) = if !l.compact {
+            (58.0, w * 0.5, h - 160.0)
+        } else if l.landscape {
+            // bottom centre, left of the thumb cluster
+            let span = w - crate::hud_layout::CLUSTER_W - 24.0;
+            let bw = ((span - 5.0 * gap) / 6.0).min(46.0);
+            (bw, 12.0 + span * 0.5, h - 16.0 - bw)
+        } else {
+            // full width, just above the thumb cluster
+            let bw = ((w - 24.0 - 5.0 * gap) / 6.0).min(52.0);
+            (bw, w * 0.5, h - crate::hud_layout::CLUSTER_H - 14.0 - bw)
+        };
         let total = 6.0 * bw + 5.0 * gap;
-        let x0 = self.screen.x * 0.5 - total * 0.5;
-        let y = self.screen.y - if self.input.is_touch { 200.0 } else { 160.0 };
+        let x0 = x_mid - total * 0.5;
         let mut out = [(0.0, 0.0, 0.0, 0.0); 6];
         for (k, o) in out.iter_mut().enumerate() {
             *o = (x0 + k as f32 * (bw + gap), y, bw, bw);
@@ -998,3 +1010,4 @@ impl ModeHooks for Siege {
         format!("WAVE {}/{}", g.wave.n.max(1), last)
     }
 }
+

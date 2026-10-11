@@ -486,6 +486,23 @@ impl Game {
             self.ready_shown = show_ready;
             self.ui_out.push(("readybtn", if show_ready { "1".into() } else { "0".into() }));
         }
+        // touch: ultimate charge + class ability cooldown for the HTML thumb buttons
+        if self.input.is_touch && !matches!(self.phase, Phase::Menu) {
+            let ch = &crate::content::CHARACTERS[self.character];
+            let ak = 1.0 - (self.ability_cd / ch.cd).clamp(0.0, 1.0);
+            let st = format!(
+                "{:.2}|{:.2}|{}|{}|{}",
+                self.player.ult.clamp(0.0, 1.0),
+                ak,
+                self.ability_cd.max(0.0).ceil() as i32,
+                ch.ability_icon,
+                (self.ability_t > 0.0) as u8
+            );
+            if st != self.abil_shown {
+                self.abil_shown = st.clone();
+                self.ui_out.push(("abil", st));
+            }
+        }
         if show_use != self.use_shown {
             self.use_shown = show_use;
             self.ui_out.push(("usebtn", if show_use { "1".into() } else { "0".into() }));
@@ -494,9 +511,18 @@ impl Game {
             if self.phase == Phase::Playing {
                 let (title, how) = crate::tutorial::STEPS[tu.step.min(crate::tutorial::STEPS.len() - 1)];
                 let font = "'Inter','Segoe UI',system-ui,sans-serif";
-                let bw = (w * 0.9).min(560.0);
-                let x = w * 0.5 - bw * 0.5;
-                let y = if w < 640.0 { 150.0 } else { 96.0 };
+                let lay = self.hud_layout();
+                // phones: landscape in the stack column; portrait under the minimap
+                let (x, y, bw) = if lay.landscape {
+                    (lay.stack_x, lay.stack_end + 4.0, lay.stack_w)
+                } else if lay.compact {
+                    let (_, my, mr) = lay.minimap;
+                    let bw = w - 24.0;
+                    (12.0, my + mr + 10.0, bw)
+                } else {
+                    let bw = (w * 0.9).min(560.0);
+                    (w * 0.5 - bw * 0.5, 96.0, bw)
+                };
                 round_rect(c, x, y, bw, 54.0, 12.0);
                 c.set_fill_style_str("rgba(8,12,22,0.85)");
                 c.fill();
@@ -539,6 +565,50 @@ impl Game {
                 h - 10.0,
             );
         }
+    }
+
+    /// One labelled bar in the compact status stack (boss, crystal, …):
+    /// the label sits inside the bar, left; `tail` inside, right.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stack_bar(&self, c: &Ctx, l: &crate::hud_layout::HudLayout, row: usize, label: &str, tail: &str, k: f32, col: &str, text_col: &str, marks: &[f32], shield: bool) {
+        let font = "'Inter','Segoe UI',system-ui,sans-serif";
+        let (x, y, bw, bh) = (l.stack_x, l.stack_y + row as f32 * crate::hud_layout::ROW_H, l.stack_w, crate::hud_layout::BAR_H);
+        round_rect(c, x, y, bw, bh, 5.0);
+        c.set_fill_style_str("rgba(8,8,16,0.82)");
+        c.fill();
+        if k > 0.0 {
+            round_rect(c, x + 2.0, y + 2.0, ((bw - 4.0) * k).max(4.0), bh - 4.0, 4.0);
+            c.set_fill_style_str(col);
+            c.fill();
+        }
+        c.set_fill_style_str("rgba(255,255,255,0.55)");
+        for f in marks {
+            c.fill_rect(d(x + bw * f), d(y + 2.0), 1.5, d(bh - 4.0));
+        }
+        if shield {
+            c.set_stroke_style_str("#9fdcff");
+            c.set_line_width(2.0);
+            round_rect(c, x - 1.0, y - 1.0, bw + 2.0, bh + 2.0, 6.0);
+            c.stroke();
+        }
+        c.set_text_baseline("middle");
+        c.set_font(&format!("800 11px {}", font));
+        c.set_stroke_style_str("rgba(0,0,0,0.9)");
+        c.set_fill_style_str(text_col);
+        c.set_text_align("left");
+        outlined(c, label, x + 7.0, y + bh * 0.5 + 0.5, 3.0);
+        if !tail.is_empty() {
+            c.set_text_align("right");
+            c.set_font(&format!("700 10px {}", font));
+            outlined(c, tail, x + bw - 7.0, y + bh * 0.5 + 0.5, 3.0);
+        }
+        c.set_text_baseline("alphabetic");
+    }
+
+    /// Compact layout: where teammate cards end and the kill feed starts.
+    pub(crate) fn left_column_y(&self, l: &crate::hud_layout::HudLayout) -> f32 {
+        let cards = self.net.as_ref().map(|n| n.remotes.iter().filter(|r| r.present).count()).unwrap_or(0);
+        l.left_y + cards as f32 * 32.0 + 12.0
     }
 
     // ------------------------------------------------------------- ground
@@ -2413,20 +2483,20 @@ impl Game {
         c.fill_rect(0.0, 0.0, d(w * xk), 2.0);
         c.set_global_alpha(1.0);
 
-        // HP panel
-        let px = 16.0;
-        let py = 20.0;
-        let bw = if small { 150.0 } else { 250.0 };
+        // HP panel (compact on phones: it must end above the HTML pause/chat row at y=52)
+        let lay = self.hud_layout();
+        let (bcx, bcy, br) = if lay.compact { (28.0, 28.0, 16.0) } else { (36.0, 40.0, 20.0) };
+        let bw = lay.hp_w;
         // level badge
         c.set_fill_style_str("#1a1f2e");
-        circle(c, px + 20.0, py + 20.0, 20.0);
+        circle(c, bcx, bcy, br);
         c.set_stroke_style_str("#7ad7ff");
         c.set_line_width(3.0);
         c.begin_path();
         let _ = c.arc(
-            d(px + 20.0),
-            d(py + 20.0),
-            20.0,
+            d(bcx),
+            d(bcy),
+            d(br),
             -PI as f64 / 2.0,
             -PI as f64 / 2.0 + TAU64 * xk as f64,
         );
@@ -2434,28 +2504,31 @@ impl Game {
         c.set_fill_style_str("#e8f6ff");
         c.set_text_align("center");
         c.set_text_baseline("middle");
-        c.set_font(&format!("800 15px {}", font));
-        text(c, &format!("{}", pl.level), px + 20.0, py + 21.0);
-        c.set_font(&format!("700 8px {}", font));
-        c.set_fill_style_str("#7ad7ff");
-        text(c, "LV", px + 20.0, py + 8.0);
+        c.set_font(&format!("800 {}px {}", if lay.compact { 13 } else { 15 }, font));
+        text(c, &format!("{}", pl.level), bcx, bcy + 1.0);
+        if !lay.compact {
+            c.set_font(&format!("700 8px {}", font));
+            c.set_fill_style_str("#7ad7ff");
+            text(c, "LV", bcx, bcy - 12.0);
+        }
 
-        let hx = px + 48.0;
-        let hy = py + 8.0;
-        round_rect(c, hx, hy, bw, 18.0, 5.0);
+        let hx = if lay.compact { 50.0 } else { 64.0 };
+        let hy = if lay.compact { 16.0 } else { 28.0 };
+        let bh = if lay.compact { 16.0 } else { 18.0 };
+        round_rect(c, hx, hy, bw, bh, 5.0);
         c.set_fill_style_str("rgba(10,10,16,0.75)");
         c.fill();
         let gk = (pl.hp_ghost / pl.max_hp).clamp(0.0, 1.0);
         let hk = (pl.hp / pl.max_hp).clamp(0.0, 1.0);
         if gk > 0.0 {
-            round_rect(c, hx + 2.0, hy + 2.0, (bw - 4.0) * gk, 14.0, 4.0);
+            round_rect(c, hx + 2.0, hy + 2.0, (bw - 4.0) * gk, bh - 4.0, 4.0);
             c.set_fill_style_str("#ffe0e0");
             c.fill();
         }
         if hk > 0.0 {
-            round_rect(c, hx + 2.0, hy + 2.0, (bw - 4.0) * hk, 14.0, 4.0);
+            round_rect(c, hx + 2.0, hy + 2.0, (bw - 4.0) * hk, bh - 4.0, 4.0);
             {
-                let g = c.create_linear_gradient(0.0, d(hy), 0.0, d(hy + 18.0));
+                let g = c.create_linear_gradient(0.0, d(hy), 0.0, d(hy + bh));
                 let _ = g.add_color_stop(0.0, "#ff6b7d");
                 let _ = g.add_color_stop(1.0, "#c3122b");
                 c.set_fill_style_canvas_gradient(&g);
@@ -2464,20 +2537,20 @@ impl Game {
         }
         c.set_fill_style_str("#ffffff");
         c.set_stroke_style_str("rgba(0,0,0,0.75)");
-        c.set_font(&format!("700 11px {}", font));
+        c.set_font(&format!("700 {}px {}", if lay.compact { 10 } else { 11 }, font));
         outlined(
             c,
-            &format!("{} / {}", pl.hp.ceil() as i32, pl.max_hp as i32),
+            &format!("❤ {} / {}", pl.hp.ceil() as i32, pl.max_hp as i32),
             hx + bw * 0.5,
-            hy + 9.5,
+            hy + bh * 0.5 + 0.5,
             3.0,
         );
         // dash pips under HP
         let dash_k = 1.0 - (pl.dash_cd / self.dash_cooldown()).clamp(0.0, 1.0);
-        round_rect(c, hx, hy + 22.0, bw * 0.5, 5.0, 2.5);
+        round_rect(c, hx, hy + bh + 4.0, bw * 0.5, 5.0, 2.5);
         c.set_fill_style_str("rgba(10,10,16,0.75)");
         c.fill();
-        round_rect(c, hx, hy + 22.0, bw * 0.5 * dash_k, 5.0, 2.5);
+        round_rect(c, hx, hy + bh + 4.0, bw * 0.5 * dash_k, 5.0, 2.5);
         c.set_fill_style_str(if dash_k >= 1.0 { "#9fc0ff" } else { "#4a5a80" });
         c.fill();
 
@@ -2485,15 +2558,15 @@ impl Game {
         c.set_text_align("right");
         c.set_text_baseline("alphabetic");
         c.set_fill_style_str("#ffffff");
-        c.set_font(&format!("900 {}px {}", if small { 22 } else { 30 }, font));
-        outlined(
-            c,
-            &self.mode.hooks().hud(self),
-            w - 18.0,
-            44.0,
-            5.0,
-        );
-        c.set_font(&format!("600 13px {}", font));
+        // compact (phones): a tighter column that ends above the status stack
+        let cpt = lay.compact;
+        let ry = |desk: f32, phone: f32| if cpt { phone } else { desk };
+        c.set_font(&format!("900 {}px {}", if cpt { 20 } else if small { 22 } else { 30 }, font));
+        let title = self.mode.hooks().hud(self);
+        // Outbreak draws rounds 1-5 as chalk tallies on desktop; phones show the number
+        let title = if title.is_empty() && cpt && self.ob.is_some() { format!("ROUND {}", self.wave.n.max(1)) } else { title };
+        outlined(c, &title, w - 14.0, ry(44.0, 32.0), 5.0);
+        c.set_font(&format!("600 {}px {}", if cpt { 12 } else { 13 }, font));
         c.set_fill_style_str("#c8d2e8");
         let info = if self.hub.is_some() {
             format!("🪙 {} · E to talk · Esc to leave", self.coins)
@@ -2502,7 +2575,7 @@ impl Game {
         } else {
             format!("{} undead remain", self.remaining())
         };
-        outlined(c, &info, w - 18.0, 64.0, 3.0);
+        outlined(c, &info, w - 14.0, ry(64.0, 49.0), 3.0);
         let secs = self.time as u32;
         c.set_fill_style_str("#9aa4bb");
         outlined(
@@ -2514,11 +2587,11 @@ impl Game {
                 secs / 60,
                 secs % 60
             ),
-            w - 18.0,
-            82.0,
+            w - 14.0,
+            ry(82.0, 65.0),
             3.0,
         );
-        if self.best_wave > 0 {
+        if self.best_wave > 0 && !cpt {
             c.set_fill_style_str("#ffd36a");
             c.set_font(&format!("600 11px {}", font));
             outlined(
@@ -2531,7 +2604,7 @@ impl Game {
         }
         if self.combo >= 5 {
             let pulse = 1.0 + 0.08 * (t * 12.0).sin();
-            c.set_font(&format!("900 {}px {}", (22.0 * pulse).round(), font));
+            c.set_font(&format!("900 {}px {}", ((if cpt { 15.0 } else { 22.0 }) * pulse).round(), font));
             let col = if self.combo >= 100 {
                 "#ff4df0"
             } else if self.combo >= 50 {
@@ -2540,7 +2613,7 @@ impl Game {
                 "#ffd34a"
             };
             c.set_fill_style_str(col);
-            outlined(c, &format!("{}× STREAK", self.combo), w - 18.0, 126.0, 4.0);
+            outlined(c, &format!("{}× STREAK", self.combo), w - 14.0, ry(126.0, 99.0), 4.0);
         }
         // score + streak multiplier
         c.set_font(&format!("800 {}px {}", if small { 12 } else { 14 }, font));
@@ -2551,7 +2624,7 @@ impl Game {
         } else {
             format!("{} pts", self.score)
         };
-        outlined(c, &score_line, w - 18.0, if self.combo >= 5 { 146.0 } else { 118.0 }, 3.0);
+        outlined(c, &score_line, w - 14.0, if cpt { 81.0 } else if self.combo >= 5 { 146.0 } else { 118.0 }, 3.0);
 
         // multi-kill callout
         if let Some(co) = &self.callout {
@@ -2574,14 +2647,26 @@ impl Game {
             for (i, f) in self.feed.iter().enumerate() {
                 c.set_global_alpha(d(f.life.min(1.0)));
                 c.set_fill_style_str(f.color);
-                outlined(c, &f.text, 18.0, 84.0 + i as f32 * 18.0, 3.0);
+                let y0 = if cpt { self.left_column_y(&lay) } else { 84.0 };
+                outlined(c, &f.text, 16.0, y0 + i as f32 * 16.0, 3.0);
             }
             c.set_global_alpha(1.0);
             c.set_text_align("right");
         }
 
-        // boss bar
-        if let Some(b) = self.zombies.iter().find(|z| z.kind == ZKind::Boss) {
+        // boss bar: a status-stack row on phones
+        if let (true, Some(b)) = (cpt, self.zombies.iter().find(|z| z.kind == ZKind::Boss)) {
+            let bosses = self.zombies.iter().filter(|z| z.kind == ZKind::Boss).count();
+            let name = if bosses > 1 { format!("{} ×{}", b.boss_var.name(), bosses) } else { b.boss_var.name().to_string() };
+            let tail = if b.rage_t > 1000.0 {
+                format!("P{} · ENRAGED", b.phase.max(1))
+            } else {
+                format!("P{} · enrage {}s", b.phase.max(1), (crate::boss::ENRAGE_T - b.age).max(0.0) as i32)
+            };
+            let k = (b.hp / b.max_hp).clamp(0.0, 1.0);
+            let col = if b.rage_t > 1000.0 { "#ff3a3a" } else { "#d03aff" };
+            self.stack_bar(c, &lay, 0, &format!("☠ {}", name), &tail, k, col, "#ffd6ff", &[0.33, 0.66], b.shield > 0.0);
+        } else if let Some(b) = self.zombies.iter().find(|z| z.kind == ZKind::Boss) {
             let bw2 = (w * 0.45).min(520.0);
             let bx = (w - bw2) * 0.5;
             let by = 40.0;
@@ -2630,82 +2715,85 @@ impl Game {
             outlined(c, &phase_txt, w * 0.5, by + 26.0, 3.0);
         }
 
-        // abilities (bottom centre)
+        // abilities (bottom centre). On touch the HTML thumb buttons show them
+        // (state pushed as the `abil` event), so the canvas copies are skipped.
         let cy = h - 52.0;
         let cx = w * 0.5;
-        // ultimate
-        let uk = pl.ult.clamp(0.0, 1.0);
-        let ready = uk >= 1.0;
-        c.set_fill_style_str("rgba(10,12,20,0.75)");
-        circle(c, cx, cy, 28.0);
-        if ready {
-            let _ = c.set_global_composite_operation("lighter");
-            c.set_global_alpha(d(0.35 + 0.25 * (t * 6.0).sin()));
-            c.set_fill_style_str("#ffcf4a");
-            circle(c, cx, cy, 34.0);
-            let _ = c.set_global_composite_operation("source-over");
-            c.set_global_alpha(1.0);
-        }
-        c.set_stroke_style_str(if ready { "#ffe08a" } else { "#b08a3a" });
-        c.set_line_width(5.0);
-        c.begin_path();
-        let _ = c.arc(
-            d(cx),
-            d(cy),
-            26.0,
-            -PI as f64 / 2.0,
-            -PI as f64 / 2.0 + TAU64 * uk as f64,
-        );
-        c.stroke();
-        c.set_text_align("center");
-        c.set_text_baseline("middle");
-        c.set_font("22px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif");
-        c.set_global_alpha(if ready { 1.0 } else { 0.5 });
-        text(c, "☢️", cx, cy);
-        c.set_global_alpha(1.0);
         if !self.input.is_touch {
-            c.set_font(&format!("800 10px {}", font));
-            c.set_fill_style_str("#ffffff");
-            c.set_stroke_style_str("rgba(0,0,0,0.8)");
-            outlined(c, "R", cx, cy + 38.0, 3.0);
-        }
+            // ultimate
+            let uk = pl.ult.clamp(0.0, 1.0);
+            let ready = uk >= 1.0;
+            c.set_fill_style_str("rgba(10,12,20,0.75)");
+            circle(c, cx, cy, 28.0);
+            if ready {
+                let _ = c.set_global_composite_operation("lighter");
+                c.set_global_alpha(d(0.35 + 0.25 * (t * 6.0).sin()));
+                c.set_fill_style_str("#ffcf4a");
+                circle(c, cx, cy, 34.0);
+                let _ = c.set_global_composite_operation("source-over");
+                c.set_global_alpha(1.0);
+            }
+            c.set_stroke_style_str(if ready { "#ffe08a" } else { "#b08a3a" });
+            c.set_line_width(5.0);
+            c.begin_path();
+            let _ = c.arc(
+                d(cx),
+                d(cy),
+                26.0,
+                -PI as f64 / 2.0,
+                -PI as f64 / 2.0 + TAU64 * uk as f64,
+            );
+            c.stroke();
+            c.set_text_align("center");
+            c.set_text_baseline("middle");
+            c.set_font("22px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif");
+            c.set_global_alpha(if ready { 1.0 } else { 0.5 });
+            text(c, "☢️", cx, cy);
+            c.set_global_alpha(1.0);
+            if !self.input.is_touch {
+                c.set_font(&format!("800 10px {}", font));
+                c.set_fill_style_str("#ffffff");
+                c.set_stroke_style_str("rgba(0,0,0,0.8)");
+                outlined(c, "R", cx, cy + 38.0, 3.0);
+            }
 
-        // class ability (right of the ultimate)
-        let ch = &crate::content::CHARACTERS[self.character];
-        let ax = cx + 64.0;
-        let ay = cy + 6.0;
-        let ak = 1.0 - (self.ability_cd / ch.cd).clamp(0.0, 1.0);
-        let aready = self.ability_cd <= 0.0;
-        c.set_fill_style_str("rgba(10,12,20,0.75)");
-        circle(c, ax, ay, 21.0);
-        if self.ability_t > 0.0 {
-            let _ = c.set_global_composite_operation("lighter");
-            c.set_global_alpha(d(0.4 + 0.3 * (t * 10.0).sin()));
-            c.set_fill_style_str(ch.color);
-            circle(c, ax, ay, 26.0);
-            let _ = c.set_global_composite_operation("source-over");
-            c.set_global_alpha(1.0);
-        }
-        c.set_stroke_style_str(if aready { ch.color } else { "#4a5a70" });
-        c.set_line_width(4.0);
-        c.begin_path();
-        let _ = c.arc(d(ax), d(ay), 19.0, -PI as f64 / 2.0, -PI as f64 / 2.0 + TAU64 * ak as f64);
-        c.stroke();
-        c.set_font("17px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif");
-        c.set_fill_style_str("#ffffff");
-        c.set_global_alpha(if aready { 1.0 } else { 0.45 });
-        text(c, ch.ability_icon, ax, ay);
-        c.set_global_alpha(1.0);
-        if !aready {
-            c.set_font(&format!("800 11px {}", font));
-            c.set_stroke_style_str("rgba(0,0,0,0.85)");
-            outlined(c, &format!("{}", self.ability_cd.ceil() as i32), ax, ay + 1.0, 3.0);
-        }
-        if !self.input.is_touch {
-            c.set_font(&format!("800 10px {}", font));
+            // class ability (right of the ultimate)
+            let ch = &crate::content::CHARACTERS[self.character];
+            let ax = cx + 64.0;
+            let ay = cy + 6.0;
+            let ak = 1.0 - (self.ability_cd / ch.cd).clamp(0.0, 1.0);
+            let aready = self.ability_cd <= 0.0;
+            c.set_fill_style_str("rgba(10,12,20,0.75)");
+            circle(c, ax, ay, 21.0);
+            if self.ability_t > 0.0 {
+                let _ = c.set_global_composite_operation("lighter");
+                c.set_global_alpha(d(0.4 + 0.3 * (t * 10.0).sin()));
+                c.set_fill_style_str(ch.color);
+                circle(c, ax, ay, 26.0);
+                let _ = c.set_global_composite_operation("source-over");
+                c.set_global_alpha(1.0);
+            }
+            c.set_stroke_style_str(if aready { ch.color } else { "#4a5a70" });
+            c.set_line_width(4.0);
+            c.begin_path();
+            let _ = c.arc(d(ax), d(ay), 19.0, -PI as f64 / 2.0, -PI as f64 / 2.0 + TAU64 * ak as f64);
+            c.stroke();
+            c.set_font("17px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif");
             c.set_fill_style_str("#ffffff");
-            c.set_stroke_style_str("rgba(0,0,0,0.8)");
-            outlined(c, "Q", ax, ay + 32.0, 3.0);
+            c.set_global_alpha(if aready { 1.0 } else { 0.45 });
+            text(c, ch.ability_icon, ax, ay);
+            c.set_global_alpha(1.0);
+            if !aready {
+                c.set_font(&format!("800 11px {}", font));
+                c.set_stroke_style_str("rgba(0,0,0,0.85)");
+                outlined(c, &format!("{}", self.ability_cd.ceil() as i32), ax, ay + 1.0, 3.0);
+            }
+            if !self.input.is_touch {
+                c.set_font(&format!("800 10px {}", font));
+                c.set_fill_style_str("#ffffff");
+                c.set_stroke_style_str("rgba(0,0,0,0.8)");
+                outlined(c, "Q", ax, ay + 32.0, 3.0);
+            }
         }
 
         // upgrade tray (bottom-left)
@@ -2828,20 +2916,15 @@ impl Game {
     /// Circular radar: terrain, zombies, pickups and the visible area around the
     /// player, plus red rim arcs showing which directions hordes are coming from
     /// (including zombies beyond radar range).
-    fn draw_minimap(&self, c: &Ctx, w: f32, h: f32, a: f32, t: f32) {
+    fn draw_minimap(&self, c: &Ctx, _w: f32, h: f32, a: f32, t: f32) {
         if !self.show_minimap
             || !matches!(self.phase, Phase::Playing | Phase::LevelUp | Phase::Paused)
         {
             return;
         }
-        let small = w < 640.0;
-        let r = if small { 52.0 } else { 76.0 };
-        // touch: top-right under the wave info (bottom-right holds the touch buttons)
-        let (cx, cy) = if self.input.is_touch {
-            (w - r - 16.0, 140.0 + r)
-        } else {
-            (w - r - 20.0, h - r - 30.0)
-        };
+        // phones: top-right under the status stack (bottom-right holds the thumb cluster)
+        let (cx, cy, r) = self.hud_layout().minimap;
+        let _ = h;
         let centre = v2(cx, cy);
         let range = self.spawn_r * 1.5;
         let k = r / range;
@@ -3076,6 +3159,10 @@ impl Game {
         } else {
             cy - r - 12.0
         };
+        // phones: no caption (it would crowd the thumb cluster / stack)
+        if self.hud_layout().compact {
+            return;
+        }
         let dist = cam.len() / 32.0;
         let label = if self.input.is_touch {
             format!(
@@ -3134,8 +3221,9 @@ impl Game {
     fn draw_coop_hud(&self, c: &Ctx, w: f32, h: f32, t: f32) {
         let Some(n) = &self.net else { return };
         let font = "'Inter','Segoe UI',system-ui,sans-serif";
-        // teammate cards under the HP bar
-        let mut y = 92.0;
+        // teammate cards under the HP bar (phones: under the status stack)
+        let lay = self.hud_layout();
+        let mut y = if lay.compact { lay.left_y } else { 92.0 };
         c.set_text_baseline("middle");
         for r in n.remotes.iter().filter(|r| r.present) {
             let s = &r.state;

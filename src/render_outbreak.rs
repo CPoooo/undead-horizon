@@ -336,7 +336,7 @@ impl Game {
     pub fn draw_outbreak_prompt(&self, c: &Ctx, w: f32, h: f32, cy: f32) {
         let Some(pr) = self.ob_prompt() else { return };
         let sp = v2(w * 0.5, cy) + (pr.pos - self.cam) * self.zoom;
-        let y = (sp.y - 56.0).clamp(80.0, h - 140.0);
+        let y = (sp.y - 56.0).max(80.0).min((h - 140.0).max(80.0));
         c.set_text_align("center");
         c.set_text_baseline("middle");
         c.set_font(&format!("800 {}px {}", if w < 640.0 { 13 } else { 15 }, FONT));
@@ -352,7 +352,9 @@ impl Game {
         let Some(ob) = self.ob.as_ref() else { return };
         // red chalk tally marks for the first five rounds
         let n = self.wave.n.max(1);
-        if n <= 5 {
+        let lay = self.hud_layout();
+        // phones: the round is in the wave title; the tally would sit on it
+        if n <= 5 && !lay.compact {
             let col = if ob.hound_round { "#ff7a1f" } else { "#c81e1e" };
             c.set_stroke_style_str(col);
             c.set_line_cap("round");
@@ -373,9 +375,15 @@ impl Game {
             c.set_line_cap("butt");
         }
         let small = w < 640.0;
-        let right = w - 18.0;
-        // above the minimap (desktop) / the touch buttons (phones)
-        let bottom = if self.input.is_touch { h - 250.0 } else { h - 300.0 };
+        // above the minimap (desktop); above the thumb cluster (phones, portrait);
+        // left of the thumb cluster (phones, landscape)
+        let (right, bottom) = if !lay.compact {
+            (w - 18.0, h - 300.0)
+        } else if lay.landscape {
+            (w - crate::hud_layout::CLUSTER_W - 20.0, h - 86.0)
+        } else {
+            (w - 14.0, h - crate::hud_layout::CLUSTER_H - 96.0)
+        };
         c.set_text_baseline("alphabetic");
         c.set_stroke_style_str("rgba(0,0,0,0.85)");
         c.set_line_join("round");
@@ -408,8 +416,8 @@ impl Game {
         c.set_text_baseline("middle");
         for (k, pk) in ob.perks.iter().enumerate() {
             let (_, icon, col, _) = pk.def();
-            let x = 30.0 + k as f32 * 34.0;
-            let y = 74.0;
+            // phones: a row right-aligned above the points (the HP corner holds the pause row)
+            let (x, y) = if lay.compact { (right - 14.0 - k as f32 * 32.0, bottom - 40.0) } else { (30.0 + k as f32 * 34.0, 74.0) };
             c.set_fill_style_str(col);
             c.begin_path();
             let _ = c.arc(d(x), d(y), 14.0, 0.0, TAU64);
@@ -427,8 +435,9 @@ impl Game {
             timers.push(("✖️", ob.double_t));
         }
         for (k, (icon, left)) in timers.iter().enumerate() {
-            let x = w * 0.5 + (k as f32 - (timers.len() as f32 - 1.0) * 0.5) * 52.0;
-            let y = h - 130.0;
+            let mid = if lay.compact { lay.stack_x + lay.stack_w * 0.5 } else { w * 0.5 };
+            let x = mid + (k as f32 - (timers.len() as f32 - 1.0) * 0.5) * 52.0;
+            let y = if lay.compact { lay.stack_end + 22.0 } else { h - 130.0 };
             let blink = *left > 5.0 || (t * 6.0).sin() > 0.0;
             if !blink {
                 continue;

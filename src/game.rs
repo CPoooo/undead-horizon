@@ -574,6 +574,8 @@ pub struct Game {
     pub candy: u32,
     /// the Nemesis that hunts this player (solo horde runs)
     pub nemesis: Option<crate::nemesis::Nemesis>,
+    /// last ability/ultimate state sent to the touch buttons
+    pub abil_shown: String,
     /// photo mode (free camera while paused)
     pub photo: Option<crate::photo::Photo>,
     /// AI Director: stress-driven spawn pacing (horde modes)
@@ -744,6 +746,7 @@ impl Game {
             late_join: false,
             director: Default::default(),
             photo: None,
+            abil_shown: String::new(),
             nemesis: None,
             event_hollow: false,
             candy: 0,
