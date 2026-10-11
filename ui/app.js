@@ -1185,15 +1185,15 @@
   let proxOn = false;
   setInterval(() => {
     if (state !== 'hub') {
-      if (proxOn) { proxOn = false; window.UHVoice?.setProximity?.({}); }
+      if (proxOn) { proxOn = false; window.UHVoice?.setProximity?.({}); window.UHCoop?.hubLeave?.(); }
       return;
     }
     const mates = window.UHCoop?.hubMates?.() || [];
     // proximity voice: full volume within 250 units, fading to 10% at 1400
     const me = window.UHCoop?.hubAt?.();
+    proxOn = true;
     if (me && window.UHVoice?.setProximity) {
-      proxOn = true;
-      window.UHVoice.setProximity(Object.fromEntries(mates.map((m) => {
+      window.UHVoice.setProximity(Object.fromEntries(mates.filter((m) => m.party).map((m) => {
         const d = Math.hypot(m.x - me.x, m.y - me.y);
         return [m.id, Math.max(0.1, Math.min(1, 1 - (d - 250) / 1150))];
       })));
@@ -1202,7 +1202,7 @@
       // a fresh emote goes to the game once
       const e = m.emote && !m.emote.sent && Date.now() - m.emote.at < 2500 ? m.emote.e : -1;
       if (m.emote) m.emote.sent = true;
-      return [m.name, m.x, m.y, m.aim, m.look.skin, m.look.hat, m.look.gun, e].map((x) => String(x ?? '').replace(/[|~]/g, '')).join('~');
+      return [m.name, m.x, m.y, m.aim, m.look.skin, m.look.hat, m.look.gun, e, m.party ? 1 : 0].map((x) => String(x ?? '').replace(/[|~]/g, '')).join('~');
     }).join('|'));
   }, 300);
   window.UHCoop?.on?.('chat', (m) => { if (state === 'hub' && m.name) send('hubbubble|' + String(m.name).replace(/\|/g, '') + '|' + String(m.text || '').replace(/\|/g, '/')); });

@@ -199,3 +199,18 @@ create index if not exists parties_public_idx on parties (created_at) where publ
 
 -- Home Base Outskirts: last Supply Drop reward (rate limit).
 alter table profiles add column if not exists last_drop timestamptz;
+
+-- Home Base instances: everyone walking the hub, grouped 16 per instance
+-- (party members share one). Rows go stale after a few seconds.
+create table if not exists hub_presence (
+  user_id   text primary key references profiles(user_id) on delete cascade,
+  instance  int not null,
+  x         real not null default 0,
+  y         real not null default 0,
+  aim       real not null default 0,
+  look      jsonb not null default '{}',
+  emote     int,
+  emote_at  timestamptz,
+  at        timestamptz not null default now()
+);
+create index if not exists hub_presence_inst_idx on hub_presence (instance, at);

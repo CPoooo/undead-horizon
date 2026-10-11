@@ -135,7 +135,7 @@ impl Game {
         }
         for m in h.mates.iter() {
             c.set_font(&format!("800 11px {}", FONT));
-            c.set_fill_style_str("#9cffb8");
+            c.set_fill_style_str(if m.party { "#9cffb8" } else { "#cfe3ff" });
             c.set_stroke_style_str("rgba(0,0,0,0.85)");
             outlined(c, &m.name, m.pos.x, m.pos.y - 40.0, 3.0);
             if m.bubble_t > 0.0 {

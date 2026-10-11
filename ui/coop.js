@@ -20,6 +20,7 @@
     party: null,
     pendingLink: null, // { partyId, token } from a ?party= URL
     hubMates: {}, // Home Base: party members walking around (by user id)
+    hubStrangers: {}, // Home Base: other players in our instance (by user id)
     // game transport
     peers: new Map(), // slot -> { pc, u, r, uid, sid }
     sid: null, // current match session id
@@ -168,6 +169,20 @@
         };
         emit('hub', m);
         return; // positions don't need a re-render
+      case 'hub.instance': {
+        // everyone else in our Home Base instance (party members come via 'hub')
+        const now = Date.now();
+        const next = {};
+        for (const x of Array.isArray(m.list) ? m.list : []) {
+          const prev = S.hubStrangers[x.id];
+          const fresh = x.emoteAt && x.emoteAt !== prev?.emoteAt && now - x.emoteAt < 4000;
+          next[x.id] = { name: x.name, x: x.x, y: x.y, aim: x.aim, look: x.look || {}, at: now, emoteAt: x.emoteAt,
+            emote: fresh && Number.isInteger(x.emote) ? { e: x.emote, at: now } : prev?.emote };
+        }
+        S.hubStrangers = next;
+        S.hubInstance = m.instance;
+        return;
+      }
       case 'toast':
         UI().toast(m.msg);
         break;
@@ -948,12 +963,22 @@
     get debug() { return { hostSlot: S.hostSlot || 0, migrations: S.migrations || 0, late: !!S.late, restarts: S.restarts || 0, restart: (slot) => { const p = S.peers.get(slot); if (p) { p.troubleAt = Date.now(); restartIce(p); } }, slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
     inviteLink,
     /** Home Base: share our position with the party, and read theirs */
-    hubPos(x, y, aim) { S.hubAt = { x, y, aim }; if (S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },
+    hubPos(x, y, aim) { S.hubAt = { x, y, aim }; if (S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },
+    get hubInstance() { return S.hubInstance || 0; },
     hubAt: () => S.hubAt,
-    hubEmote(e) { const p = S.hubAt; if (p && S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', ...p, look: look(), emote: e }); },
+    hubEmote(e) { const p = S.hubAt; if (p && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', ...p, look: look(), emote: e }); },
     hubMates() {
       const now = Date.now();
-      return Object.entries(S.hubMates).filter(([, m]) => now - m.at < 3000).map(([id, m]) => Object.assign(m, { id }));
+      const party = Object.entries(S.hubMates).filter(([, m]) => now - m.at < 3000).map(([id, m]) => Object.assign(m, { id, party: true }));
+      const strangers = Object.entries(S.hubStrangers)
+        .filter(([id, m]) => now - m.at < 3000 && !party.some((p) => p.id === id))
+        .map(([id, m]) => Object.assign(m, { id, party: false }));
+      return party.concat(strangers);
+    },
+    hubLeave() {
+      S.hubStrangers = {};
+      S.hubAt = null;
+      if (S.ws?.readyState === 1) wsSend({ t: 'hub.leave' });
     },
   };
 

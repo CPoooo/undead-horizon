@@ -10,10 +10,11 @@
 //   | { t: "party.create"|"party.leave"|"party.start"|"party.end" }
 //   | { t: "party.invite"|"party.kick", id } | { t: "party.join"|"party.decline", partyId }
 //   | { t: "party.ready", ready } | { t: "party.diff", diff } | { t: "party.mode", mode, chapter? } | { t: "party.look", look }
+//   | { t: "hub.pos", x, y, aim, look, emote? } | { t: "hub.leave" }
 //   | { t: "party.public", on } | { t: "party.list", mode? } | { t: "quickplay", mode?, look? }
 //   | { t: "signal", to, data } | { t: "ping" }
 //   | { t: "chat", text } | { t: "party.voice", on } | { t: "block"|"unblock", id } | { t: "report", id, reason, message }
-// Server -> client: hello, social, party, party.start, invite, signal, chat, toast, error, ping, parties
+// Server -> client: hello, social, party, party.start, invite, signal, chat, toast, error, ping, parties, hub, hub.instance
 import { Hono } from "hono";
 import { upgradeWebSocket } from "@neon/functions/hono";
 import { pool, verifyToken, ensureProfile } from "./shared";
@@ -79,6 +80,7 @@ async function poll() {
     if (Date.now() - lastCleanup > 60_000) {
       lastCleanup = Date.now();
       await pool.query("delete from events where created_at < now() - interval '5 minutes'");
+      await pool.query("delete from hub_presence where at < now() - interval '2 minutes'");
       // parties nobody has been online in for a while
       await pool.query(
         `delete from parties p where p.created_at < now() - interval '15 minutes' and not exists (
@@ -279,6 +281,28 @@ async function publicParties(uid: string, mode?: string) {
   return r.rows.filter((x) => x.n < MAX_PARTY);
 }
 
+// Home Base instances (16 players each). Keep our current one while it's live;
+// otherwise join a party member's, else the fullest one with room, else a new one.
+const HUB_CAP = 16;
+const hubSnapAt = new Map<string, number>();
+async function hubInstance(uid: string, party: string[]): Promise<number> {
+  const cur = await pool.query("select instance from hub_presence where user_id = $1 and at > now() - interval '15 seconds'", [uid]);
+  if (cur.rowCount) return cur.rows[0].instance;
+  const mates = party.filter((x) => x !== uid);
+  if (mates.length) {
+    const m = await pool.query("select instance from hub_presence where user_id = any($1) and at > now() - interval '15 seconds' limit 1", [mates]);
+    if (m.rowCount) return m.rows[0].instance;
+  }
+  const open = await pool.query(
+    `select instance, count(*)::int as n from hub_presence where at > now() - interval '15 seconds'
+     group by instance having count(*) < $1 order by n desc, instance limit 1`,
+    [HUB_CAP],
+  );
+  if (open.rowCount) return open.rows[0].instance;
+  const top = await pool.query("select coalesce(max(instance), 0) + 1 as i from hub_presence where at > now() - interval '15 seconds'");
+  return top.rows[0].i;
+}
+
 // ---------------------------------------------------------------- commands
 async function handle(uid: string, msg: any): Promise<void> {
   switch (msg?.t) {
@@ -414,17 +438,45 @@ async function handle(uid: string, msg: any): Promise<void> {
     // Home Base: where you are, relayed to your party (a few times a second)
     case "hub.pos": {
       const pa = await partyOf(uid);
-      if (!pa) return;
       const num = (v: unknown) => (Number.isFinite(Number(v)) ? Math.round(Number(v) * 100) / 100 : 0);
       const look = Object.fromEntries(
         ["skin", "hat", "gun"].map((k) => [k, String(msg.look?.[k] ?? "").slice(0, 20)]),
       );
-      const me = await pool.query("select display_name from profiles where user_id = $1", [uid]);
-      const ids = (await memberIds(pa.id)).filter((id) => id !== uid);
       const emote = Number.isInteger(msg.emote) && msg.emote >= 0 && msg.emote < 32 ? msg.emote : undefined;
-      await notify(ids, { k: "hub", from: uid, name: me.rows[0]?.display_name ?? "?", x: num(msg.x), y: num(msg.y), aim: num(msg.aim), look, emote });
-      return;
+      // party members: low-latency relay through events
+      if (pa) {
+        const me = await pool.query("select display_name from profiles where user_id = $1", [uid]);
+        const ids = (await memberIds(pa.id)).filter((id) => id !== uid);
+        if (ids.length) await notify(ids, { k: "hub", from: uid, name: me.rows[0]?.display_name ?? "?", x: num(msg.x), y: num(msg.y), aim: num(msg.aim), look, emote });
+      }
+      // everyone else in our instance: presence rows, pulled with our own updates
+      const inst = await hubInstance(uid, pa ? await memberIds(pa.id) : []);
+      await pool.query(
+        `insert into hub_presence (user_id, instance, x, y, aim, look, emote, emote_at, at)
+         values ($1, $2, $3, $4, $5, $6, $7, case when $7::int is null then null else now() end, now())
+         on conflict (user_id) do update set instance = excluded.instance, x = excluded.x, y = excluded.y, aim = excluded.aim,
+           look = excluded.look, at = now(),
+           emote = coalesce(excluded.emote, hub_presence.emote), emote_at = coalesce(excluded.emote_at, hub_presence.emote_at)`,
+        [uid, inst, num(msg.x), num(msg.y), num(msg.aim), look, emote ?? null],
+      );
+      const last = hubSnapAt.get(uid) ?? 0;
+      if (Date.now() - last < 450) return;
+      hubSnapAt.set(uid, Date.now());
+      if (hubSnapAt.size > 20_000) hubSnapAt.clear();
+      const r = await pool.query(
+        `select h.user_id as id, p.display_name as name, h.x, h.y, h.aim, h.look, h.emote,
+                (extract(epoch from h.emote_at) * 1000)::bigint as "emoteAt"
+         from hub_presence h join profiles p on p.user_id = h.user_id
+         where h.instance = $1 and h.user_id <> $2 and h.at > now() - interval '6 seconds'
+           and not exists (select 1 from blocks b where (b.user_id = $2 and b.blocked_id = h.user_id) or (b.user_id = h.user_id and b.blocked_id = $2))
+         order by h.at desc limit 24`,
+        [inst, uid],
+      );
+      return sendUser(uid, { t: "hub.instance", instance: inst, list: r.rows.map((x) => ({ ...x, emoteAt: Number(x.emoteAt) || 0 })) });
     }
+    case "hub.leave":
+      await pool.query("delete from hub_presence where user_id = $1", [uid]);
+      return;
     case "party.look": {
       const pa = await partyOf(uid);
       if (!pa) return;

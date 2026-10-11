@@ -46,6 +46,8 @@ pub struct HubMate {
     pub bubble_t: f32,
     pub emote: usize,
     pub emote_t: f32,
+    /// in our party (else a stranger sharing the instance)
+    pub party: bool,
 }
 
 pub struct HubState {
@@ -360,12 +362,12 @@ impl Game {
         }
     }
 
-    /// Hub mates from the social server: name~x~y~aim~skin~hat~gun~emote|...
+    /// Hub mates from the social server: name~x~y~aim~skin~hat~gun~emote~party|...
     /// (emote is an index into `EMOTES` once, when it was just used; else -1)
     pub fn set_hub_mates(&mut self, spec: &str) {
         let Some(h) = self.hub.as_mut() else { return };
         let mut seen = Vec::new();
-        for m in spec.split('|').filter(|s| !s.is_empty()).take(8) {
+        for m in spec.split('|').filter(|s| !s.is_empty()).take(24) {
             let f: Vec<&str> = m.split('~').collect();
             if f.len() < 7 {
                 continue;
@@ -379,6 +381,7 @@ impl Game {
                 crate::content::gun_index(f[6]),
             );
             seen.push(name.clone());
+            let party = f.get(8).is_none_or(|p| *p != "0");
             let emote = f.get(7).and_then(|e| e.parse::<i32>().ok()).filter(|e| *e >= 0).map(|e| (e as usize).min(crate::content::EMOTES.len() - 1));
             match h.mates.iter_mut().find(|x| x.name == name) {
                 Some(x) => {
@@ -387,6 +390,7 @@ impl Game {
                         x.emote_t = 2.5;
                     }
                     x.target = pos;
+                    x.party = party;
                     x.aim = aim;
                     x.skin = skin;
                     x.hat = hat;
@@ -404,6 +408,7 @@ impl Game {
                     gun,
                     bubble: String::new(),
                     bubble_t: 0.0,
+                    party,
                     emote: emote.unwrap_or(0),
                     emote_t: if emote.is_some() { 2.5 } else { 0.0 },
                 }),
@@ -585,6 +590,12 @@ mod tests {
         assert_eq!(m.emote_t, 0.0, "no re-trigger without a new emote");
         g.set_hub_mates("Ann~110~200~0~default~none~pistol~99");
         assert!(g.hub.as_ref().unwrap().mates[0].emote < crate::content::EMOTES.len());
+        // strangers from our instance join party members, up to 24
+        let many: Vec<String> = (0..30).map(|i| format!("P{i}~{}~0~0~default~none~pistol~-1~{}", i * 30, (i == 0) as u8)).collect();
+        g.set_hub_mates(&many.join("|"));
+        let h = g.hub.as_ref().unwrap();
+        assert_eq!(h.mates.len(), 24);
+        assert!(h.mates[0].party && !h.mates[1].party);
     }
 
     #[test]
