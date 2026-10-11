@@ -124,7 +124,7 @@ Not scheduled yet; design notes for when we pick it up.
   - contents: walls as rect/polyline, doors with id/cost/linked zones, spawn windows, props, interactables with type and position
   - collision via `resolve`; rendering in `render.rs::draw_obstacle_base` style
   - Done when a test map loads and the player collides with its walls.
-- [ ] F3 (M) **Mode abstraction.** Replace `campaign: bool` with `enum Mode { Infinite, Campaign(ch), Outbreak(map), Siege(map) }` plus a `ModeHooks` trait:
+- [x] F3 (M) **Mode abstraction.** Replace `campaign: bool` with `enum Mode { Infinite, Campaign(ch), Outbreak(map), Siege(map) }` plus a `ModeHooks` trait:
   - hooks: `on_start`, `update_waves`, `on_kill`, `hud`, `is_over`
   - move the wave and campaign code into `src/modes/{infinite,campaign}.rs`
   - Done when behavior is identical.

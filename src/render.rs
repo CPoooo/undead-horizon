@@ -2,7 +2,7 @@
 //! (tree canopies, rock tops, gravestones) away from the camera centre, so they
 //! parallax as you move — plus soft shadows, depth sorting and dynamic lighting.
 
-use crate::content::{CHAPTERS, GUNS, HATS, SKINS, TRACERS};
+use crate::content::{GUNS, HATS, SKINS, TRACERS};
 use crate::game::*;
 use crate::math::*;
 use crate::upgrades::ALL;
@@ -1649,15 +1649,7 @@ impl Game {
         c.set_font(&format!("900 {}px {}", if small { 22 } else { 30 }, font));
         outlined(
             c,
-            &if self.campaign {
-                format!(
-                    "WAVE {}/{}",
-                    self.wave.n.max(1),
-                    CHAPTERS[self.chapter].waves
-                )
-            } else {
-                format!("WAVE {}", self.wave.n.max(1))
-            },
+            &self.mode.hooks().hud(self),
             w - 18.0,
             44.0,
             5.0,

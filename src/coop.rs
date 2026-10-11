@@ -61,7 +61,7 @@ impl Game {
             }
         }
         self.start(opts);
-        self.campaign = false;
+        self.mode = crate::modes::Mode::Infinite;
         let mut net = Net::new(role, me);
         for slot in 0..MAX_PLAYERS {
             if slot as u8 == me {

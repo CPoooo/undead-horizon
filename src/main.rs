@@ -3,6 +3,7 @@ mod content;
 mod coop;
 mod game;
 mod math;
+mod modes;
 mod net;
 mod render;
 mod render_map;

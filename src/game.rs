@@ -1,6 +1,7 @@
 use crate::audio::{Audio, Sfx, Track};
 use crate::content::{self, BossVar, CHAPTERS, DIFFICULTIES, GUNS};
 use crate::math::*;
+use crate::modes::Mode;
 use crate::net::{self, Net};
 use crate::upgrades::{Levels, Up};
 use crate::world;
@@ -271,7 +272,7 @@ pub struct Grid {
 }
 
 impl Grid {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let n = 80;
         Grid {
             cell: 64.0,
@@ -282,12 +283,12 @@ impl Grid {
             items: Vec::new(),
         }
     }
-    fn cell_xy(&self, p: V2) -> (i32, i32) {
+    pub(crate) fn cell_xy(&self, p: V2) -> (i32, i32) {
         let x = ((p.x - self.origin.x) / self.cell).floor() as i32;
         let y = ((p.y - self.origin.y) / self.cell).floor() as i32;
         (x.clamp(0, self.n - 1), y.clamp(0, self.n - 1))
     }
-    fn build(&mut self, center: V2, zs: &[Zombie]) {
+    pub(crate) fn build(&mut self, center: V2, zs: &[Zombie]) {
         let half = self.n as f32 * self.cell * 0.5;
         self.origin = center - v2(half, half);
         self.start.iter_mut().for_each(|s| *s = 0);
@@ -392,8 +393,9 @@ pub struct Game {
     pub sep: Vec<V2>,
     pub groan_t: f32,
     // mode / loadout / cosmetics
-    pub campaign: bool,
-    pub chapter: usize,
+    pub mode: Mode,
+    /// `chapter=` may arrive before `mode=` in the options string
+    pub pending_chapter: usize,
     pub diff: usize,
     pub gun: usize,
     pub perk: String,
@@ -496,8 +498,8 @@ impl Game {
             fps: 60.0,
             sep: Vec::new(),
             groan_t: 3.0,
-            campaign: false,
-            chapter: 0,
+            mode: Mode::Infinite,
+            pending_chapter: 0,
             diff: 1,
             gun: 0,
             perk: String::new(),
@@ -520,7 +522,7 @@ impl Game {
         g
     }
 
-    fn fresh_player() -> Player {
+    pub(crate) fn fresh_player() -> Player {
         Player {
             pos: V2::ZERO,
             prev: V2::ZERO,
@@ -568,8 +570,21 @@ impl Game {
                     self.player_name = if n.is_empty() { "Survivor".into() } else { n };
                 }
                 "best" => self.best_wave = v.parse().unwrap_or(0),
-                "mode" => self.campaign = v == "campaign",
-                "chapter" => self.chapter = v.parse::<usize>().unwrap_or(0).min(CHAPTERS.len() - 1),
+                "mode" => {
+                    self.mode = match v {
+                        "campaign" => Mode::Campaign(self.chapter()),
+                        "outbreak" => Mode::Outbreak,
+                        "siege" => Mode::Siege,
+                        _ => Mode::Infinite,
+                    }
+                }
+                "chapter" => {
+                    let ch = v.parse::<usize>().unwrap_or(0).min(CHAPTERS.len() - 1);
+                    if let Mode::Campaign(c) = &mut self.mode {
+                        *c = ch;
+                    }
+                    self.pending_chapter = ch;
+                }
                 "diff" => self.diff = content::difficulty_index(v),
                 "gun" => self.gun = content::gun_index(v),
                 "perk" => self.perk = v.to_string(),
@@ -586,11 +601,23 @@ impl Game {
         &DIFFICULTIES[self.diff]
     }
 
+    pub fn is_campaign(&self) -> bool {
+        matches!(self.mode, Mode::Campaign(_))
+    }
+
+    /// Current campaign chapter (0 outside the campaign).
+    pub fn chapter(&self) -> usize {
+        match self.mode {
+            Mode::Campaign(c) => c,
+            _ => self.pending_chapter,
+        }
+    }
+
     /// Wave number used for scaling: campaign chapters start partway up the curve.
     pub fn scale_n(&self) -> u32 {
         let n = self.wave.n.max(1);
-        if self.campaign {
-            CHAPTERS[self.chapter].base + n - 1
+        if self.is_campaign() {
+            CHAPTERS[self.chapter()].base + n - 1
         } else {
             n
         }
@@ -602,6 +629,8 @@ impl Game {
         self.audio.set_track(Track::Gameplay);
         self.best_wave = 0;
         self.map_id.clear();
+        self.mode = Mode::Infinite;
+        self.pending_chapter = 0;
         self.apply_opts(opts);
         self.player = Game::fresh_player();
         let map = world::load_builtin(&self.map_id);
@@ -661,32 +690,8 @@ impl Game {
                 self.player.hp_ghost = self.player.hp;
             }
         }
-        self.banner = Some(if self.campaign {
-            Banner {
-                title: format!("CHAPTER {}", self.chapter + 1),
-                sub: format!(
-                    "{} · {}",
-                    CHAPTERS[self.chapter].title,
-                    self.difficulty().name
-                ),
-                t: 0.0,
-                dur: 3.0,
-                color: "#ffd36a",
-            }
-        } else {
-            Banner {
-                title: "SURVIVE".into(),
-                sub: format!(
-                    "Infinite · {} · {}",
-                    self.difficulty().name,
-                    GUNS[self.gun].name
-                ),
-                t: 0.0,
-                dur: 2.6,
-                color: "#e8f0ff",
-            }
-        });
         self.phase = Phase::Playing;
+        self.mode.hooks().on_start(self);
         self.audio.play(Sfx::UiSelect);
     }
 
@@ -694,7 +699,7 @@ impl Game {
     pub fn dmg_mult(&self) -> f32 {
         (1.0 + 0.25 * self.ups.f(Up::Damage)) * (1.0 + 0.08 * self.ups.f(Up::Velocity))
     }
-    fn fire_interval(&self) -> f32 {
+    pub(crate) fn fire_interval(&self) -> f32 {
         let base = 0.30 * GUNS[self.gun].interval / (1.0 + 0.16 * self.ups.f(Up::FireRate));
         if self.player.frenzy > 0.0 {
             base * 0.5
@@ -702,13 +707,13 @@ impl Game {
             base
         }
     }
-    fn move_speed(&self) -> f32 {
+    pub(crate) fn move_speed(&self) -> f32 {
         255.0 * (1.0 + 0.09 * self.ups.f(Up::Speed)) * GUNS[self.gun].move_mult
     }
     pub fn magnet_r(&self) -> f32 {
         95.0 * (1.0 + 0.45 * self.ups.f(Up::Magnet))
     }
-    fn crit_chance(&self) -> f32 {
+    pub(crate) fn crit_chance(&self) -> f32 {
         0.05 + 0.10 * self.ups.f(Up::Crit)
     }
     pub fn dash_cooldown(&self) -> f32 {
@@ -748,7 +753,7 @@ impl Game {
         self.text(pos, s, color, size);
     }
 
-    fn sfx(&mut self, s: Sfx, at: V2) {
+    pub(crate) fn sfx(&mut self, s: Sfx, at: V2) {
         if self.pending_sfx.len() < 48 {
             self.pending_sfx.push((s, at));
         }
@@ -775,7 +780,7 @@ impl Game {
         self.shake = (self.shake + amt).min(1.0);
     }
 
-    fn text(&mut self, pos: V2, s: String, color: &'static str, size: f32) {
+    pub(crate) fn text(&mut self, pos: V2, s: String, color: &'static str, size: f32) {
         if self.texts.len() > 90 {
             self.texts.remove(0);
         }
@@ -791,7 +796,7 @@ impl Game {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn burst(
+    pub(crate) fn burst(
         &mut self,
         pos: V2,
         n: usize,
@@ -841,7 +846,7 @@ impl Game {
         });
     }
 
-    fn nearest_zombie(&self, p: V2, max_d: f32, exclude: u32) -> Option<usize> {
+    pub(crate) fn nearest_zombie(&self, p: V2, max_d: f32, exclude: u32) -> Option<usize> {
         let mut best = None;
         let mut bd = max_d * max_d;
         self.grid.query(p, max_d, |j| {
@@ -915,7 +920,7 @@ impl Game {
         self.frame_tail(real_dt);
     }
 
-    fn simulate(&mut self, real_dt: f32) {
+    pub(crate) fn simulate(&mut self, real_dt: f32) {
         {
             {
                 let scale = if self.phase == Phase::Dying { 0.3 } else { 1.0 };
@@ -934,7 +939,7 @@ impl Game {
                     }
                 }
                 self.alpha = (self.acc / DT).clamp(0.0, 1.0);
-                if self.victory_t >= 0.0 && self.phase == Phase::Playing {
+                if self.mode.hooks().is_over(self) && self.phase == Phase::Playing {
                     self.victory_t += real_dt;
                     if self.victory_t > 3.2 {
                         self.phase = Phase::GameOver;
@@ -956,7 +961,7 @@ impl Game {
         }
     }
 
-    fn frame_tail(&mut self, real_dt: f32) {
+    pub(crate) fn frame_tail(&mut self, real_dt: f32) {
         if let Some(t) = &mut self.toast {
             t.1 -= real_dt;
             if t.1 <= 0.0 {
@@ -977,7 +982,7 @@ impl Game {
         let _ = self.audio.update_music();
     }
 
-    fn handle_input(&mut self, _dt: f32) {
+    pub(crate) fn handle_input(&mut self, _dt: f32) {
         let pressed = std::mem::take(&mut self.input.pressed);
         let clicks = std::mem::take(&mut self.input.clicks);
         for code in pressed.iter() {
@@ -1173,7 +1178,7 @@ impl Game {
         ]
     }
 
-    fn open_levelup(&mut self) {
+    pub(crate) fn open_levelup(&mut self) {
         let luck = (self.wave.n as f32 * 0.01).min(0.25);
         self.offers = self.ups.roll(&mut self.rng, luck);
         if self.offers.is_empty() {
@@ -1188,7 +1193,7 @@ impl Game {
         self.audio.play(Sfx::LevelUp);
     }
 
-    fn choose(&mut self, i: usize) {
+    pub(crate) fn choose(&mut self, i: usize) {
         if i >= self.offers.len() || self.phase != Phase::LevelUp {
             return;
         }
@@ -1229,7 +1234,7 @@ impl Game {
         }
     }
 
-    fn try_ult(&mut self) {
+    pub(crate) fn try_ult(&mut self) {
         if self.player.ult < 1.0 {
             if self.player.ult < 0.999 {
                 self.toast = Some((
@@ -1244,7 +1249,7 @@ impl Game {
         self.ult_queued = true;
     }
 
-    fn fire_ult(&mut self) {
+    pub(crate) fn fire_ult(&mut self) {
         if self.player.ult < 1.0 {
             return;
         }
@@ -1295,8 +1300,8 @@ impl Game {
             self.time,
             self.best_combo,
             self.coins,
-            if self.campaign { "campaign" } else { "infinite" },
-            self.chapter,
+            self.mode.id(),
+            self.chapter(),
             diff,
             GUNS[self.gun].id,
             self.victory_t >= 0.0
@@ -1353,8 +1358,8 @@ impl Game {
         format!(
             "name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={}",
             self.player_name.replace([';', '=', '|'], ""),
-            if self.campaign { "campaign" } else { "infinite" },
-            self.chapter,
+            self.mode.id(),
+            self.chapter(),
             diff,
             GUNS[self.gun].id,
             self.perk,
@@ -1399,8 +1404,8 @@ impl Game {
                 _ => {}
             }
         }
-        if self.campaign {
-            wave = wave.min(CHAPTERS[self.chapter].waves);
+        if self.is_campaign() {
+            wave = wave.min(CHAPTERS[self.chapter()].waves);
         }
         self.player.xp_next = xp_for(self.player.level);
         self.player.hp = self.player.hp.clamp(1.0, self.player.max_hp);
@@ -1423,7 +1428,7 @@ impl Game {
     }
 
     // ---------------------------------------------------------------- simulation
-    fn step(&mut self) {
+    pub(crate) fn step(&mut self) {
         self.time += DT;
         let coop = self.net.is_some();
         let client = self.is_client();
@@ -1467,7 +1472,7 @@ impl Game {
         }
         self.update_effects();
         if alive_play && !client {
-            self.update_waves();
+            self.mode.hooks().update_waves(self);
         }
         if coop && alive_play {
             self.update_revive();
@@ -1490,7 +1495,7 @@ impl Game {
         }
     }
 
-    fn move_dir(&self) -> V2 {
+    pub(crate) fn move_dir(&self) -> V2 {
         let i = &self.input;
         if i.touch_active {
             return i.touch_move.clamp_len(1.0);
@@ -1511,7 +1516,7 @@ impl Game {
         d.norm()
     }
 
-    fn update_player(&mut self) {
+    pub(crate) fn update_player(&mut self) {
         let mdir = self.move_dir();
         let speed = self.move_speed() * if self.player.downed { 0.25 } else { 1.0 };
         if self.player.downed {
@@ -1630,7 +1635,7 @@ impl Game {
     /// cone around the cursor direction, bend the shot partway toward it
     /// (leading its movement). Strongest when nearly on target, fading to zero
     /// at the cone's edge, so it never fights the player's intent.
-    fn assisted_aim(&self, ppos: V2, raw: f32) -> f32 {
+    pub(crate) fn assisted_aim(&self, ppos: V2, raw: f32) -> f32 {
         const RANGE: f32 = 620.0;
         const BASE_CONE: f32 = 0.14; // ~8 degrees
         const STRENGTH: f32 = 0.5;
@@ -1661,7 +1666,7 @@ impl Game {
         }
     }
 
-    fn update_weapons(&mut self) {
+    pub(crate) fn update_weapons(&mut self) {
         let ppos = self.player.pos;
         // ---- gun
         self.player.fire_cd -= DT;
@@ -1781,7 +1786,7 @@ impl Game {
         }
     }
 
-    fn fire(&mut self) {
+    pub(crate) fn fire(&mut self) {
         let gun = GUNS[self.gun];
         let ppos = self.player.pos;
         let aim = self.player.aim;
@@ -1929,7 +1934,7 @@ impl Game {
         dead
     }
 
-    fn kill_zombie(&mut self, j: usize) {
+    pub(crate) fn kill_zombie(&mut self, j: usize) {
         let (pos, kind, xp, r, fuse_done, uid, killer) = {
             let z = &mut self.zombies[j];
             z.dead = true;
@@ -1994,7 +1999,7 @@ impl Game {
         }
     }
 
-    fn drop_loot(&mut self, pos: V2, kind: ZKind, xp: u32, r: f32, big: bool) {
+    pub(crate) fn drop_loot(&mut self, pos: V2, kind: ZKind, xp: u32, r: f32, big: bool) {
         let bonus = self.wave.n / 4;
         let mut drops = if big { 4 + (r / 10.0) as u32 } else { 1 };
         if kind == ZKind::Boss {
@@ -2035,7 +2040,7 @@ impl Game {
         }
     }
 
-    fn kill_aftermath(&mut self, j: usize, pos: V2, kind: ZKind, fuse_done: bool) {
+    pub(crate) fn kill_aftermath(&mut self, j: usize, pos: V2, kind: ZKind, fuse_done: bool) {
         match kind {
             ZKind::Boss => {
                 self.add_shake(0.8);
@@ -2050,14 +2055,6 @@ impl Game {
                     dur: 2.2,
                     color: "#ff9cff",
                 });
-                let bosses_left = self.wave.boss_pending
-                    || self
-                        .zombies
-                        .iter()
-                        .any(|z| !z.dead && z.kind == ZKind::Boss);
-                if self.campaign && self.wave.n >= CHAPTERS[self.chapter].waves && !bosses_left {
-                    self.campaign_victory();
-                }
             }
             ZKind::Brute => {
                 self.add_shake(0.25);
@@ -2068,9 +2065,10 @@ impl Game {
             }
             _ => {}
         }
+        self.mode.hooks().on_kill(self, kind, pos);
     }
 
-    fn spawn_gem(&mut self, pos: V2, value: u32) {
+    pub(crate) fn spawn_gem(&mut self, pos: V2, value: u32) {
         if self.gems.len() > 420 {
             // merge into a random existing gem to bound the count
             let i = self.rng.below(self.gems.len());
@@ -2090,7 +2088,7 @@ impl Game {
     }
 
     /// `hurts_player`: true for exploder fuses that went off; player-caused kills are safe.
-    fn explode(&mut self, pos: V2, radius: f32, dmg: f32, hurts_player: bool) {
+    pub(crate) fn explode(&mut self, pos: V2, radius: f32, dmg: f32, hurts_player: bool) {
         let mut hits = Vec::new();
         self.grid.query(pos, radius + 50.0, |j| hits.push(j));
         for j in hits {
@@ -2154,7 +2152,7 @@ impl Game {
         }
     }
 
-    fn update_zombies(&mut self) {
+    pub(crate) fn update_zombies(&mut self) {
         let targets = self.targets();
         let wave_n = self.scale_n();
         let mut contacts: Vec<(usize, u8)> = Vec::new();
@@ -2441,7 +2439,7 @@ impl Game {
     }
 
     /// Soft separation so hordes flow around each other instead of stacking.
-    fn separate(&mut self) {
+    pub(crate) fn separate(&mut self) {
         let n = self.zombies.len();
         self.sep.clear();
         self.sep.resize(n, V2::ZERO);
@@ -2497,7 +2495,7 @@ impl Game {
         }
     }
 
-    fn update_bullets(&mut self) {
+    pub(crate) fn update_bullets(&mut self) {
         let mut bullets = std::mem::take(&mut self.bullets);
         let homing = self.ups.get(Up::Homing);
         let expl = self.ups.get(Up::Explosive);
@@ -2580,7 +2578,7 @@ impl Game {
         self.bullets = bullets;
     }
 
-    fn small_blast(&mut self, pos: V2, r: f32, dmg: f32, skip: u32) {
+    pub(crate) fn small_blast(&mut self, pos: V2, r: f32, dmg: f32, skip: u32) {
         let mut hits = Vec::new();
         self.grid.query(pos, r + 50.0, |j| hits.push(j));
         for j in hits {
@@ -2596,7 +2594,7 @@ impl Game {
         self.add_shake(0.04);
     }
 
-    fn update_eshots(&mut self) {
+    pub(crate) fn update_eshots(&mut self) {
         let targets = self.targets();
         let mut hits = Vec::new();
         for (i, s) in self.eshots.iter_mut().enumerate() {
@@ -2621,7 +2619,7 @@ impl Game {
         self.eshots.retain(|s| !s.dead);
     }
 
-    fn update_pickups(&mut self) {
+    pub(crate) fn update_pickups(&mut self) {
         let targets = self.targets();
         let mr = self.magnet_r();
         let mut gained = 0.0;
@@ -2731,7 +2729,7 @@ impl Game {
         }
     }
 
-    fn update_effects(&mut self) {
+    pub(crate) fn update_effects(&mut self) {
         for p in self.particles.iter_mut() {
             p.life -= DT;
             p.pos += p.vel * DT;
@@ -2779,119 +2777,11 @@ impl Game {
         }
     }
 
-    // ---------------------------------------------------------------- waves
-    fn is_boss_wave(&self, n: u32) -> bool {
-        if self.campaign {
-            n == CHAPTERS[self.chapter].waves
-        } else {
-            n % 5 == 0
-        }
-    }
 
-    fn start_wave(&mut self, n: u32) {
-        self.wave.n = n;
-        let lvl = self.scale_n();
-        let w = (lvl - 1) as f32;
-        let base_total = 12.0 + 7.0 * w + w.powf(1.45);
-        let camp = if self.campaign { 0.85 } else { 1.0 };
-        self.wave.total = (base_total * self.difficulty().count * camp) as u32;
-        self.wave.spawned = 0;
-        self.wave.timer = 0.6;
-        let boss = self.is_boss_wave(n);
-        self.wave.boss_pending = boss;
-        self.wave.boss_timer = 2.5;
-        let new_record = !self.campaign && self.best_wave > 0 && n > self.best_wave;
-        let (title, sub) = if self.campaign {
-            let ch = &CHAPTERS[self.chapter];
-            let t = if boss {
-                format!("FINAL WAVE {}/{}", n, ch.waves)
-            } else {
-                format!("WAVE {}/{}", n, ch.waves)
-            };
-            let line = ch.radio.get((n - 1) as usize).copied().unwrap_or("");
-            (t, line.to_string())
-        } else {
-            (
-                if boss {
-                    format!("WAVE {} — BOSS", n)
-                } else {
-                    format!("WAVE {}", n)
-                },
-                if new_record {
-                    "NEW PERSONAL BEST!".into()
-                } else {
-                    format!(
-                        "{} undead approach",
-                        self.wave.total + if boss { 1 } else { 0 }
-                    )
-                },
-            )
-        };
-        self.banner = Some(Banner {
-            title,
-            sub,
-            t: 0.0,
-            dur: if self.campaign { 3.6 } else { 2.4 },
-            color: if boss { "#ff6a8a" } else { "#e8f0ff" },
-        });
-        self.sfx(Sfx::WaveStart, self.player.pos);
-        if let Some(net) = &mut self.net {
-            let total = self.wave.total;
-            net.event(|w| {
-                w.u8(net::E_WAVE_START);
-                w.u16(n.min(u16::MAX as u32) as u16);
-                w.u16((total + boss as u32).min(u16::MAX as u32) as u16);
-                w.u8(boss as u8);
-            });
-        }
-    }
 
-    fn spawn_boss(&mut self, var: BossVar, pos: V2) {
-        self.spawn_zombie(ZKind::Boss, pos);
-        let (hm, r, sm) = var.stats();
-        if let Some(z) = self.zombies.last_mut() {
-            z.boss_var = var;
-            z.hp *= hm;
-            z.max_hp = z.hp;
-            z.r = r;
-            z.speed *= sm;
-            z.special_t = 2.5;
-            if var == BossVar::BloomHeart {
-                z.xp *= 3;
-            }
-        }
-    }
 
-    fn campaign_victory(&mut self) {
-        if self.victory_t >= 0.0 {
-            return;
-        }
-        self.victory_t = 0.0;
-        let bonus = (100.0 * (self.chapter + 1) as f32 * self.difficulty().coins) as u32;
-        self.coins += bonus;
-        // the horde collapses with its master
-        for z in self.zombies.iter_mut() {
-            z.dead = true;
-        }
-        for g in self.gems.iter_mut() {
-            g.magnet = true;
-        }
-        self.eshots.clear();
-        let p = self.player.pos;
-        self.ring(p, 900.0, 1.2, "#ffd36a", 14.0);
-        self.burst(p, 60, 700.0, "#ffd36a", 4.0, 1.0, false, true);
-        self.banner = Some(Banner {
-            title: "CHAPTER COMPLETE".into(),
-            sub: format!("{} · +{} coins", CHAPTERS[self.chapter].title, bonus),
-            t: 0.0,
-            dur: 3.2,
-            color: "#ffd36a",
-        });
-        self.audio.play(Sfx::WaveClear);
-        self.audio.play(Sfx::LevelUp);
-    }
 
-    fn pick_kind(&mut self) -> ZKind {
+    pub(crate) fn pick_kind(&mut self) -> ZKind {
         let n = self.scale_n() as f32;
         let weight = |k: ZKind| {
             let d = k.def();
@@ -2912,7 +2802,7 @@ impl Game {
         ZKind::Walker
     }
 
-    fn spawn_zombie(&mut self, kind: ZKind, pos: V2) {
+    pub(crate) fn spawn_zombie(&mut self, kind: ZKind, pos: V2) {
         let def = kind.def();
         let (hp, speed, r, dmg, xp) = (def.hp, def.speed, def.r, def.dmg, def.xp);
         let n = self.scale_n();
@@ -2972,113 +2862,7 @@ impl Game {
         });
     }
 
-    fn update_waves(&mut self) {
-        if self.victory_t >= 0.0 {
-            return;
-        }
-        if self.wave.intermission > 0.0 {
-            self.wave.intermission -= DT;
-            if self.wave.intermission <= 0.0 {
-                let n = self.wave.n + 1;
-                self.start_wave(n);
-            }
-            return;
-        }
-        let n = self.wave.n;
-        let lvl = self.scale_n();
-        let max_alive = (150 + 8 * lvl).min(340);
-        let alive = self.alive();
-        self.wave.timer -= DT;
-        if self.wave.spawned < self.wave.total && self.wave.timer <= 0.0 && alive < max_alive {
-            let interval = (1.1 - lvl as f32 * 0.045).max(0.22) / self.difficulty().count;
-            self.wave.timer = interval * self.rng.range(0.7, 1.3);
-            let gmax = 3 + lvl / 2;
-            let g =
-                (2 + self.rng.below(gmax as usize) as u32).min(self.wave.total - self.wave.spawned);
-            let targets = self.targets();
-            let (_, ppos, pv) = targets[self.rng.below(targets.len())];
-            let a = if pv.len2() > 900.0 && self.rng.chance(0.4) {
-                pv.angle() + self.rng.range(-0.7, 0.7)
-            } else {
-                self.rng.angle()
-            };
-            let base = ppos + V2::from_angle(a) * self.spawn_r;
-            for _ in 0..g {
-                let k = self.pick_kind();
-                let p = base + self.rng.unit() * self.rng.range(0.0, 70.0);
-                self.spawn_zombie(k, p);
-            }
-            self.wave.spawned += g;
-        }
-        if self.wave.boss_pending {
-            self.wave.boss_timer -= DT;
-            if self.wave.boss_timer <= 0.0 {
-                self.wave.boss_pending = false;
-                let (var, twin) = if self.campaign {
-                    let ch = &CHAPTERS[self.chapter];
-                    (ch.boss, ch.twin)
-                } else {
-                    let i = ((n / 5).max(1) - 1) as usize % content::INFINITE_BOSSES.len();
-                    (content::INFINITE_BOSSES[i], false)
-                };
-                let a = self.rng.angle();
-                let center = self.targets()[0].1;
-                let p = center + V2::from_angle(a) * (self.spawn_r - 40.0);
-                self.spawn_boss(var, p);
-                if let Some(net) = &mut self.net {
-                    net.event(|w| {
-                        w.u8(net::E_BOSS);
-                        w.u8(var as u8);
-                    });
-                }
-                if twin {
-                    let p2 = center + V2::from_angle(a + PI) * (self.spawn_r - 40.0);
-                    self.spawn_boss(var, p2);
-                }
-                self.toast = Some((var.name().to_string(), 2.5));
-                self.sfx(Sfx::BossRoar, self.player.pos);
-                self.add_shake(0.5);
-            }
-        }
-        if self.wave.spawned >= self.wave.total && !self.wave.boss_pending && alive == 0 && n > 0 {
-            self.wave_cleared();
-        } else if n == 0 {
-            self.wave.intermission = 0.01;
-        }
-    }
 
-    fn wave_cleared(&mut self) {
-        self.wave.intermission = 3.5;
-        for g in self.gems.iter_mut() {
-            g.magnet = true;
-        }
-        let heal = self.player.max_hp * 0.1;
-        if self.player_alive() {
-            self.player.hp = (self.player.hp + heal).min(self.player.max_hp);
-        }
-        let earned = ((10 + 5 * self.scale_n()) as f32 * self.difficulty().coins) as u32;
-        self.coins += earned;
-        if let Some(net) = &mut self.net {
-            let n = self.wave.n;
-            net.event(|w| {
-                w.u8(net::E_WAVE_CLEAR);
-                w.u16(n.min(u16::MAX as u32) as u16);
-                w.u16(earned.min(u16::MAX as u32) as u16);
-            });
-        }
-        self.banner = Some(Banner {
-            title: format!("WAVE {} CLEARED", self.wave.n),
-            sub: format!(
-                "+{} coins · +{} HP · next wave incoming",
-                earned, heal as i32
-            ),
-            t: 0.0,
-            dur: 2.6,
-            color: "#9cffb8",
-        });
-        self.sfx(Sfx::WaveClear, self.player.pos);
-        self.ui_out.push(("wave", format!("{}", self.wave.n)));
-    }
 }
 
 #[cfg(test)]
@@ -3090,7 +2874,7 @@ mod tests {
     /// killed zombies its indices could run past the end of `zombies` (panic,
     /// seen in the browser as `RuntimeError: unreachable`).
     #[test]
-    fn ultimate_while_bullets_are_killing_never_uses_stale_grid() {
+    pub(crate) fn ultimate_while_bullets_are_killing_never_uses_stale_grid() {
         for seed in 1..=20u64 {
             let mut g = Game::new(seed);
             g.phase = Phase::Playing;
@@ -3133,7 +2917,7 @@ mod tests {
     }
 
     #[test]
-    fn enemy_table_drives_spawns() {
+    pub(crate) fn enemy_table_drives_spawns() {
         let mut g = Game::new(7);
         g.phase = Phase::Playing;
         // wave 1 only spawns walkers; later waves unlock kinds by `min_wave`
@@ -3155,5 +2939,29 @@ mod tests {
             assert_eq!(g.zombies[0].r, k.def().r);
             assert_eq!(ZKind::from_u8(k as u8), k);
         }
+    }
+
+    #[test]
+    fn modes_parse_and_dispatch() {
+        let mut g = Game::new(3);
+        g.start("mode=campaign;chapter=2;diff=rookie");
+        assert_eq!(g.mode, Mode::Campaign(2));
+        g.start("chapter=3;mode=campaign");
+        assert_eq!(g.mode, Mode::Campaign(3));
+        assert_eq!(g.chapter(), 3);
+        g.wave.n = 4;
+        assert_eq!(g.mode.hooks().hud(&g), format!("WAVE 4/{}", CHAPTERS[3].waves));
+        g.start("diff=rookie");
+        assert_eq!(g.mode, Mode::Infinite);
+        assert_eq!(g.mode.hooks().hud(&g), "WAVE 1");
+        // campaign clears on the final boss
+        g.start("mode=campaign;chapter=0");
+        let last = CHAPTERS[0].waves;
+        g.wave.n = last;
+        g.wave.boss_pending = false;
+        g.spawn_boss(CHAPTERS[0].boss, v2(300.0, 0.0));
+        g.grid.build(g.player.pos, &g.zombies);
+        g.damage_zombie(0, 1.0e9, v2(1.0, 0.0), 0.0, false);
+        assert!(g.victory_t >= 0.0, "final boss kill wins the chapter");
     }
 }
