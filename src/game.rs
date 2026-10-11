@@ -13,7 +13,7 @@ use std::f32::consts::{PI, TAU};
 pub const DT: f32 = 1.0 / 120.0;
 pub const PR: f32 = 16.0; // player radius
 /// Save-string format version (`v=`). Older saves (no `v`) still load.
-pub const SAVE_VERSION: u32 = 2;
+pub const SAVE_VERSION: u32 = 3;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Phase {
@@ -2077,18 +2077,16 @@ impl Game {
 
     /// Serialise the run so it can be resumed later (from the start of the current wave).
     pub fn save_string(&self) -> String {
-        let wave = if self.wave.intermission > 0.0 {
-            self.wave.n + 1
-        } else {
-            self.wave.n.max(1)
-        };
+        let wave = self.save_wave();
         let ups: Vec<String> = self.ups.0.iter().map(|l| l.to_string()).collect();
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={};score={};charges={},{},{};ban={};evo={};char={}",
+            "v={};name={};mode={};map={};variant={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={};score={};charges={},{},{};ban={};evo={};char={}",
             SAVE_VERSION,
             self.player_name.replace([';', '=', '|'], ""),
             self.mode.id(),
+            self.map_id.replace([';', '='], ""),
+            self.variant.replace([';', '='], ""),
             self.chapter(),
             diff,
             GUNS[self.gun].id,
@@ -2120,7 +2118,7 @@ impl Game {
                 .collect::<Vec<_>>()
                 .join(","),
             content::CHARACTERS[self.character].id
-        )
+        ) + &self.mode_save_fields()
     }
 
     /// Version stamped into a save string (0 = pre-versioning).
@@ -2191,6 +2189,8 @@ impl Game {
         self.ult_ready_played = self.player.ult >= 1.0;
         self.wave.n = wave - 1;
         self.wave.intermission = 2.0;
+        // Outbreak / Siege: points, guns, perks, doors, defenses, crystal…
+        self.restore_mode_save(data);
         self.banner = Some(Banner {
             title: "RUN RESUMED".into(),
             sub: format!(

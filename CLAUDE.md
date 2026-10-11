@@ -17,7 +17,8 @@ Legend:
 
 | Area | Feature | State |
 |---|---|---|
-| Core | Infinite mode, Campaign (5 chapters), 4 difficulties, loadouts, shop, locker, save slots | ✅ |
+| Core | Infinite mode, Campaign (5 chapters), 4 difficulties, loadouts, shop, locker | ✅ |
+| Core | Save & resume: **one save per game type** (Infinite, Campaign, Outbreak, Siege); a new save of a type replaces only that type's save | ✅ for guests and for signed-in Infinite/Campaign; 🟡 signed-in Outbreak/Siege slots (server deploy) |
 | Core | Combat depth: evolutions, chests, elements, elite affixes, 5 new archetypes, Boss 2.0, characters/abilities, projectile pressure | ✅ |
 | Core | Outbreak mode (2 maps, points, doors, box, perks, power, upgrade machine, power-ups, hounds, traps, buildables, easter egg) | ✅ (its leaderboard 🟡) |
 | Core | Siege mode (3 maps, 6 defenses ×3 tiers, mana, stars, Glass variant) | ✅ |
@@ -70,6 +71,7 @@ Legend:
    - hub emotes + `hub_presence` instances
    - event candy in `/runs`
    - the leaderboard test-account filter
+   - Outbreak + Siege save slots (`saves_slot_check` widened; `PUT /save` accepts the four types)
 2. **AI vendors**: add `ANTHROPIC_API_KEY` to `.env.local` before deploying (`neon.ts` already passes it). Without it, vendors use canned lines.
 3. **TURN**: Metered's free plan allows 10 live credentials (4h expiry), and the server mints one per isolate when `METERED_API_KEY` is unset. If friends can't connect and `/turn` logs "Maximum credential limit reached", either set `METERED_API_KEY` or make `/turn` reuse an existing credential (`GET https://<app>.metered.live/api/v2/turn/credentials?secretKey=`).
 4. **Real iPhone pass** (Safari + home-screen PWA):
@@ -93,14 +95,14 @@ Legend:
 trunk serve --release                              # local dev at http://127.0.0.1:8080
 trunk build --release                              # production bundle in dist/
 cargo build --target wasm32-unknown-unknown        # fast type-check (must have no warnings)
-cargo test --release                               # native sim tests (53 as of 2026-10-11)
+cargo test --release                               # native sim tests (55 as of 2026-10-11)
 for f in ui/*.js; do node --check "$f"; done       # JS syntax check
 npm run build:cloud                                # after editing ui/cloud-src.js (CI also does it)
 ```
 
 **End-to-end (Playwright, real Chromium):**
 - First serve `dist/` on :8765 with `cd dist && python3 -m http.server 8765`, then run `npm run e2e`.
-- Suites, in order: `turn`, `coop`, `chat-voice`, `outbreak`, `hub`, `career`, `photo`, `nemesis`, `event`, `mobile-hud`. Shared helpers are in `tests/e2e/lib.mjs`. Screenshots go to `tests/e2e/out/`.
+- Suites, in order: `turn`, `coop`, `chat-voice`, `outbreak`, `hub`, `career`, `photo`, `nemesis`, `event`, `mobile-hud`, `saves`. Shared helpers are in `tests/e2e/lib.mjs`. Screenshots go to `tests/e2e/out/`.
 - `coop`, `chat-voice` and `turn` sign up fresh accounts (`uh-test-<name>-<ts>@example.com`) against the live Neon Auth and social server.
 - Suites fail only on page errors. Failed fetches (e.g. routes not deployed yet) are logged but tolerated.
 - WSL without system libnss3: extract the `libnss3`/`libnspr4` debs into `~/.cache/uh-libs` (or set `UH_LIBS`). `UH_CHROME` overrides the Chromium path.
@@ -121,11 +123,13 @@ npm run build:cloud                                # after editing ui/cloud-src.
 | File | What |
 |---|---|
 | `main.rs` | Browser bootstrap, input listeners, rAF loop, the JS bridge (`uhPoll` JS→Rust command queue, `uhEvent` Rust→JS notifications, `uhNetSend`/`uhNetPoll` for co-op bytes) and the command dispatch (incl. `dev|`). |
-| `game.rs` | The core sim (~4.9k lines; `grep -n` anchors, never read it whole). Fixed 120 Hz step (`DT`) with render interpolation (`prev`/`pos`); phases Menu/Playing/LevelUp/Paused/Dying/GameOver; player, zombies, weapons, powers, pickups, spatial hash `Grid`, `apply_opts`, `stats_json`, saves (`SAVE_VERSION` 2). |
+| `game.rs` | The core sim (~4.9k lines; `grep -n` anchors, never read it whole). Fixed 120 Hz step (`DT`) with render interpolation (`prev`/`pos`); phases Menu/Playing/LevelUp/Paused/Dying/GameOver; player, zombies, weapons, powers, pickups, spatial hash `Grid`, `apply_opts`, `stats_json`, saves (`SAVE_VERSION` 3). |
 | `modes/` | `Mode` enum + `ModeHooks` (`on_start`, `update_waves`, `on_kill`, `hud`, `is_over`). `infinite.rs`, `campaign.rs`, `horde.rs` (shared wave spawner, boss waves, chapter victory), `outbreak.rs`, `siege.rs`, `hub.rs` (Home Base + Outskirts). |
 | `content.rs` | Data tables: `ENEMIES` (15 kinds), `GUNS`, `DIFFICULTIES`, `CHAPTERS`, bosses, skins/hats/tracers/packs/killfx/deathfx/emotes, mutators. Ids are shared with the UI catalog. |
 | `coop.rs` / `net.rs` | Co-op: authority model, wire format (`PROTOCOL` 14), snapshots, replicas, hit reporting, kill credit, shared XP, revive, events, late join sync, checkpoints, host migration. |
 | `director.rs` | AI Director pacing. |
+| `save_modes.rs` | Outbreak/Siege save + restore (one save per game type). |
+| `hud_layout.rs` | Where HUD pieces go (desktop vs compact phone layout). |
 | `nemesis.rs` | Nemesis system. |
 | `photo.rs` | Photo mode camera + overlays. |
 | `upgrades.rs`, `chest.rs`, `status.rs`, `elites.rs`, `boss.rs`, `abilities.rs` | Level-up powers + evolutions, chests, elements, affixes, Boss 2.0, character abilities. |
@@ -301,7 +305,15 @@ npm run build:cloud                                # after editing ui/cloud-src.
   - Friends (codes, requests, presence).
   - Parties: up to 4 (server deploy pending; 3 live), ready checks, host-set difficulty and mode, and a shareable invite link via the native share sheet on phones.
   - Party members stand in your lobby.
-- [x] 11. **Save slots**: one Infinite and one Campaign save. A new run of a mode overwrites that mode's save (tooltips warn).
+- [x] 11. **Save slots: one per game type.** Infinite, Campaign, Outbreak and Siege each have their own slot, and they coexist.
+  - **Overwriting:** saving a type (Save, or Save & quit, in the pause menu) replaces that type's save only. Starting a new run of a type discards that type's save. Tooltips on Play and Save say which save would be overwritten.
+  - **Resuming:** a save resumes once (it's consumed), at the start of the current round/wave. The lobby shows one "⏯ Continue … run" button per saved type, with the selected mode's first.
+  - **What's saved:**
+    - common: `save_string`, `SAVE_VERSION` 3 (map + variant included)
+    - Outbreak (`src/save_modes.rs`): points, guns (mag/reserve/upgraded), perks, opened doors, power, box position, self-revives, hound timing, shield parts / easter-egg progress
+    - Siege: mana, crystal health, every defense (kind, position, tier, health); it resumes in the build phase before the next wave
+  - **Not saved:** co-op games and the Home Base (Save is disabled there). Guests save in localStorage; signed-in players save in the `saves` table (primary key `(user_id, slot)`).
+  - **Tests:** `save_modes::tests` (round-trips) and the `saves.mjs` e2e.
 - [x] 12. **Lobby music picker**: 4 procedural tunes (`audio.rs` `LOBBY_TUNES`), cycled with 🎵.
 - [ ] 13. **Safari and mobile.** Layouts, touch and the PWA are done; a real-device iOS pass is still open (see §2.4).
   - **Done:**
@@ -539,7 +551,72 @@ Files: `modes/hub.rs`, `render_hub.rs`, `assets/maps/hub.json`, the stall UI in 
 - **CORS:** the allowlist is in `server/index.ts`. Auth trusted domains are managed with `neon neon-auth domain list|add` (https://cpoooo.github.io is added).
 - **Auth emails/Google:** Neon's shared SMTP and dev OAuth for now. Production should configure its own (https://neon.com/docs/auth/production-checklist.md).
 
-## 9. Known issues & caveats
+## 9. Application state (snapshot, 2026-10-11)
+
+- **Size:** about 23.4k lines of Rust (game), 4.5k of UI JS/CSS, 1.8k of server TS/SQL.
+- **Tests:** 55 native tests and 12 Playwright e2e suites (`npm run e2e`), all passing.
+- **Live:** GitHub Pages serves the latest `main` (static WASM + JS). Everything client-side is live.
+- **Backend:** one Neon project (Postgres + Managed Auth + one Functions app with HTTP API and WebSocket social server). The deployed function **lags the repo**: see §2 item 1 for everything waiting on `npm run db:schema && npm run deploy:api`.
+- **Data:** roughly 120 runs, mostly from e2e test accounts (hidden from leaderboards after the deploy). There are no real-money purchases; coins are earned only.
+- **Multiplayer:** peer-to-peer WebRTC (host-authoritative star, up to 4 players) with Metered TURN on the free plan. The social server relays lobby, chat, signalling and hub presence.
+- **Open:** a real-device iOS pass (§2.4); Settings toggle for touch controls (Auto/On/Off); backlog in §7.5.
+
+## 10. Scaling plan (for future reference)
+
+What breaks first as players grow, and what to do about it. The tiers are rough guides; measure before acting (Neon dashboard, `client_errors`, function logs).
+
+### Where the limits are today
+- **Social fan-out by polling:** every function isolate polls the `events` table every 250 ms (`server/social.ts`), and every notification is a row per recipient. Load grows with isolates × poll rate plus messages × recipients.
+- **Hub presence writes:** each player in the Home Base upserts `hub_presence` about 4×/s, and reads a snapshot up to 2×/s. 1,000 players in the hub means about 4,000 writes/s on the primary.
+- **Leaderboards:** computed per request with `distinct on (user_id)` over `runs` (indexed, but it grows with every run). `/leaderboard` is public and uncached.
+- **P2P co-op:** quality depends on the host's device and upload; there's no anti-cheat beyond server caps on rewards. TURN is on Metered's free plan (10 live credentials).
+- **AI vendors:** each uncached line is a Claude call. Per-caller and per-isolate hourly caps exist, but there is no global budget across isolates.
+- **Operations:** one production branch; the schema is an idempotent SQL file with no migration history; there's no staging environment and no alerting.
+
+### Tier 1: hundreds of concurrent players (cheap, do first)
+1. **Leaderboards:**
+   - Keep a `best_runs` table (one row per user × board) upserted in `/runs`, and read boards from it.
+   - Add `Cache-Control: public, s-maxage=10` on `/leaderboard`, and slow the client's 5s refresh to 15–30s.
+2. **Connections:** use the Neon pooled connection string for functions; keep `pg` pools small per isolate.
+3. **Hygiene:**
+   - Cron-delete `events` older than 5 min (done in poll today) and stale `hub_presence`/`presence` rows.
+   - Add a `runs (user_id, mode)` index.
+   - Archive runs older than 90 days to a summary table.
+4. **TURN:** move to a paid Metered plan or Cloudflare Calls TURN, and reuse credentials per user instead of minting per isolate.
+5. **AI cost guard:**
+   - A global daily budget row in Postgres, checked before calling Claude.
+   - Cache more lines (the reuse pool), and use a smaller model (Haiku) for greet/browse events.
+6. **Staging:** a Neon branch per PR (Neon branching) plus a preview Pages deploy, with `npm run e2e` in CI against it.
+
+### Tier 2: thousands of concurrent players
+1. **Realtime layer:** replace `events` polling with a push transport. The options, in order of effort:
+   - Postgres `LISTEN/NOTIFY` (one listener per isolate).
+   - Redis/Upstash pub/sub.
+   - A managed realtime service (Ably / Pusher / Cloudflare Durable Objects).
+   The client protocol (`{t:…}` messages) can stay the same.
+2. **Hub presence out of Postgres:** keep positions in Redis (or Durable Objects per instance) with TTL keys, and broadcast instance snapshots from there. Assign instances in that store too.
+3. **Read scaling:** a Neon read replica for leaderboards, profiles reads and the Career tab; writes stay on the primary.
+4. **Matchmaking:** move Quick Play from a SQL scan to a queue (Redis sorted sets by mode/region/skill) and add region tags to parties.
+5. **Observability:**
+   - Structured logs, an error tracker (e.g. Sentry) next to `/errors`, and dashboards for p95 latency, socket counts and DB CPU.
+   - Alerting on 5xx rate and TURN failures.
+6. **Schema migrations:** switch `schema.sql` to numbered migrations (e.g. `node-pg-migrate`/`dbmate`) with history, and keep PITR backups enabled.
+
+### Tier 3: tens of thousands and up / competitive play
+1. **Authoritative servers** for public matches: run the Rust sim headless (it's already deterministic per step and has a native build) on regional game servers (e.g. Fly.io / Agones on Kubernetes). Keep P2P for friend parties. This also gives anti-cheat for leaderboards.
+2. **Run validation:** have clients upload compact input/replay logs for top leaderboard runs and re-simulate them server-side before ranking.
+3. **Data pipeline:**
+   - Partition `runs` by month.
+   - Stream to a warehouse (logical replication → BigQuery/ClickHouse) for balance telemetry instead of SQL views on the primary.
+4. **Global edge:** keep static assets on a CDN (Pages/Cloudflare) with hashed filenames (trunk already does this) and long cache times. Put the API behind a CDN/WAF with per-IP rate limits.
+5. **Accounts and trust & safety:**
+   - Production SMTP and OAuth credentials (§8).
+   - Abuse reporting review tools for `reports`/`blocks`.
+   - Chat moderation beyond the word list (a moderation API).
+   - Age/region compliance as needed.
+6. **Team process:** load tests (k6 on the API and socket), chaos tests for host migration, a release train with feature flags (the Season/Event configs already work like content flags).
+
+## 11. Known issues & caveats
 - **TURN:** the Metered credential cap (see §2.3).
 - **Pending deploy:** many signed-in features wait on the deploy (see §1).
 - **AI vendors** are untested against the live Claude API locally: there's no local key, but the code typechecks against SDK 0.133.

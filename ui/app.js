@@ -185,7 +185,7 @@
       'pack:pack', 'killfx:default', 'deathfx:default', 'emote:wave'],
     equipped: { gun: 'pistol', perk: 'none', skin: 'default', hat: 'none', tracer: 'default', char: 'rook', pack: 'pack', killfx: 'default', deathfx: 'default', emote: 'wave' },
     campaign: { unlocked: 0, cleared: [] },
-    saves: { infinite: null, campaign: null },
+    saves: { infinite: null, campaign: null, outbreak: null, siege: null },
     stats: { runs: 0, kills: 0, bestWave: 0 },
     progress: window.UHProg.fresh(),
   });
@@ -197,7 +197,7 @@
     p.stats = Object.assign({ runs: 0, kills: 0, bestWave: 0 }, p.stats || {});
     p.progress = window.UHProg.normalize(p.progress);
     // older builds had a single save slot
-    p.saves = Object.assign({ infinite: null, campaign: null }, p.saves || {});
+    p.saves = Object.assign({ infinite: null, campaign: null, outbreak: null, siege: null }, p.saves || {});
     if (p.save) {
       p.saves[p.save.summary?.mode === 'campaign' ? 'campaign' : 'infinite'] = p.save;
       delete p.save;
@@ -206,6 +206,11 @@
     return p;
   };
 
+  // one save slot per game type; a new save of a type replaces that type's save only
+  const SAVE_SLOTS = ['infinite', 'campaign', 'outbreak', 'siege'];
+  const SLOT_LABEL = { infinite: 'Infinite', campaign: 'Campaign', outbreak: 'Outbreak', siege: 'Siege' };
+  const slotOf = (mode) => (SAVE_SLOTS.includes(mode) ? mode : 'infinite');
+  const MAP_NAME = { asylum: 'Hollowbrook Asylum', refinery: 'Ashfall Refinery', keep: 'The Last Keep', bridge: 'River Crossing', crossroads: 'The Crossroads' };
   const cmpScore = (a, b) => b.wave - a.wave || b.level - a.level || b.kills - a.kills || a.time - b.time;
   const localProfile = () => normalizeProfile(store.get(PROFILE_KEY, null));
   const OB_KEY = 'undeadHorizon.outbreakBoard.v1';
@@ -385,9 +390,9 @@
       this.persistLocal();
       return true;
     },
-    /** Each mode has its own slot; saving overwrites that slot only. */
+    /** Each game type has its own slot (SAVE_SLOTS); saving overwrites that slot only. */
     async putSave(data, summary) {
-      const slot = summary.mode === 'campaign' ? 'campaign' : 'infinite';
+      const slot = slotOf(summary.mode);
       if (this.cloud) {
         const r = await this.cloud.api('/save', { method: 'PUT', body: { data, summary } });
         this.profile.saves[slot] = { summary: r.summary };
@@ -605,16 +610,24 @@
     }
     // saved runs: one slot per mode
     const saves = Data.profile.saves;
-    const describe = (sv) => `${sv.summary.mode === 'campaign' ? 'Ch ' + (sv.summary.chapter + 1) + ' · ' : ''}Wave ${sv.summary.wave} · Lv ${sv.summary.level} · ${DIFF[sv.summary.diff]?.name || ''} · ${new Date(sv.summary.date).toLocaleDateString()}`;
-    $('continues').innerHTML = ['infinite', 'campaign'].filter((m) => saves[m]).map((m) =>
-      `<button class="btn blue" data-continue="${m}" style="margin-top:12px">⏯ Continue ${m === 'campaign' ? 'Campaign' : 'Infinite'} run</button>
+    const describe = (sv) => {
+      const m = sv.summary;
+      const where = m.mode === 'campaign' ? `Ch ${m.chapter + 1} · ` : MAP_NAME[m.map] ? `${MAP_NAME[m.map]} · ` : '';
+      const unit = m.mode === 'outbreak' ? 'Round' : 'Wave';
+      return `${where}${unit} ${m.wave} · Lv ${m.level} · ${DIFF[m.diff]?.name || ''} · ${new Date(m.date).toLocaleDateString()}`;
+    };
+    // the selected mode's save first, then the others
+    const order = [settings.mode, ...SAVE_SLOTS.filter((m) => m !== settings.mode)].filter((m) => SAVE_SLOTS.includes(m) && saves[m]);
+    $('continues').innerHTML = order.map((m) =>
+      `<button class="btn ${m === settings.mode ? 'blue' : 'secondary'}" data-continue="${m}" style="margin-top:12px">⏯ Continue ${SLOT_LABEL[m]} run</button>
        <div class="hint" style="text-align:center">${esc(describe(saves[m]))}</div>`).join('');
-    const existing = ['outbreak', 'siege'].includes(settings.mode) ? null : saves[settings.mode];
+    const label = SLOT_LABEL[slotOf(settings.mode)];
+    const existing = SAVE_SLOTS.includes(settings.mode) ? saves[settings.mode] : null;
     const sameChapter = existing && (settings.mode !== 'campaign' || existing.summary.chapter === settings.chapter);
     const warn = existing
-      ? `⚠ Starting a new ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run overwrites your saved ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run (${describe(existing)}).${!sameChapter ? ' It\'s from a different chapter.' : ''}`
+      ? `⚠ Starting a new ${label} run overwrites your saved ${label} run (${describe(existing)}).${!sameChapter ? ' It\'s from a different chapter.' : ''} Your other saves are untouched.`
       : '';
-    $('play-tip').textContent = warn || `No saved ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run to overwrite. Have fun!`;
+    $('play-tip').textContent = warn || `No saved ${label} run to overwrite. Have fun!`;
     $('play-warn').textContent = existing ? 'Overwrites your saved run: hover Play for details' : '';
     saveSettings();
   }
@@ -1319,12 +1332,12 @@
     for (const id of ['save', 'save-quit']) { const el = $(id); if (el) el.closest('.tip-wrap, button').style.display = coopRun ? 'none' : ''; }
     $('quit').textContent = coopRun ? 'Leave co-op game' : 'Abandon run';
     $('save-hint').textContent = coopRun ? '⚠ Co-op games keep running while paused, so stay alert!' : 'Saved runs resume from the start of the current wave.';
-    const slot = r.mode === 'campaign' ? 'campaign' : 'infinite';
-    const label = slot === 'campaign' ? 'Campaign' : 'Infinite';
+    const slot = slotOf(r.mode || runCtx?.mode);
+    const label = SLOT_LABEL[slot];
     const prev = Data.profile.saves[slot];
     $('save-tip').textContent = prev
-      ? `⚠ Overwrites your saved ${label} run (Wave ${prev.summary.wave}, Lv ${prev.summary.level}). Your ${slot === 'campaign' ? 'Infinite' : 'Campaign'} save is untouched.`
-      : `Saves to your ${label} slot. Your ${slot === 'campaign' ? 'Infinite' : 'Campaign'} save is untouched.`;
+      ? `⚠ Overwrites your saved ${label} run (${slot === 'outbreak' ? 'Round' : 'Wave'} ${prev.summary.wave}, Lv ${prev.summary.level}). Your other saves are untouched.`
+      : `Saves to your ${label} slot (one save per game type). Your other saves are untouched.`;
   }
 
   // ------------------------------------------------------------------ events from Rust
@@ -1342,8 +1355,8 @@
         state = 'paused';
         $('photo-btn').style.display = window.UHCoop?.inGame ? 'none' : ''; // co-op never really pauses
         try { renderPause(JSON.parse(data)); } catch (e) { console.warn(e); }
-        // Outbreak runs can't be saved mid-match (yet)
-        for (const id of ['save', 'save-quit']) $(id).disabled = ['outbreak', 'siege'].includes(runCtx.mode) || !!window.UHCoop?.inGame;
+        // every solo game type can be saved (one slot each); the Home Base and co-op can't
+        for (const id of ['save', 'save-quit']) $(id).disabled = !SAVE_SLOTS.includes(runCtx.mode) || !!window.UHCoop?.inGame;
         applySettings();
         show('pause');
         break;
@@ -1447,7 +1460,11 @@
       }
       case 'saved': {
         const r = lastPause ? lastPause.run : {};
-        const summary = { mode: r.mode || runCtx.mode, chapter: r.chapter || 0, diff: r.diff || runCtx.diff, wave: r.wave || 1, level: r.level || 1, date: Date.now() };
+        const field = (k) => (new RegExp(`(?:^|;)${k}=([^;]*)`).exec(data) || [])[1];
+        const summary = {
+          mode: field('mode') || r.mode || runCtx.mode, chapter: Number(field('chapter')) || r.chapter || 0, map: field('map') || '',
+          diff: field('diff') || r.diff || runCtx.diff, wave: Number(field('savewave')) || r.wave || 1, level: Number(field('level')) || r.level || 1, date: Date.now(),
+        };
         try { await Data.putSave(data, summary); } catch (e) { console.warn(e); afterSave = null; toast('Save failed. Check your connection.'); break; }
         if (afterSave === 'quit') { afterSave = null; toast('Game saved'); toMenu(); }
         else { afterSave = null; toast('Game saved 💾'); $('save-hint').textContent = '✓ Saved. Continue it from the main menu any time.'; }

@@ -180,7 +180,7 @@ async function auth(c: any, next: () => Promise<void>) {
 async function profileJson(userId: string) {
   const p = await ensureProfile(userId);
   const s = await pool.query("select slot, summary from saves where user_id = $1", [userId]);
-  const saves: Record<string, unknown> = { infinite: null, campaign: null };
+  const saves: Record<string, unknown> = { infinite: null, campaign: null, outbreak: null, siege: null };
   for (const r of s.rows) saves[r.slot] = { summary: r.summary };
   return {
     name: p.display_name,
@@ -331,13 +331,18 @@ app.post("/equip", async (c) => {
 });
 
 // ---------------------------------------------------------------- saves
+// one save per game type; saving a type replaces that type's save only
+const SAVE_SLOTS = ["infinite", "campaign", "outbreak", "siege"];
+const slotOf = (v: unknown) => (SAVE_SLOTS.includes(String(v)) ? String(v) : "infinite");
+
 app.put("/save", async (c) => {
   const uid = c.get("userId");
   const { data, summary } = await c.req.json();
   if (typeof data !== "string" || data.length > 4096) return c.json({ error: "bad_save" }, 400);
   await ensureProfile(uid);
   const sum = {
-    mode: summary?.mode === "campaign" ? "campaign" : "infinite",
+    mode: slotOf(summary?.mode),
+    map: String(summary?.map ?? "").replace(/[^a-z]/g, "").slice(0, 20),
     chapter: Math.max(0, Math.min(CHAPTERS.length - 1, Number(summary?.chapter) || 0)),
     diff: DIFFS.includes(summary?.diff) ? summary.diff : "survivor",
     wave: Math.max(1, Number(summary?.wave) || 1),
@@ -352,7 +357,6 @@ app.put("/save", async (c) => {
   return c.json({ ok: true, summary: sum });
 });
 
-const slotOf = (v: unknown) => (v === "campaign" ? "campaign" : "infinite");
 
 app.post("/save/consume", async (c) => {
   const body = await c.req.json().catch(() => ({}));

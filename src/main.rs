@@ -26,6 +26,7 @@ mod render_light;
 mod render_outbreak;
 mod render_siege;
 mod render_map;
+mod save_modes;
 mod secrets;
 mod status;
 mod tutorial;

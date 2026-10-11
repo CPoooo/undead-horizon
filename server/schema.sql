@@ -214,3 +214,7 @@ create table if not exists hub_presence (
   at        timestamptz not null default now()
 );
 create index if not exists hub_presence_inst_idx on hub_presence (instance, at);
+
+-- One save per game type (Infinite, Campaign, Outbreak, Siege).
+alter table saves drop constraint if exists saves_slot_check;
+alter table saves add constraint saves_slot_check check (slot in ('infinite','campaign','outbreak','siege'));
