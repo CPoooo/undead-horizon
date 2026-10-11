@@ -33,6 +33,8 @@ export const CHAPTERS = [
 export function waveCoins(r: { mode: string; chapter: number; diff: string; wave: number; victory: boolean }): number {
   const m = DIFF_COINS[r.diff] ?? 1;
   let total = 0;
+  // treasure chests (bosses, elites, brutes) add coins on top of wave rewards
+  total += 65 * m * (Math.floor(r.wave / 5) + Math.ceil(r.wave / 2) + 1);
   if (r.mode === "campaign") {
     const ch = CHAPTERS[r.chapter];
     const cleared = Math.min(r.wave, ch.waves);

@@ -143,3 +143,8 @@ create table if not exists client_errors (
   created_at timestamptz not null default now()
 );
 create index if not exists client_errors_time_idx on client_errors (created_at desc);
+
+-- Outbreak and Siege runs (own leaderboards later; never ranked as Infinite).
+alter table runs drop constraint if exists runs_mode_check;
+alter table runs add constraint runs_mode_check check (mode in ('infinite','campaign','outbreak','siege'));
+alter table runs add column if not exists score bigint not null default 0;

@@ -382,7 +382,9 @@
     $('diff-hint').textContent = DIFF[settings.diff].hint;
     const camp = settings.mode === 'campaign';
     $('chapter-box').style.display = camp ? '' : 'none';
-    $('mode-hint').textContent = camp ? 'Story chapters with unique boss fights.' : 'Endless waves. Bosses every 5 waves. Ranked on the leaderboard.';
+    $('mode-hint').textContent = camp ? 'Story chapters with unique boss fights.'
+      : settings.mode === 'outbreak' ? 'Hollowbrook Asylum: rounds, boarded windows, points, doors, wall guns, a mystery box, perks and an upgrade machine.'
+      : 'Endless waves. Bosses every 5 waves. Ranked on the leaderboard.';
     if (camp) {
       const c = Data.profile.campaign;
       settings.chapter = Math.min(settings.chapter, c.unlocked);
@@ -400,7 +402,7 @@
     $('continues').innerHTML = ['infinite', 'campaign'].filter((m) => saves[m]).map((m) =>
       `<button class="btn blue" data-continue="${m}" style="margin-top:12px">⏯ Continue ${m === 'campaign' ? 'Campaign' : 'Infinite'} run</button>
        <div class="hint" style="text-align:center">${esc(describe(saves[m]))}</div>`).join('');
-    const existing = saves[settings.mode];
+    const existing = settings.mode === 'outbreak' ? null : saves[settings.mode];
     const sameChapter = existing && (settings.mode !== 'campaign' || existing.summary.chapter === settings.chapter);
     const warn = existing
       ? `⚠ Starting a new ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run overwrites your saved ${settings.mode === 'campaign' ? 'Campaign' : 'Infinite'} run (${describe(existing)}).${!sameChapter ? ' It\'s from a different chapter.' : ''}`
@@ -628,6 +630,8 @@
   on('pause-btn', 'click', () => send('pause'));
   const tap = (id, cmd) => $(id).addEventListener('touchstart', (e) => { e.preventDefault(); send(cmd); }, { passive: false });
   tap('t-dash', 'dash'); tap('t-ult', 'ult'); tap('t-abil', 'act|ability');
+  $('t-use').addEventListener('touchstart', (e) => { e.preventDefault(); send('use|1'); }, { passive: false });
+  $('t-use').addEventListener('touchend', (e) => { e.preventDefault(); send('use|0'); }, { passive: false });
 
   window.addEventListener('keydown', (e) => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
@@ -688,6 +692,8 @@
       case 'pause':
         state = 'paused';
         try { renderPause(JSON.parse(data)); } catch (e) { console.warn(e); }
+        // Outbreak runs can't be saved mid-match (yet)
+        for (const id of ['save', 'save-quit']) $(id).disabled = runCtx.mode === 'outbreak' || !!window.UHCoop?.inGame;
         applySettings();
         show('pause');
         break;
@@ -715,6 +721,7 @@
         } catch {}
         break;
       }
+      case 'usebtn': $('t-use').classList.toggle('on', data === '1'); break;
       case 'haptic': {
         const [ms, str] = String(data).split(':').map(Number);
         const k = settings.haptics ?? 0.6;

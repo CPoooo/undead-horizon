@@ -183,16 +183,16 @@ Not scheduled yet; design notes for when we pick it up.
 - [x] C9 (S) **Projectile pressure.** More enemy projectiles with fair telegraphs (dodge skill expression), plus a "danger" outline for bullets hitting the player.
 
 ### M3 · Outbreak mode (CoD Zombies homage — use original names, no trademarks)
-- [ ] O1 (M) **First map.** "Hollowbrook Asylum" in `assets/maps/asylum.json`: about 6 zones, doors and debris, spawn windows with barricades. Depends on F2 and F3.
-- [ ] O2 (M) **Point economy.** Points per hit, kill and headshot-crit; repairing barricades earns points. HUD points counter; co-op has per-player points. New `src/modes/outbreak.rs`.
-- [ ] O3 (S) **Interact prompt.** An `Interact` action (E, or a tap button on touch) with a world-space prompt "[E] Open door — 750". Doors open zones; spawns are gated by opened zones.
-- [ ] O4 (M) **Ammo, reload and wall-buys.**
+- [x] O1 (M) **First map.** "Hollowbrook Asylum" in `assets/maps/asylum.json`: about 6 zones, doors and debris, spawn windows with barricades. Depends on F2 and F3.
+- [x] O2 (M) **Point economy.** Points per hit, kill and headshot-crit; repairing barricades earns points. HUD points counter; co-op has per-player points. New `src/modes/outbreak.rs`.
+- [x] O3 (S) **Interact prompt.** An `Interact` action (E, or a tap button on touch) with a world-space prompt "[E] Open door — 750". Doors open zones; spawns are gated by opened zones.
+- [x] O4 (M) **Ammo, reload and wall-buys.**
   - Introduce magazines and reload (Outbreak only; Infinite keeps infinite ammo) with a reload bar and an empty-click sound.
   - Wall-buys: a chalk outline sells a weapon or refills its ammo.
-- [ ] O5 (M) **Mystery Box.** Spin animation cycling gun icons, a weighted pool including 2 box-exclusive wonder weapons (e.g. "Ray Rifle", "Thundergun-style" wave gun with original visuals), and a "zombie hand" result that relocates the box.
-- [ ] O6 (M) **Perk machines.** 4 perks, original names: *Iron Gut* (+HP), *Quickdraw Cola* (reload/fire), *Second Wind* (fast revive, or solo self-revive ×3), *Fleetfoot* (speed). Max 4 perks, all lost when downed. Jingles via synth.
-- [ ] O7 (S) **Upgrade machine.** Power switch, then the upgrade machine ("Pack-a-Punch" homage): ×2 damage, bigger magazine, an element (from C4), a renamed weapon and a camo tint.
-- [ ] O8 (S) **Power-ups.** Max Ammo, Insta-Kill, Double Points, Nuke, Carpenter, each with a timer HUD and an announcer line.
+- [x] O5 (M) **Mystery Box.** Spin animation cycling gun icons, a weighted pool including 2 box-exclusive wonder weapons (e.g. "Ray Rifle", "Thundergun-style" wave gun with original visuals), and a "zombie hand" result that relocates the box.
+- [x] O6 (M) **Perk machines.** 4 perks, original names: *Iron Gut* (+HP), *Quickdraw Cola* (reload/fire), *Second Wind* (fast revive, or solo self-revive ×3), *Fleetfoot* (speed). Max 4 perks, all lost when downed. Jingles via synth.
+- [x] O7 (S) **Upgrade machine.** Power switch, then the upgrade machine ("Pack-a-Punch" homage): ×2 damage, bigger magazine, an element (from C4), a renamed weapon and a camo tint.
+- [x] O8 (S) **Power-ups.** Max Ammo, Insta-Kill, Double Points, Nuke, Carpenter, each with a timer HUD and an announcer line.
 - [ ] O9 (S) **Rounds feel.** Tally-mark round counter, round-transition sting, and special "hound rounds" (fast pack) every 5–6 rounds.
 - [ ] O10 (M) **Secrets.** Buildables (collect 3 parts to build a shield or trap) and a multi-step easter-egg quest with a reward; secrets are server-tracked achievements.
 - [ ] O11 (S) **Traps.** Buyable electric and fire traps (shared code with Siege S4).

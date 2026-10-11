@@ -176,12 +176,18 @@ impl Game {
             })
             .collect();
         faces.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+        let centre = s.a.lerp(s.b, 0.5);
         for (_, i) in faces {
             // faces 1 and 3 are the ends at b and a
             if (i == 1 && !w.cap_b) || (i == 3 && !w.cap_a) {
                 continue;
             }
             let j = (i + 1) % 4;
+            // only faces turned toward the camera are visible (no overdraw seams)
+            let mid = base[i].lerp(base[j], 0.5);
+            if (mid - centre).dot(self.cam - mid) < 0.0 {
+                continue;
+            }
             c.set_fill_style_str(if i % 2 == 0 { side } else { side2 });
             poly(c, &[base[i], base[j], top[j], top[i]]);
             c.fill();

@@ -11,9 +11,12 @@ mod game;
 mod input;
 mod math;
 mod modes;
+mod nav;
 mod net;
+mod outbreak_interact;
 mod render;
 mod render_light;
+mod render_outbreak;
 mod render_map;
 mod status;
 mod upgrades;
@@ -396,6 +399,9 @@ fn run() -> Result<(), JsValue> {
 fn set_key(g: &mut Game, code: &str, down: bool) {
     let mut moved = false;
     for a in g.bindings.actions(code).to_vec() {
+        if a == input::Action::Interact {
+            g.input.use_down = down;
+        }
         if !a.is_held() {
             continue;
         }
@@ -457,6 +463,13 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
         "dash" => g.input.dash_req = true,
         "ult" => g.input.ult_req = true,
         "touch" => g.input.is_touch = a == "1",
+        // the touch USE button is held to rebuild barricades
+        "use" => {
+            g.input.use_down = a == "1";
+            if a == "1" {
+                g.input.actions.push(input::Action::Interact);
+            }
+        }
         // rebind keys: action=Code,Code;...  (empty = reset to defaults)
         "bind" => {
             if a.is_empty() {
@@ -477,6 +490,18 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
                 use game::ZKind::*;
                 for (k, kind) in [Crawler, Screamer, Armored, Bat, Burrower].iter().enumerate() {
                     g.spawn_zombie(*kind, p + math::V2::from_angle(k as f32 * 1.25 + 0.3) * 230.0);
+                }
+            }
+            if let Some(v) = a.strip_prefix("tp=") {
+                let xy: Vec<f32> = v.split(',').filter_map(|n| n.parse().ok()).collect();
+                if xy.len() == 2 {
+                    g.player.pos = math::v2(xy[0], xy[1]);
+                    g.player.prev = g.player.pos;
+                }
+            }
+            if let Some(v) = a.strip_prefix("points=") {
+                if let Some(o) = g.ob.as_mut() {
+                    o.points = v.parse().unwrap_or(0);
                 }
             }
             if let Some(v) = a.strip_prefix("boss=") {

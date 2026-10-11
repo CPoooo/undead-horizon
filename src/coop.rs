@@ -226,6 +226,7 @@ impl Game {
 
     // ------------------------------------------------------------ downed / revive
     pub fn go_down(&mut self) {
+        self.lose_perks();
         let p = &mut self.player;
         p.hp = 0.0;
         p.downed = true;
@@ -380,6 +381,7 @@ impl Game {
                 self.headshot(pos);
             }
         }
+        self.ob_on_hit(pos, dead, crit);
         dead
     }
 
@@ -650,6 +652,10 @@ impl Game {
                         .push(("netversion", format!("{}:{}", PROTOCOL, theirs)));
                 }
             }
+            MSG_WORLD if host => {
+                let (Some(kind), Some(idx)) = (r.u8(), r.u8()) else { return };
+                self.world_change(kind, idx);
+            }
             MSG_SNAP if !host => self.apply_snapshot(&mut r),
             MSG_GEMS if !host => self.apply_gems(&mut r),
             MSG_EVENTS if !host => self.apply_events(&mut r),
@@ -875,6 +881,11 @@ impl Game {
                     1 => PickKind::Vacuum,
                     2 => PickKind::Frenzy,
                     3 => PickKind::Chest,
+                    4 => PickKind::MaxAmmo,
+                    5 => PickKind::InstaKill,
+                    6 => PickKind::DoublePoints,
+                    7 => PickKind::Nuke,
+                    8 => PickKind::Carpenter,
                     _ => PickKind::Heart,
                 },
                 t,
@@ -1020,6 +1031,28 @@ impl Game {
                         self.pending_chests += 1;
                     }
                 }
+                E_POWERUP => {
+                    let Some(k) = r.u8() else { return };
+                    let kind = match k {
+                        4 => PickKind::MaxAmmo,
+                        5 => PickKind::InstaKill,
+                        6 => PickKind::DoublePoints,
+                        7 => PickKind::Nuke,
+                        8 => PickKind::Carpenter,
+                        _ => return,
+                    };
+                    self.apply_powerup(kind, false);
+                }
+                E_BOARDS => {
+                    let (Some(i), Some(b)) = (r.u8(), r.u8()) else { return };
+                    if let Some(w) = self.ob.as_mut().and_then(|o| o.windows.get_mut(i as usize)) {
+                        w.boards = b;
+                    }
+                }
+                E_WORLD => {
+                    let (Some(kind), Some(idx)) = (r.u8(), r.u8()) else { return };
+                    self.apply_world(kind, idx);
+                }
                 E_GAMEOVER => self.enter_dying(),
                 E_BLAST => {
                     let (Some(p), Some(rad)) = (r.v2(), r.f32()) else {
@@ -1083,6 +1116,7 @@ fn replica(uid: u32, kind: ZKind, var: BossVar, pos: V2) -> Zombie {
         affix: crate::elites::Affix::None,
         shield: 0.0,
         rage_t: 0.0,
+        win: -1,
         phase: 0,
         age: 0.0,
         hidden: false,

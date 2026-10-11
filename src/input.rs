@@ -27,9 +27,11 @@ pub enum Action {
     Confirm,
     Prev,
     Next,
+    Reload,
+    Swap,
 }
 
-pub const ACTIONS: [Action; 23] = [
+pub const ACTIONS: [Action; 25] = [
     Action::Up,
     Action::Down,
     Action::Left,
@@ -53,6 +55,8 @@ pub const ACTIONS: [Action; 23] = [
     Action::Confirm,
     Action::Prev,
     Action::Next,
+    Action::Reload,
+    Action::Swap,
 ];
 
 impl Action {
@@ -81,6 +85,8 @@ impl Action {
             Action::Confirm => "confirm",
             Action::Prev => "prev",
             Action::Next => "next",
+            Action::Reload => "reload",
+            Action::Swap => "swap",
         }
     }
 
@@ -118,6 +124,8 @@ impl Action {
             Action::Confirm => &["Enter", "Space"],
             Action::Prev => &["ArrowLeft", "KeyA", "ArrowUp"],
             Action::Next => &["ArrowRight", "KeyD", "ArrowDown"],
+            Action::Reload => &["KeyC"],
+            Action::Swap => &["Tab", "KeyX"],
         }
     }
 }
@@ -209,13 +217,13 @@ mod tests {
         assert_eq!(b.actions("KeyE")[0], Action::Interact);
         assert!(b.actions("KeyE").contains(&Action::Ult));
         assert!(b.actions("KeyA").contains(&Action::Left));
-        b.apply("dash=KeyC;bogus=KeyV");
+        b.apply("dash=KeyJ;bogus=KeyV");
         assert!(!b.actions("Space").contains(&Action::Dash));
         assert!(b.actions("Space").contains(&Action::Confirm));
-        assert_eq!(b.actions("KeyC"), &[Action::Dash]);
+        assert_eq!(b.actions("KeyJ"), &[Action::Dash]);
         let spec = b.to_spec();
         let mut c = Bindings::default();
         c.apply(&spec);
-        assert_eq!(c.actions("KeyC"), &[Action::Dash]);
+        assert_eq!(c.actions("KeyJ"), &[Action::Dash]);
     }
 }

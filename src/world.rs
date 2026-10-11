@@ -650,6 +650,7 @@ impl Level for AuthoredMap {
 pub fn builtin_map(id: &str) -> Option<&'static str> {
     match id {
         "testbox" => Some(include_str!("../assets/maps/testbox.json")),
+        "asylum" => Some(include_str!("../assets/maps/asylum.json")),
         _ => None,
     }
 }
@@ -696,5 +697,26 @@ mod tests {
         assert!(nrm.len2() > 0.0 && pp.dist(prop.pos) >= prop.r + 15.9);
         use_map(None);
         assert!(map().is_none());
+    }
+
+    #[test]
+    fn asylum_parses_and_every_zone_is_reachable_with_doors_open() {
+        let m = load_builtin("asylum").expect("asylum parses");
+        assert_eq!(m.zones.len(), 7);
+        assert!(m.windows.len() >= 12);
+        for i in 0..m.doors.len() {
+            m.open_door(i);
+        }
+        let mut f = crate::nav::FlowField::new(&m);
+        f.compute(&[m.spawn]);
+        for z in &m.zones {
+            let [x0, y0, x1, y1] = z.rect;
+            let c = v2((x0 + x1) * 0.5 + 60.0, (y0 + y1) * 0.5 + 60.0);
+            assert!(f.reachable(c) || f.reachable(c + v2(80.0, 80.0)), "zone {} reachable", z.id);
+        }
+        for w in &m.windows {
+            let p = v2(w.pos[0], w.pos[1]) + v2(w.dir[0], w.dir[1]) * 40.0;
+            assert!(f.reachable(p), "window at {:?} leads in", w.pos);
+        }
     }
 }

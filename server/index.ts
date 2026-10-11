@@ -299,7 +299,7 @@ app.delete("/save", async (c) => {
 app.post("/runs", async (c) => {
   const uid = c.get("userId");
   const r = await c.req.json();
-  const mode = r.mode === "campaign" ? "campaign" : "infinite";
+  const mode = ["campaign", "outbreak", "siege"].includes(r.mode) ? r.mode : "infinite";
   const diff = DIFFS.includes(r.diff) ? r.diff : "survivor";
   const chapter = Math.max(0, Math.min(CHAPTERS.length - 1, Math.floor(Number(r.chapter) || 0)));
   const int = (v: unknown, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.floor(Number(v) || 0)));
@@ -321,10 +321,11 @@ app.post("/runs", async (c) => {
   let rank: number | null = null;
   try {
     await client.query("begin");
+    const score = int(r.score, 0, 2_000_000_000);
     const ins = await client.query(
-      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
-      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players],
+      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id`,
+      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score],
     );
     const campaign = p.campaign as { unlocked: number; cleared: number[] };
     if (victory) {

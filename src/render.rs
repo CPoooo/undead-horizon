@@ -217,6 +217,7 @@ impl Game {
         });
 
         self.draw_shadows(c, a, &obs);
+        self.draw_outbreak_world(c, t);
         self.draw_gems(c, a, t);
         self.draw_telegraphs(c, a, t);
         self.draw_rings(c);
@@ -372,6 +373,16 @@ impl Game {
         }
         if self.coop() && !matches!(self.phase, Phase::Menu) {
             self.draw_coop_hud(c, w, h, t);
+        }
+        if self.ob.is_some() && matches!(self.phase, Phase::Playing | Phase::Paused) {
+            self.draw_outbreak_hud(c, w, h, t);
+            self.draw_outbreak_prompt(c, w, h, cy);
+        }
+        // the touch USE button follows the prompt
+        let show_use = self.ob.is_some() && self.phase == Phase::Playing && self.ob_prompt().is_some();
+        if show_use != self.use_shown {
+            self.use_shown = show_use;
+            self.ui_out.push(("usebtn", if show_use { "1".into() } else { "0".into() }));
         }
         if let Some(bi) = &self.boss_intro {
             self.draw_boss_intro(c, w, h, bi.var, bi.t);
@@ -618,6 +629,7 @@ impl Game {
                 PickKind::Vacuum => "#b48cff",
                 PickKind::Frenzy => "#ffd84a",
                 PickKind::Chest => "#ffb830",
+                _ => "#7affb0",
             };
             let blink = p.t > 24.0 && ((t * 10.0) as i32 % 2 == 0);
             if blink {
@@ -635,6 +647,11 @@ impl Game {
                 PickKind::Vacuum => "🧲",
                 PickKind::Frenzy => "⚡",
                 PickKind::Chest => "🎁",
+                PickKind::MaxAmmo => "🎒",
+                PickKind::InstaKill => "💀",
+                PickKind::DoublePoints => "✖️",
+                PickKind::Nuke => "☢️",
+                PickKind::Carpenter => "🔨",
             };
             text(c, icon, p.pos.x, p.pos.y - 4.0 + bob);
         }
@@ -2548,6 +2565,7 @@ impl Game {
                 PickKind::Vacuum => "#b48cff",
                 PickKind::Frenzy => "#ffd84a",
                 PickKind::Chest => "#ffb830",
+                _ => "#7affb0",
             };
             c.set_fill_style_str(col);
             let m = to_map(p.pos);

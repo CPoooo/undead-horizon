@@ -15,7 +15,7 @@ pub const MAX_PLAYERS: usize = 3;
 
 /// Bump whenever the wire format or sim rules change in a way that would
 /// desync peers running different builds.
-pub const PROTOCOL: u16 = 6;
+pub const PROTOCOL: u16 = 7;
 
 pub const MSG_PSTATE: u8 = 1; // client -> host (unreliable): own player state
 pub const MSG_HITS: u8 = 2; // client -> host (reliable): damage dealt to zombies
@@ -23,6 +23,7 @@ pub const MSG_SNAP: u8 = 3; // host -> clients (unreliable): world snapshot
 pub const MSG_GEMS: u8 = 4; // host -> clients (unreliable): xp gem positions
 pub const MSG_EVENTS: u8 = 5; // host -> clients (reliable): discrete events
 pub const MSG_HELLO: u8 = 6; // everyone (reliable), once per match: protocol version
+pub const MSG_WORLD: u8 = 7; // client -> host (reliable): bought a door / flipped the power
 
 // events
 pub const E_HURT: u8 = 1;
@@ -37,6 +38,9 @@ pub const E_BLAST: u8 = 9;
 pub const E_BOSS: u8 = 10;
 pub const E_CHEST: u8 = 11; // slot: that player opens a chest
 pub const E_PULL: u8 = 12; // slot, velocity: the Butcher hooked that player
+pub const E_POWERUP: u8 = 13; // kind: everyone gets the power-up
+pub const E_BOARDS: u8 = 14; // window, boards
+pub const E_WORLD: u8 = 15; // kind, index: a door opened / the power came on
 
 // player flags
 pub const PF_DOWNED: u8 = 1;

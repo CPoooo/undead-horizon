@@ -119,6 +119,8 @@ pub struct Zombie {
     pub shield: f32,
     /// screamer enrage: faster while > 0
     pub rage_t: f32,
+    /// Outbreak: index of the window it is breaking in through (-1 = inside)
+    pub win: i8,
     /// boss phase (1..3) and lifetime, for phases and the enrage timer
     pub phase: u8,
     pub age: f32,
@@ -191,6 +193,21 @@ pub enum PickKind {
     Vacuum,
     Frenzy,
     Chest,
+    // Outbreak power-ups
+    MaxAmmo,
+    InstaKill,
+    DoublePoints,
+    Nuke,
+    Carpenter,
+}
+
+impl PickKind {
+    pub fn is_powerup(self) -> bool {
+        matches!(
+            self,
+            PickKind::MaxAmmo | PickKind::InstaKill | PickKind::DoublePoints | PickKind::Nuke | PickKind::Carpenter
+        )
+    }
 }
 
 pub struct Pickup {
@@ -301,6 +318,8 @@ pub struct Input {
     pub joy_id: Option<i32>,
     pub joy_origin: V2,
     pub joy_pos: V2,
+    /// interact held (rebuilding barricades)
+    pub use_down: bool,
 }
 
 /// Uniform spatial hash grid (counting sort) centred on the player; rebuilt each step.
@@ -414,6 +433,13 @@ pub struct Game {
     pub volatile: Vec<(V2, f32, f32)>,
     pub slams: Vec<crate::boss::Slam>,
     pub corpses: Vec<crate::corpses::Corpse>,
+    /// Outbreak state (points, guns, perks, windows, box...)
+    pub ob: Option<Box<crate::modes::outbreak::ObState>>,
+    /// pathfinding on authored maps
+    pub flow: Option<crate::nav::FlowField>,
+    pub nuke_pending: bool,
+    /// the touch USE button is visible
+    pub use_shown: bool,
     pub boss_intro: Option<crate::boss::BossIntro>,
     /// chests picked up while another overlay was open
     pub pending_chests: u32,
@@ -558,6 +584,10 @@ impl Game {
             volatile: Vec::new(),
             slams: Vec::new(),
             corpses: Vec::new(),
+            ob: None,
+            flow: None,
+            nuke_pending: false,
+            use_shown: false,
             boss_intro: None,
             pending_chests: 0,
             rng: Rng::new(seed),
@@ -778,6 +808,9 @@ impl Game {
         self.volatile.clear();
         self.slams.clear();
         self.corpses.clear();
+        self.ob = None;
+        self.flow = None;
+        self.nuke_pending = false;
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -870,7 +903,8 @@ impl Game {
     pub(crate) fn fire_interval(&self) -> f32 {
         let class = if self.kit() == content::Kit::HeatSink { 1.1 } else { 1.0 };
         let heat = if self.kit() == content::Kit::HeatSink && self.ability_t > 0.0 { 2.0 } else { 1.0 };
-        let base = 0.30 * GUNS[self.gun].interval / ((1.0 + 0.16 * self.ups.f(Up::FireRate)) * class * heat);
+        let base = 0.30 * GUNS[self.gun].interval
+            / ((1.0 + 0.16 * self.ups.f(Up::FireRate)) * class * heat * self.ob_fire_mult());
         if self.player.frenzy > 0.0 {
             base * 0.5
         } else {
@@ -878,7 +912,7 @@ impl Game {
         }
     }
     pub(crate) fn move_speed(&self) -> f32 {
-        255.0 * (1.0 + 0.09 * self.ups.f(Up::Speed)) * GUNS[self.gun].move_mult
+        255.0 * (1.0 + 0.09 * self.ups.f(Up::Speed)) * GUNS[self.gun].move_mult * self.ob_speed_mult()
     }
     pub fn magnet_r(&self) -> f32 {
         let eng = if self.kit() == content::Kit::Turret { 1.3 } else { 1.0 };
@@ -1302,6 +1336,10 @@ impl Game {
                 Action::Interact => return self.try_interact(),
                 Action::Ult => self.try_ult(),
                 Action::Ability => return self.try_ability(),
+                Action::Reload if self.ob.is_some() => self.start_reload(),
+                Action::Swap if self.ob.is_some() => return self.swap_weapon(None),
+                Action::Pick1 if self.ob.is_some() => return self.swap_weapon(Some(0)),
+                Action::Pick2 if self.ob.is_some() => return self.swap_weapon(Some(1)),
                 Action::AutoAim => {
                     self.auto_aim = !self.auto_aim;
                     let msg = if self.auto_aim {
@@ -1375,6 +1413,9 @@ impl Game {
     /// Use whatever interactable is in reach (doors, machines...). Modes with
     /// authored maps fill this in; returns false when there is nothing to use.
     pub(crate) fn try_interact(&mut self) -> bool {
+        if self.ob.is_some() {
+            return self.ob_interact();
+        }
         false
     }
 
@@ -1397,6 +1438,8 @@ impl Game {
     pub fn to_menu(&mut self) {
         self.phase = Phase::Menu;
         world::use_map(None);
+        self.ob = None;
+        self.flow = None;
         self.audio.set_track(Track::Lobby);
         self.audio.music_on = true;
         self.net = None;
@@ -1861,6 +1904,14 @@ impl Game {
             self.zombies.retain(|z| !z.dead);
             self.grid.build(self.player.pos, &self.zombies);
         }
+        if self.ob.is_some() && alive_play {
+            if self.input.use_down {
+                if let Some(o) = self.ob.as_mut() {
+                    o.use_held = 0.1;
+                }
+            }
+            self.ob_tick();
+        }
         if alive_play && !self.player.dead {
             self.update_abilities();
             self.update_player();
@@ -1876,6 +1927,10 @@ impl Game {
                 z.anim += DT * 0.6;
             }
         } else {
+            if self.ob.is_some() {
+                self.update_flow();
+                self.update_windows();
+            }
             self.update_zombies();
             self.update_status();
             self.update_elites();
@@ -1901,6 +1956,9 @@ impl Game {
             self.update_revive();
         }
 
+        if !client {
+            self.resolve_nuke();
+        }
         self.zombies.retain(|z| !z.dead);
         self.gems.retain(|g| !g.dead);
         self.pickups.retain(|p| !p.dead);
@@ -2113,12 +2171,13 @@ impl Game {
         } else {
             enemies_near || self.input.mouse_down
         };
-        if want_fire && self.player.fire_cd <= 0.0 {
+        if want_fire && self.player.fire_cd <= 0.0 && self.ob_can_fire() {
             self.player.fire_cd += self.fire_interval();
             if self.player.fire_cd < 0.0 {
                 self.player.fire_cd = 0.0;
             }
             self.fire();
+            self.ob_consume_round();
         }
         if self.player.fire_cd < -0.2 {
             self.player.fire_cd = 0.0;
@@ -2245,7 +2304,8 @@ impl Game {
         let extra = self.ups.get(Up::Multishot) as i32 + if hail { 2 } else { 0 };
         let speed = 920.0 * gun.speed * (1.0 + 0.2 * self.ups.f(Up::Velocity));
         let life = 0.62 * gun.life * (1.0 + 0.15 * self.ups.f(Up::Velocity));
-        let dmg = 10.0 * gun.dmg * self.dmg_mult() * self.signature_mult();
+        let upgraded = self.ob.as_ref().map(|o| o.weapon().upgraded).unwrap_or(false);
+        let dmg = 10.0 * gun.dmg * self.dmg_mult() * self.signature_mult() * if upgraded { 2.2 } else { 1.0 };
         let pierce = self.ups.get(Up::Pierce) as i32 + gun.pierce + if hail { 4 } else { 0 };
         let heat_sink = self.kit() == content::Kit::HeatSink && self.ability_t > 0.0;
         let bounces = self.ups.get(Up::Ricochet) as i32 + if heat_sink { 2 } else { 0 };
@@ -2364,6 +2424,11 @@ impl Game {
         let dmg = self.armor_mult(j, dir, crit) * dmg;
         let weak = !crit && self.weak_point(j, dir);
         let (dmg, crit) = if weak { (dmg * 2.0, true) } else { (dmg, crit) };
+        let dmg = if self.insta_kill() && self.zombies[j].kind != ZKind::Boss {
+            dmg.max(self.zombies[j].hp + self.zombies[j].shield + 1.0)
+        } else {
+            dmg
+        };
         let z = &mut self.zombies[j];
         if z.dead {
             return false;
@@ -2409,6 +2474,9 @@ impl Game {
             self.sfx(Sfx::Crit, pos);
         } else {
             self.sfx(Sfx::Hit, pos);
+        }
+        if hit_slot == self.my_slot() {
+            self.ob_on_hit(pos, dead, crit);
         }
         if dead {
             self.kill_zombie(j);
@@ -2492,6 +2560,13 @@ impl Game {
     }
 
     pub(crate) fn drop_loot(&mut self, pos: V2, kind: ZKind, xp: u32, r: f32, big: bool) {
+        if self.ob.is_some() {
+            self.ob_drop(pos);
+            if kind == ZKind::Boss {
+                self.pickups.push(Pickup { pos, kind: PickKind::MaxAmmo, t: 0.0, dead: false });
+            }
+            return;
+        }
         let bonus = self.wave.n / 4;
         let mut drops = if big { 4 + (r / 10.0) as u32 } else { 1 };
         if kind == ZKind::Boss {
@@ -2645,6 +2720,8 @@ impl Game {
         self.combo = 0;
         if self.player.hp <= 0.0 && self.net.is_some() {
             self.go_down();
+        } else if self.player.hp <= 0.0 && self.second_wind() {
+            // got back up
         } else if self.player.hp <= 0.0 {
             self.player.hp = 0.0;
             self.phase = Phase::Dying;
@@ -2671,6 +2748,9 @@ impl Game {
         for (i, z) in self.zombies.iter_mut().enumerate() {
             if z.dead {
                 continue;
+            }
+            if z.win >= 0 {
+                continue; // breaking in through a window (see outbreak.rs)
             }
             let (tslot, ppos, pvel) = Game::nearest_target(&targets, z.pos);
             z.prev = z.pos;
@@ -2702,6 +2782,13 @@ impl Game {
                 V2::from_angle(z.face + 0.5)
             };
             let mut accel = 7.0;
+            if let Some(flow) = &self.flow {
+                if dist > 90.0 && z.kind != ZKind::Bat && playing {
+                    if let Some(fd) = flow.dir(z.pos) {
+                        want = fd;
+                    }
+                }
+            }
 
             match z.kind {
                 ZKind::Brute if wave_n >= 12 => {
@@ -3351,6 +3438,10 @@ impl Game {
         }
         for (i, slot) in collected {
             let k = self.pickups[i].kind;
+            if k.is_powerup() {
+                self.apply_powerup(k, true);
+                continue;
+            }
             if slot != self.my_slot() {
                 // a teammate grabbed it
                 let heal = 30.0 + self.player.max_hp * 0.1;
@@ -3369,7 +3460,7 @@ impl Game {
                             w.u8(net::E_CHEST);
                             w.u8(slot);
                         }),
-                        PickKind::Vacuum => {}
+                        _ => {}
                     }
                 }
                 if k == PickKind::Vacuum {
@@ -3405,6 +3496,7 @@ impl Game {
                     self.burst(ppos, 20, 300.0, "#ffd84a", 3.0, 0.5, false, true);
                     self.sfx(Sfx::UltReady, ppos);
                 }
+                _ => {}
             }
         }
     }
@@ -3524,6 +3616,7 @@ impl Game {
             affix: crate::elites::Affix::None,
             shield: 0.0,
             rage_t: 0.0,
+            win: -1,
             phase: 0,
             age: 0.0,
             hidden: kind == ZKind::Burrower,
@@ -4048,5 +4141,43 @@ mod tests {
         assert_eq!(g.corpses.len(), 1);
         g.update_corpses(1.0);
         assert!(g.corpses.is_empty(), "faded away");
+    }
+
+    #[test]
+    fn outbreak_round_loop() {
+        let mut g = Game::new(27);
+        g.start("mode=outbreak;diff=rookie");
+        assert_eq!(g.mode, Mode::Outbreak);
+        assert!(g.ob.is_some() && g.flow.is_some());
+        assert_eq!(g.ob.as_ref().unwrap().points, 500);
+        g.player.hp = 1.0e9;
+        g.player.max_hp = 1.0e9;
+        let mut t = 0.0;
+        // round 1 starts and zombies come in through windows
+        let mut saw_window = false;
+        for _ in 0..1200 {
+            t += 16.7;
+            g.frame(t);
+            if g.zombies.iter().any(|z| z.win >= 0) {
+                saw_window = true;
+            }
+        }
+        assert_eq!(g.wave.n, 1);
+        assert!(saw_window, "zombies break in through windows");
+        let boards: u32 = g.ob.as_ref().unwrap().windows.iter().map(|w| w.boards as u32).sum();
+        assert!(boards < 15 * 6, "boards get torn off");
+        // shooting earns points; the pistol runs dry and reloads
+        assert!(g.ob.as_ref().unwrap().points > 500, "points from hits");
+        // buying the lobby door opens it
+        let m = world::map().unwrap();
+        let d = m.door_index("lobby").unwrap();
+        g.ob.as_mut().unwrap().points = 5000;
+        g.player.pos = m.door_center(d) + v2(0.0, 60.0);
+        assert!(g.ob_interact());
+        assert!(m.doors[d].open.get());
+        assert_eq!(g.ob.as_ref().unwrap().points, 5000 - 750);
+        // power-ups apply
+        g.apply_powerup(PickKind::InstaKill, false);
+        assert!(g.insta_kill());
     }
 }
