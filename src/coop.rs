@@ -699,10 +699,11 @@ impl Game {
             };
             w.u8(aux.clamp(0.0, 255.0) as u8);
         }
-        let es: Vec<V2> = self.eshots.iter().take(255).map(|s| s.pos).collect();
+        let es: Vec<(V2, f32)> = self.eshots.iter().take(255).map(|s| (s.pos, s.r)).collect();
         w.u8(es.len() as u8);
-        for p in es {
+        for (p, r) in es {
             w.v2(p);
+            w.u8(r.clamp(0.0, 255.0) as u8);
         }
         let pk: Vec<(u8, V2, f32)> = self
             .pickups
@@ -764,7 +765,7 @@ impl Game {
             let ne = r.u8()?;
             let mut es = Vec::new();
             for _ in 0..ne {
-                es.push(r.v2()?);
+                es.push((r.v2()?, r.u8()? as f32));
             }
             let npk = r.u8()?;
             let mut pks = Vec::new();
@@ -844,7 +845,7 @@ impl Game {
         self.zombies = next;
         self.eshots = es
             .into_iter()
-            .map(|p| EShot {
+            .map(|(p, rad)| EShot {
                 pos: p,
                 prev: p,
                 vel: V2::ZERO,
@@ -852,6 +853,8 @@ impl Game {
                 dmg: 0.0,
                 dead: false,
                 turn: 0.0,
+                r: rad,
+                grazed: false,
             })
             .collect();
         self.pickups = pks

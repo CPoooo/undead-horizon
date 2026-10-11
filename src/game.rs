@@ -169,6 +169,10 @@ pub struct EShot {
     pub dead: bool,
     /// homing turn rate (0 = flies straight)
     pub turn: f32,
+    /// hit radius (spit 6.5, thrown rocks bigger)
+    pub r: f32,
+    /// already counted as a near miss
+    pub grazed: bool,
 }
 
 pub struct Gem {
@@ -819,6 +823,18 @@ impl Game {
         } else {
             1.0
         }
+    }
+
+    /// A shot whizzed past: a little score and ultimate charge.
+    fn graze(&mut self) {
+        if self.player.iframes > 0.0 {
+            return; // dashing through doesn't count
+        }
+        self.score += 10;
+        self.player.ult = (self.player.ult + 0.01).min(1.0);
+        let p = self.player.pos;
+        self.text(p + v2(0.0, -30.0), "GRAZE".into(), "#9fe0ff", 12.0);
+        self.sfx(Sfx::UiMove, p);
     }
 
     pub fn has_evo(&self, e: Evo) -> bool {
@@ -2633,6 +2649,36 @@ impl Game {
             let mut accel = 7.0;
 
             match z.kind {
+                ZKind::Brute if wave_n >= 12 => {
+                    z.special_t -= DT;
+                    if z.state == 0 && z.special_t <= 0.0 && (220.0..520.0).contains(&dist) && playing {
+                        z.state = 1;
+                        z.timer = 0.65;
+                        z.charge_dir = dir;
+                    }
+                    if z.state == 1 {
+                        spd = 0.0;
+                        z.timer -= DT;
+                        if z.timer <= 0.0 {
+                            z.state = 0;
+                            z.special_t = 5.0 + self.rng.range(0.0, 2.0);
+                            let lead = ppos + pvel * (dist / 260.0) * 0.5;
+                            let sdir = (lead - z.pos).norm();
+                            self.eshots.push(EShot {
+                                pos: z.pos + sdir * z.r,
+                                prev: z.pos,
+                                vel: sdir * 260.0,
+                                life: 2.6,
+                                dmg: z.dmg * 0.8,
+                                dead: false,
+                                turn: 0.0,
+                                r: 13.0,
+                                grazed: false,
+                            });
+                            self.pending_sfx.push((Sfx::Dash, z.pos));
+                        }
+                    }
+                }
                 ZKind::Spitter => {
                     if dist < 250.0 {
                         want = -dir;
@@ -2644,16 +2690,22 @@ impl Game {
                     if z.timer <= 0.0 && dist < 560.0 && playing {
                         z.timer = 2.4 + self.rng.range(-0.3, 0.3);
                         let lead = ppos + pvel * (dist / 340.0) * 0.6;
-                        let sdir = (lead - z.pos).norm();
-                        self.eshots.push(EShot {
-                            pos: z.pos + sdir * z.r,
-                            prev: z.pos,
-                            vel: sdir * 340.0,
-                            life: 2.2,
-                            dmg: z.dmg,
-                            dead: false,
-                            turn: 0.0,
-                        });
+                        let aim = (lead - z.pos).angle();
+                        let spread: &[f32] = if wave_n >= 15 { &[-0.22, 0.0, 0.22] } else { &[0.0] };
+                        for off in spread {
+                            let sdir = V2::from_angle(aim + off);
+                            self.eshots.push(EShot {
+                                pos: z.pos + sdir * z.r,
+                                prev: z.pos,
+                                vel: sdir * 340.0,
+                                life: 2.2,
+                                dmg: z.dmg,
+                                dead: false,
+                                turn: 0.0,
+                                r: 6.5,
+                                grazed: false,
+                            });
+                        }
                         self.pending_sfx.push((Sfx::Spit, z.pos));
                     }
                 }
@@ -2742,6 +2794,8 @@ impl Game {
                                         dmg: shot_dmg,
                                         dead: false,
                                         turn: 0.0,
+                                        r: 6.5,
+                                        grazed: false,
                                     });
                                 }
                             };
@@ -3153,11 +3207,25 @@ impl Game {
                 s.dead = true;
             } else if let Some(t) = targets
                 .iter()
-                .find(|t| t.0 != 255 && s.pos.dist(t.1) < PR + 7.0)
+                .find(|t| t.0 != 255 && s.pos.dist(t.1) < PR + s.r * 0.6 + 3.0)
             {
                 s.dead = true;
                 hits.push((i, t.0));
             }
+        }
+        // near misses on the local player: reward the dodge
+        let me = self.player.pos;
+        let mut grazes = 0;
+        if self.player_alive() {
+            for s in self.eshots.iter_mut() {
+                if !s.dead && !s.grazed && s.pos.dist(me) < PR + s.r + 26.0 {
+                    s.grazed = true;
+                    grazes += 1;
+                }
+            }
+        }
+        for _ in 0..grazes {
+            self.graze();
         }
         for (i, slot) in hits {
             let (d, p) = (self.eshots[i].dmg, self.eshots[i].pos);
@@ -3843,5 +3911,36 @@ mod tests {
         g.player.vel = V2::ZERO;
         g.butcher_hook(v2(300.0, 0.0), v2(-1.0, 0.0), 5.0);
         assert!(g.player.vel.x > 500.0, "pulled toward the butcher");
+    }
+
+    #[test]
+    fn rocks_spreads_and_grazes() {
+        let mut g = Game::new(22);
+        g.start("diff=rookie");
+        g.wave.n = 16;
+        // high-wave spitters fire a 3-way spread
+        g.spawn_zombie(ZKind::Spitter, v2(450.0, 0.0));
+        g.zombies[0].timer = 0.0;
+        g.grid.build(g.player.pos, &g.zombies);
+        g.update_zombies();
+        assert_eq!(g.eshots.len(), 3);
+        // a near miss grazes once
+        g.eshots.clear();
+        g.player.iframes = 0.0;
+        g.eshots.push(EShot { pos: v2(30.0, 30.0), prev: v2(30.0, 30.0), vel: v2(0.0, 0.0), life: 1.0, dmg: 5.0, dead: false, turn: 0.0, r: 6.5, grazed: false });
+        let s0 = g.score;
+        g.update_eshots();
+        g.update_eshots();
+        assert_eq!(g.score, s0 + 10, "grazed exactly once");
+        // brutes wind up and throw rocks
+        g.eshots.clear();
+        g.zombies.clear();
+        g.spawn_zombie(ZKind::Brute, v2(400.0, 0.0));
+        g.zombies[0].special_t = 0.0;
+        g.grid.build(g.player.pos, &g.zombies);
+        for _ in 0..120 {
+            g.update_zombies();
+        }
+        assert!(g.eshots.iter().any(|s| s.r > 10.0), "a rock is in the air");
     }
 }

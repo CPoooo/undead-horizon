@@ -123,6 +123,8 @@ impl Game {
             dmg: z.dmg * 0.5,
             dead: false,
             turn: 0.0,
+            r: 6.5,
+            grazed: false,
         });
     }
 

@@ -180,7 +180,7 @@ Not scheduled yet; design notes for when we pick it up.
     - **Medic:** heal pulse and faster revives
     - **Pyro:** flame cone
   - C8c (S) unlock gating through achievements (P5)
-- [ ] C9 (S) **Projectile pressure.** More enemy projectiles with fair telegraphs (dodge skill expression), plus a "danger" outline for bullets hitting the player.
+- [x] C9 (S) **Projectile pressure.** More enemy projectiles with fair telegraphs (dodge skill expression), plus a "danger" outline for bullets hitting the player.
 
 ### M3 · Outbreak mode (CoD Zombies homage — use original names, no trademarks)
 - [ ] O1 (M) **First map.** "Hollowbrook Asylum" in `assets/maps/asylum.json`: about 6 zones, doors and debris, spawn windows with barricades. Depends on F2 and F3.

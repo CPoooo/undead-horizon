@@ -181,6 +181,8 @@ impl Game {
                 dmg,
                 dead: false,
                 turn: 1.6,
+                r: 8.0,
+                grazed: false,
             });
         }
         for at in swarms {

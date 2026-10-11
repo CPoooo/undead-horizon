@@ -676,6 +676,36 @@ impl Game {
                 c.restore();
                 c.set_global_alpha(1.0);
             }
+            if z.kind == ZKind::Spitter && z.timer < 0.35 && !self.player.dead {
+                let k = 1.0 - z.timer / 0.35;
+                let tgt = self.player.prev.lerp(self.player.pos, a);
+                if tgt.dist(p) < 560.0 {
+                    c.set_stroke_style_str("#9be04a");
+                    c.set_global_alpha(d(0.15 + 0.35 * k));
+                    c.set_line_width(2.0);
+                    c.begin_path();
+                    c.move_to(d(p.x), d(p.y));
+                    c.line_to(d(tgt.x), d(tgt.y));
+                    c.stroke();
+                    c.set_global_alpha(1.0);
+                }
+            }
+            if z.kind == ZKind::Brute && z.state == 1 {
+                // rock held overhead, landing line ahead
+                let k = 1.0 - (z.timer / 0.65).clamp(0.0, 1.0);
+                let hand = p + v2(0.0, -z.r * 2.0 - 8.0 * k);
+                c.set_fill_style_str("#6b6e74");
+                circle(c, hand.x, hand.y, 13.0);
+                c.set_stroke_style_str("#ff6040");
+                c.set_global_alpha(d(0.2 + 0.4 * k));
+                c.set_line_width(3.0);
+                c.begin_path();
+                c.move_to(d(p.x), d(p.y));
+                let e = p + z.charge_dir * 360.0;
+                c.line_to(d(e.x), d(e.y));
+                c.stroke();
+                c.set_global_alpha(1.0);
+            }
             if z.kind == ZKind::Exploder && z.fuse > 0.0 {
                 let k = 1.0 - z.fuse / 0.55;
                 c.set_global_alpha(d(0.15 + 0.3 * k));
@@ -1595,24 +1625,54 @@ impl Game {
             }
             c.fill();
         }
-        // enemy acid
+        // enemy acid (rocks are drawn solid below)
         c.set_fill_style_str("#7dff3a");
         c.set_global_alpha(0.35);
         c.begin_path();
-        for s in self.eshots.iter() {
+        for s in self.eshots.iter().filter(|s| s.r < 10.0) {
             let p = s.prev.lerp(s.pos, a);
-            path_circle(c, p.x, p.y, 13.0);
+            path_circle(c, p.x, p.y, s.r * 2.0);
         }
         c.fill();
         let _ = c.set_global_composite_operation("source-over");
         c.set_global_alpha(1.0);
         c.set_fill_style_str("#c4ff6a");
         c.begin_path();
-        for s in self.eshots.iter() {
+        for s in self.eshots.iter().filter(|s| s.r < 10.0) {
             let p = s.prev.lerp(s.pos, a);
-            path_circle(c, p.x, p.y, 6.5);
+            path_circle(c, p.x, p.y, s.r);
         }
         c.fill();
+        for s in self.eshots.iter().filter(|s| s.r >= 10.0) {
+            let p = s.prev.lerp(s.pos, a);
+            let top = self.lift(p, 18.0);
+            c.set_fill_style_str("rgba(0,0,0,0.3)");
+            circle(c, p.x + 4.0, p.y + 6.0, s.r);
+            c.set_fill_style_str("#6b6e74");
+            circle(c, top.x, top.y, s.r);
+            c.set_fill_style_str("#8a8e96");
+            circle(c, top.x - s.r * 0.3, top.y - s.r * 0.3, s.r * 0.4);
+        }
+        // danger: shots on a collision course with you get a red outline
+        if self.player_alive() {
+            let me = self.player.prev.lerp(self.player.pos, a);
+            let pulse = 0.55 + 0.45 * (self.real_time as f32 * 14.0).sin().abs();
+            c.set_stroke_style_str("#ff3040");
+            c.set_line_width(2.0);
+            c.set_global_alpha(d(pulse));
+            c.begin_path();
+            for s in self.eshots.iter() {
+                let p = s.prev.lerp(s.pos, a);
+                let rel = me - p;
+                let v2_ = s.vel.len2().max(1.0);
+                let tc = (rel.dot(s.vel) / v2_).clamp(0.0, 0.7);
+                if (p + s.vel * tc).dist(me) < PR + s.r + 6.0 {
+                    path_circle_stroke(c, p.x, p.y, s.r + 5.0);
+                }
+            }
+            c.stroke();
+            c.set_global_alpha(1.0);
+        }
     }
 
     /// Additive glow pools for transient lights (muzzle flashes, blasts).
