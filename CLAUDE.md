@@ -1,334 +1,534 @@
 # Undead Horizon — project notes for Claude
 
-Infinite 2.5D top-down zombie wave survival in Rust + WebAssembly (Canvas2D, WebAudio).
-Live at https://cpoooo.github.io/undead-horizon/ (deployed by `.github/workflows/pages.yml` on push to `main`).
+Infinite 2.5D top-down zombie survival in Rust + WebAssembly (Canvas2D, procedural WebAudio), with online co-op, three game loops (Infinite/Campaign horde, Outbreak, Siege), a walkable social Home Base with AI vendors, and a Neon backend.
+Live at https://cpoooo.github.io/undead-horizon/ (deployed by `.github/workflows/pages.yml` on every push to `main`).
 
-## Build & run
+_Last full status update: 2026-10-11 (latest commit at that time: `e1beb25`)._
+
+---
+
+## 1. Status at a glance
+
+Legend:
+- ✅ **Live**: works on the site now.
+- 🟡 **Needs deploy**: the client is live, but the server part isn't deployed yet (`npm run db:schema && npm run deploy:api`). Guests (signed out) usually get the local fallback.
+- 🔑 **Needs config**: needs a secret in `.env.local` before deploying.
+- 📱 **Needs device test**: built and tested in desktop/mobile emulation, but not yet on a real iPhone.
+
+| Area | Feature | State |
+|---|---|---|
+| Core | Infinite mode, Campaign (5 chapters), 4 difficulties, loadouts, shop, locker, save slots | ✅ |
+| Core | Combat depth: evolutions, chests, elements, elite affixes, 5 new archetypes, Boss 2.0, characters/abilities, projectile pressure | ✅ |
+| Core | Outbreak mode (2 maps, points, doors, box, perks, power, upgrade machine, power-ups, hounds, traps, buildables, easter egg) | ✅ (its leaderboard 🟡) |
+| Core | Siege mode (3 maps, 6 defenses ×3 tiers, mana, stars, Glass variant) | ✅ |
+| Core | AI Director (stress-paced spawns, horde rushes, mercy hearts) | ✅ |
+| Core | Nemesis system | ✅ (synced across devices once settings sync 🟡 is deployed) |
+| Core | Death recap ("Killed by …", last 8s) | ✅ |
+| Core | Photo mode | ✅ (phone share sheet 📱) |
+| Feel | Weapon feel, hit reactions, corpses, dynamic light, audio 2.0, camera, haptics, callouts | ✅ |
+| World | Day/night + weather, biomes, destructibles, character polish + cosmetic slots, lobby music picker, cutscenes | ✅ |
+| Platform | Gamepad + remap, accessibility suite, PWA/offline, perf/LOD, tutorial, i18n (en/es) | ✅ |
+| Platform | Settings sync, balance telemetry, error reporting (`/me/settings`, run columns, `/errors`) | 🟡 |
+| Platform | Safari / iOS | 📱 (layouts, touch, PWA done; needs a real-device pass) |
+| Accounts | Sign-in (email + Google), cloud profile, global leaderboard | ✅ |
+| Accounts | Leaderboard filters (mode/map/players/friends/week/pure), daily board, outbreak board, hiding e2e test accounts | 🟡 |
+| Progression | Account level, achievements (53), meta upgrades, relics, weapon mastery, bestiary, Career tab | ✅ for guests; 🟡 for signed-in (server routes) |
+| Live | Daily/weekly challenges, daily seeded run, Season 1 pass, mutators, welcome-back bonus | ✅ for guests; 🟡 for signed-in |
+| Live | **Hollow Night** event (Oct 1 – Nov 2): pumpkin zombies, candy, free Jack-o'-Lantern hat | ✅ for guests; 🟡 candy for signed-in |
+| Co-op | 2-player co-op (Infinite), lobby chat, voice chat, block/report | ✅ |
+| Co-op | Pings/emotes, squad scoreboard + MVP, ICE restart/reconnect grace, host migration | ✅ |
+| Co-op | TURN relay | ✅ (Metered free plan caps live credentials at 10; see §2) |
+| Co-op | 4-player parties, co-op Outbreak/Siege/Campaign mode picker | 🟡 (game supports 4 and all modes; server still caps parties at 3 and accepts only the old mode set) |
+| Co-op | Rejoin a running match after a drop | ✅ |
+| Co-op | A new friend joining a match in progress | 🟡 (server must allow `party.join` into `in_game` parties) |
+| Co-op | Public parties, squad browser, Quick Play | 🟡 |
+| Home Base | Walkable hub, vendor stalls, firing range + DPS meter, Hall of Survivors, mission terminal | ✅ |
+| Home Base | AI vendor dialogue (Claude) | 🟡🔑 (canned lines until `/vendor` is deployed with `ANTHROPIC_API_KEY`) |
+| Home Base | The Outskirts free-roam zone, Supply Drop events | ✅ (coin reward for signed-in 🟡 `/hub/reward`; guests get local coins) |
+| Home Base | Party members walking the hub, emotes, proximity voice, instances with strangers | 🟡 |
+
+---
+
+## 2. Owner to-do (things only you can do)
+
+1. **Deploy the server**: `npm run db:schema && npm run deploy:api`. This one step turns every 🟡 above live. It covers, in order of when it was built:
+   - `/errors`
+   - character + cosmetic categories
+   - Outbreak/Siege run modes, score and map
+   - leaderboard filters + the Outbreak board
+   - `party.mode`
+   - `hub.pos` relay
+   - progression routes (`/meta/buy`, `/relics/equip`, `/achievement`, `/welcome`)
+   - daily/mutated/pure/cause/build columns + the balance views
+   - `/me/settings`
+   - `MAX_PARTY` 4
+   - campaign party mode + `parties.chapter`
+   - joining `in_game` parties
+   - public parties + Quick Play
+   - `/hub/reward`
+   - hub emotes + `hub_presence` instances
+   - event candy in `/runs`
+   - the leaderboard test-account filter
+2. **AI vendors**: add `ANTHROPIC_API_KEY` to `.env.local` before deploying (`neon.ts` already passes it). Without it, vendors use canned lines.
+3. **TURN**: Metered's free plan allows 10 live credentials (4h expiry), and the server mints one per isolate when `METERED_API_KEY` is unset. If friends can't connect and `/turn` logs "Maximum credential limit reached", either set `METERED_API_KEY` or make `/turn` reuse an existing credential (`GET https://<app>.metered.live/api/v2/turn/credentials?secretKey=`).
+4. **Real iPhone pass** (Safari + home-screen PWA):
+   - audio unlock
+   - sign-in and session restore (ITP)
+   - co-op and voice
+   - invite share sheet
+   - Photo mode share sheet
+   - touch controls
+5. **Optional cleanup**: 114 of the 122 runs in `runs` come from e2e test accounts (`uh-test-*@example.com`). Once deployed they're hidden from leaderboards. To delete them, run:
+   ```sql
+   delete from runs where user_id in (select id::text from neon_auth."user" where email like 'uh-test-%@example.com');
+   ```
+   This has not been run.
+
+---
+
+## 3. Build, run, test
 
 ```bash
 trunk serve --release                              # local dev at http://127.0.0.1:8080
 trunk build --release                              # production bundle in dist/
-cargo build --target wasm32-unknown-unknown        # fast type-check
+cargo build --target wasm32-unknown-unknown        # fast type-check (must have no warnings)
+cargo test --release                               # native sim tests (52 as of 2026-10-11)
+for f in ui/*.js; do node --check "$f"; done       # JS syntax check
+npm run build:cloud                                # after editing ui/cloud-src.js (CI also does it)
 ```
 
-## Architecture
+**End-to-end (Playwright, real Chromium):**
+- First serve `dist/` on :8765 with `cd dist && python3 -m http.server 8765`, then run `npm run e2e`.
+- Suites, in order: `turn`, `coop`, `chat-voice`, `outbreak`, `hub`, `career`, `photo`, `nemesis`, `event`. Shared helpers are in `tests/e2e/lib.mjs`. Screenshots go to `tests/e2e/out/`.
+- `coop`, `chat-voice` and `turn` sign up fresh accounts (`uh-test-<name>-<ts>@example.com`) against the live Neon Auth and social server.
+- Suites fail only on page errors. Failed fetches (e.g. routes not deployed yet) are logged but tolerated.
+- WSL without system libnss3: extract the `libnss3`/`libnspr4` debs into `~/.cache/uh-libs` (or set `UH_LIBS`). `UH_CHROME` overrides the Chromium path.
+- Occasional flake: a party join in `coop`/`chat-voice` can time out on a slow social-server round trip. Rerun before debugging.
 
-- `src/main.rs`: browser bootstrap, input listeners (keyboard, mouse, touch joystick), rAF loop, and the JS bridge (`window.uhPoll` command queue JS→Rust, `window.uhEvent` notifications Rust→JS).
-- `src/game.rs`: all simulation. It uses a fixed 120 Hz step (`DT`) with render interpolation via `prev`/`pos` and an accumulator. It covers phases (Menu/Playing/LevelUp/Paused/Dying/GameOver), the player, zombie AI, weapons and powers, waves, pickups, and a spatial hash `Grid` that is rebuilt every step.
-- `src/render.rs`: the Canvas2D renderer. Depth comes from `lift()` (perspective offset from the camera) plus y-sorting.
-- `src/audio.rs`: procedural WebAudio sound effects and the adaptive music scheduler. There are no audio asset files.
-- `src/upgrades.rs`: upgrade and superpower definitions and weighted level-up rolls.
-- `src/world.rs`: the infinite deterministic world, generated from a hash of the cell coordinate, plus obstacle collision.
-- `index.html`: HTML/CSS/JS menus, settings, and the leaderboard (currently localStorage).
+**Dev commands** (send from the console with `window.UHUI.send('dev|…')`):
+- `chest`, `elites`, `kinds`, `horde` (800 zombies)
+- `boss=N`, `tp=x,y`, `points=N`, `biome=snow|town|forest|graveyard`
+- `sky=rain|fog|clear,clock`
+- `tank` (10M HP)
+- `drop` (Supply Drop next to you, hub only)
 
-## Conventions
+---
 
-- Gameplay feel comes first: keep the sim deterministic per step, interpolate everything that moves, and avoid per-frame allocations in hot loops.
-- Sounds are queued through `Game::sfx(sfx, world_pos)` so they get stereo panning and distance attenuation.
-- Entities are flagged `dead` during a step and removed with `retain` at the end of `step()`.
+## 4. Code map
 
-## Features to be implemented
+### Rust (`src/`)
+| File | What |
+|---|---|
+| `main.rs` | Browser bootstrap, input listeners, rAF loop, the JS bridge (`uhPoll` JS→Rust command queue, `uhEvent` Rust→JS notifications, `uhNetSend`/`uhNetPoll` for co-op bytes) and the command dispatch (incl. `dev|`). |
+| `game.rs` | The core sim (~4.9k lines; `grep -n` anchors, never read it whole). Fixed 120 Hz step (`DT`) with render interpolation (`prev`/`pos`); phases Menu/Playing/LevelUp/Paused/Dying/GameOver; player, zombies, weapons, powers, pickups, spatial hash `Grid`, `apply_opts`, `stats_json`, saves (`SAVE_VERSION` 2). |
+| `modes/` | `Mode` enum + `ModeHooks` (`on_start`, `update_waves`, `on_kill`, `hud`, `is_over`). `infinite.rs`, `campaign.rs`, `horde.rs` (shared wave spawner, boss waves, chapter victory), `outbreak.rs`, `siege.rs`, `hub.rs` (Home Base + Outskirts). |
+| `content.rs` | Data tables: `ENEMIES` (15 kinds), `GUNS`, `DIFFICULTIES`, `CHAPTERS`, bosses, skins/hats/tracers/packs/killfx/deathfx/emotes, mutators. Ids are shared with the UI catalog. |
+| `coop.rs` / `net.rs` | Co-op: authority model, wire format (`PROTOCOL` 14), snapshots, replicas, hit reporting, kill credit, shared XP, revive, events, late join sync, checkpoints, host migration. |
+| `director.rs` | AI Director pacing. |
+| `nemesis.rs` | Nemesis system. |
+| `photo.rs` | Photo mode camera + overlays. |
+| `upgrades.rs`, `chest.rs`, `status.rs`, `elites.rs`, `boss.rs`, `abilities.rs` | Level-up powers + evolutions, chests, elements, affixes, Boss 2.0, character abilities. |
+| `outbreak_interact.rs`, `secrets.rs`, `nav.rs` | Outbreak interactables (doors/box/perks/power/traps), buildables + easter egg, flow-field navigation. |
+| `world.rs` | Procedural infinite world (hash per cell, biomes) plus authored JSON maps (`Level` trait: `ProceduralWorld`/`AuthoredMap`), collision (`resolve`, `blocking`). |
+| `render*.rs` | Canvas2D renderer (`lift()` perspective + y-sort), lighting, authored maps, Outbreak/Siege/Home Base visuals. |
+| `audio.rs` | Procedural SFX, adaptive music stems, lobby tunes, announcer. |
+| `input.rs`, `ping.rs`, `callouts.rs`, `corpses.rs`, `destruct.rs`, `weather.rs`, `tutorial.rs`, `math.rs` | Action map, pings/emotes, kill feed/combos, corpses, destructibles, day/night + weather, tutorial, vector math. |
 
-- [x] 1. **Co-op mode**: real-time online co-op for up to 3 players (Infinite mode).
-  - Gameplay is WebRTC peer-to-peer with the host as the hub. `src/net.rs` defines the wire format and authority model; `src/coop.rs` holds snapshots, replicas, hit reporting, kill credit, shared XP and revive; `ui/coop.js` holds the transport.
-  - Downed players can crawl. A teammate standing within 75 units for 3s revives them. Bleed-out after 30s leads to spectating, and a team wipe ends the game for everyone.
-  - Connecting: the host sends an offer per client over the social socket; ICE candidates are trickled in batches. `GET /turn` (API) returns STUN plus short-lived Metered TURN credentials (`METERED_APP` + `METERED_SECRET_KEY` or `METERED_API_KEY` in `.env.local`); without them it falls back to STUN only. Signals carry a session id (`party.seed`) so stale offers/candidates are ignored.
-  - Match start: everyone sees the loading screen (`#coop-load`) with per-player link status; the host gets "Start without them / Retry / Cancel" after 20s, a client gives up after 40s. Sounds: `sfx|ready` (everyone ready), `sfx|start` (launch sting), `sfx|click`.
-  - **Chat:** party text chat in the lobby panel and in matches (T or / to type, 💬 on touch), via the social socket (`chat` message). The server (`server/chat.ts`) caps length at 200, rate-limits (5-message bucket), masks profanity and skips recipients who blocked the sender. Click a name for volume / Block / Report (`blocks`, `reports` tables; unblock in Friends).
-  - **Voice:** `ui/voice.js` runs an audio-only WebRTC mesh between party members who joined voice (lower user id offers; `v-offer|v-answer|v-ice` signals; TURN from `/turn`). Mute, open mic or push-to-talk (hold V), per-player volume, speaking rings, and in-game speaker chips. Blocked players are never connected. `party_members.voice` shows 🎙 in the party list.
-- [x] 2. **Persistence in Neon DB**: profiles (coins, owned items, equipped loadout and cosmetics, campaign progress, stats), save states and every run are stored in Neon Postgres. The leaderboard is global (each player's best infinite run) and auto-refreshes every 5s while visible.
-- [x] 3. **Login / accounts**: Neon Managed Auth (Better Auth), with email and password sign-up/sign-in and Google sign-in. Sessions persist across reloads and devices. On the first sign-in, offline progress is imported once (coins capped at 5000). Guests can still play offline with browser storage.
-- [x] 4. **Shop & customizations**: coins are earned by clearing waves (scaled by difficulty) plus boss and chapter bonuses. They buy guns, perks, skins, hats and bullet tracers in the 🛒 Shop.
-- [x] 5. **Multiple difficulties**: Rookie, Survivor, Veteran and Nightmare (`content::DIFFICULTIES`). They scale HP, damage, horde size, speed and coin rewards.
-- [x] 6. **Loadouts**: a primary weapon (6 guns with distinct handling, in `content::GUNS`) plus a starting perk, chosen in the 🎒 Locker.
-- [x] 7. **Character / inventory screen**: the lobby renders your character in-engine on a pedestal, live, facing your cursor. The Locker equips owned items and updates the model instantly.
-- [x] 8. **Campaign mode**: 5 chapters with a story ("Rook and Mara vs. the Bloom"). Each has a typewriter intro and outro, radio chatter per wave, and a unique boss fight (Gravedigger, Matriarch, Cinder King, Twin Wraiths, Bloom Heart). Chapters unlock in order.
-- [x] 9. **Infinite mode**: endless survival. Bosses rotate every 5 waves, and it is the only mode ranked on the leaderboard.
-- [x] 10. **Fortnite / CoD-style lobby**: before starting infinite co-op, players can invite friends to their lobby, customize their character, and see their friends list. The host sets the difficulty before loading into the game.
-  - The social server is in `server/social.ts`: a Neon WebSocket with fan-out across isolates through the `events` table.
-  - **Friends:** friend codes, requests, presence, and an invite button.
-  - **Parties:** up to 3 players, with ready checks and a host-set difficulty. A shareable `?party=ID&t=TOKEN` link joins the party and makes you friends with the host.
-  - **Lobby:** party members stand next to you in the lobby showcase.
+### UI (`ui/`, loaded by `index.html` via trunk)
+| File | What |
+|---|---|
+| `app.js` | Menus, lobby, shop/locker catalog + prices (`CATALOG`), story text, settings, game-event handlers, `Data` (localStorage when signed out, cloud API when signed in), Home Base stall UI, Nemesis naming, event UI. |
+| `coop.js` | Social socket client (friends, parties, invites, chat relay), WebRTC game transport, loading screen, ICE restart, rejoin, host migration, public parties/Quick Play, hub presence. |
+| `voice.js` | Voice chat mesh (+ hub proximity volume). |
+| `chat.js` | Chat panels. |
+| `photo.js` | Photo mode panel + capture. |
+| `gamepad.js` | Gamepad input. |
+| `i18n.js` | Translations. |
+| `progression.js` | Shared (UMD) progression rules, used by both the UI and `server/index.ts`: account XP, achievements, meta, relics, challenges, season, mutators, the limited-time `EVENT`. |
+| `cloud-src.js` → `cloud.js` | Neon Auth client bundle. |
+| `config.js` | Public API/auth URLs. |
+| `style.css` | Styles. |
 
-- [x] 11. **Separate save slots**: one Infinite save and one Campaign save, which can coexist. Starting a new run of a mode overwrites that mode's save. Tooltips on Play and Save warn before that happens.
-- [x] 12. **Lobby music picker** *(→ Roadmap v2 · V5)*: let players choose the lobby song on the home screen (cycle through pre-made procedural tunes). The first lobby tune ("Graveyard Shuffle") is in `src/audio.rs`; tunes should be data-driven so new ones are easy to add.
-- [ ] 13. **Make it playable in Safari and on mobile** *(→ Roadmap v2 · A3)* *(mobile layout done; Safari and iOS real-device testing still open)*. Done so far:
-  - **Lobby:** the phone lobby uses a bottom nav with one panel at a time, a lifted character showcase, and large touch targets.
-  - **Level-up:** cards stack vertically on narrow screens.
-  - **Overlays:** they scroll full-width.
-  - **Banners:** they stay clear of the touch minimap.
-  - **Still open:** the items below.: support Safari (desktop and iOS) and offer mobile play as an option.
-  - **Detecting mobile**: decide when mobile controls appear. Use `matchMedia('(pointer: coarse)')` together with `(hover: none)`, and switch on the first `touchstart` instead of sniffing the user agent. That way touch laptops and iPads with keyboards aren't misdetected, and the controls never get in the way on a laptop. Add an explicit override in Settings ("Touch controls: Auto / On / Off").
-  - **Overhaul or adapt?** The game canvas already scales to any size and has a floating joystick, tap-to-dash, auto-aim and touch buttons. So in-game play does **not** need a redesign: add safe-area insets, bigger HUD hit targets, and a portrait-mode zoom. The HTML menus (lobby 3-column grid, shop and locker grids, pause stats) collapse into one column below 980px today but are long and scroll-heavy. A good middle ground is a **tabbed bottom-nav lobby on mobile** (Play / Party / Shop / Locker / Board), reusing the same panels, instead of a separate mobile UI.
-  - **Safari specifics**:
-    - Web Audio must be unlocked inside a touch or click gesture (we do this, but verify on iOS).
-    - Check `desynchronized` canvas support.
-    - WebRTC works in Safari but needs real-device testing.
-    - Third-party cookie blocking (ITP) can break the Neon Auth session restore across domains. The bearer-JWT fallback in `ui/cloud-src.js` should cover it; verify on iOS.
-  - **If this grows too big**: put a pin in the full mobile lobby redesign and ship only "Safari works + touch controls auto-detect" first.
- shows full run stats (HP, XP, damage per shot, fire rate, crit, speed, powers) and can **save the run** (resumes from the start of the current wave; one save slot, consumed on resume).
+### Server (`server/`, Neon Functions; deploy with `npm run deploy:api`)
+| File | What |
+|---|---|
+| `index.ts` | HTTP API (Hono + `pg`, JWT via Neon Auth JWKS). |
+| `social.ts` | WebSocket social server (fan-out across isolates via the `events` table). |
+| `vendor.ts` | AI vendor dialogue. |
+| `chat.ts` | Chat filter/limits. |
+| `catalog.ts` | Prices + coin caps. These **must mirror** `ui/app.js` CATALOG and the coin formulas in Rust. |
+| `shared.ts` | DB pool, token verify, profiles. |
+| `schema.sql` | Idempotent schema; append only. |
 
-### Where things live
-- Content tables (ids shared with the UI catalog): `src/content.rs`. The shop catalog, prices and story text are in `ui/app.js`.
-- UI to game commands: `start|k=v;...`, `equip|k=v;...`, `save`, `load|<save string>`, `pause`, `resume`, `menu`, `vol|`, `music|`, `autoaim|`.
-- Game to UI events: `ready`, `pause` (run JSON), `resume`, `saved` (save string), `gameover` and `victory` (stats JSON), `autoaim`, `wave`.
-- Player profile, leaderboard and saves go through `Data` in `ui/app.js`: localStorage when signed out, and the cloud API when signed in (`window.UHCloud`, from `ui/cloud-src.js`).
+### Assets
+- `assets/maps/*.json`: `asylum`, `refinery` (Outbreak), `keep`, `bridge`, `crossroads` (Siege), `hub` (Home Base + Outskirts), `testbox`.
+- `assets/manifest.webmanifest`, `sw.js` (network-first service worker), icons.
 
-## Home Base (free-roam social hub, à la Destiny's Tower)
+---
 
-**Built (v1):** `modes/hub.rs`, `render_hub.rs`, `assets/maps/hub.json`, the vendor stall UI in `ui/app.js`, and `server/vendor.ts`.
-- Lobby "🏠 Enter Home Base" starts `mode=hub`. Vendor NPCs: Rusty Vex (guns), Madame Lucienne (skins/hats), Sgt. Dole (perks/tracers), Ada (missions terminal); the memorial shows the leaderboard; a firing range has unkillable dummies and a DPS meter (shooting is only allowed there).
-- E opens a stall (docked panel): items to buy/equip, the vendor's line, and a "Say something" box. Lines come from `POST /vendor` (Claude `claude-opus-5-5` at low effort via `@anthropic-ai/sdk`, cached persona prompt, server-side refusal fallback, per-caller rate limits, a reuse cache) and fall back to canned lines without `ANTHROPIC_API_KEY`. Lines show as speech bubbles and are spoken with per-vendor Web Speech voices (Settings toggle).
-- Party members in the hub are relayed through the social socket (`hub.pos` → `{t:'hub'}`), drawn walking around, with chat as speech bubbles.
-- **The Outskirts (free roam):** east through the gate (`hub.json` zone `outskirts`). Weapons are free there, ambient zombies spawn (no XP or gems in the hub), and the gate turret zaps anything following you into the plaza. Going down is a rescue back to base, never a game over. **Supply Drops** land every ~2 min while you're out there: hold the beacon ring for 30s against a surge for 🪙 40 (`POST /hub/reward`, once per 2 min per account; local profile for guests). `dev|drop` forces one.
-- **Emotes:** Y (or the emote button) in the hub shows your emote over your head for party members (`hub.pos` carries `emote`; needs deploy).
-- **Proximity voice:** in the hub, party voice volume follows distance (full within 250 units, 10% at 1400+) via `UHVoice.setProximity`; reset on leaving.
-- **Instances with strangers:** every `hub.pos` upserts `hub_presence`; the sender gets `{t:'hub.instance'}` (≤2 Hz) with everyone in its instance (16 per instance, party members kept together, blocks respected). Strangers get light-blue nameplates, party green; up to 24 shown. `hub.leave` on exit; stale rows cleaned up. Needs db:schema + deploy.
+## 5. Bridges, protocols and APIs
 
-Original design notes:
+**UI → game commands** (`window.UHUI.send('cmd|args')`):
+- Run control: `start|k=v;…`, `load|<save>`, `save`, `pause`, `resume`, `menu`.
+- Co-op: `coop|<opts>`, `peerleft|slot`, `peerjoin|slot|name`, `promote|old`, `hostmoved|old|new`, `lobbymates|…`.
+- Loadout: `equip|k=v;…`.
+- Settings: `vol|`, `music|`, `tune|`, `autoaim|`, `access|`, `lookahead|`, `bind|`, `touch|`.
+- Input: `dash`, `ult`, `use`, `act|`, `pad|`.
+- Home Base: `hubmates|name~x~y~aim~skin~hat~gun~emote~party|…`, `hubbubble|name|text`, `hubclose`, `npcsay|id|line`.
+- Other: `photo|…`, `sfx|ready|start|click`, `dev|…`.
 
-- **What:** a walkable, persistent hub world that replaces (or sits behind) the menu lobby. You spawn in as your equipped character and can see and walk around with other players who are in the Home Base at the same time, not only party members.
-- **Vendors replace menu screens:** everything bought in the main menu today (guns, perks, skins, hats, tracers, later relics/permanent upgrades/season pass) is sold by in-world vendor NPCs at stalls. Walk up, press Interact, and a shop panel opens anchored to that vendor; the menu Shop stays as a fallback on mobile/accessibility.
-- **AI vendors with personality:** each vendor has a name, look, voice and attitude (e.g. a paranoid gunsmith, a theatrical tailor, a deadpan quartermaster). They greet you, react to what you browse and buy ("Ooh, the Thunder Coat. Bold. Zombies hate bold."), complain when you're broke, and drop random funny one-liners. Lines come from an LLM (Claude via the `api` function, with a persona prompt, the item catalog and the player's purchase context; short, PG-13, cached and rate-limited, with a canned-line fallback offline). They make noises: synthesized voice barks/grunts in `audio.rs`, optionally Web Speech for full lines (toggle).
-- **Social:** proximity text bubbles and the existing voice chat (proximity volume), emotes, party up by walking to someone and inviting, a mission terminal/board that starts Infinite, Campaign, Outbreak or Siege with your party, the leaderboard as an in-world monument, and a firing range to try guns before buying.
-- **Tech sketch:**
-  - Instanced hubs of ~16–24 players, assigned by the social server.
-  - Movement-only replication (position, facing, look, emote) at about 10 Hz.
-  - Relay over the social WebSocket, or a dedicated realtime relay, rather than mesh WebRTC.
-  - An authored hub map (needs F2), reused NPC rendering, and server-authoritative purchases exactly as today.
-- **Free roam:** the hub opens out into a small free-roam zone with ambient zombies, public events and loot caches. Pick-up/drop-out with anyone in the instance.
+**Start options** (`start|`, `coop|`, `load|`):
+- Run setup: `name`, `best`, `mode=infinite|campaign|outbreak|siege|hub`, `chapter`, `diff`, `map`, `variant=glass`.
+- Modifiers: `mut=…`, `seed`, `tutorial=1`.
+- Loadout and cosmetics: `gun`, `perk`, `skin`, `hat`, `tracer`, `char`, `pack`, `killfx`, `deathfx`, `emote`.
+- New in this round: `nemesis=<kind>,<rank>,<name>`, `event=hollow`.
+- Co-op only: `role`, `me`, `names`, `present`, `late=1`.
 
-## Roadmap v2 (research-backed; no real-money purchases)
+**Game → UI events** (`uhEvent(kind, data)`):
+- Run lifecycle: `ready`, `pause` (run JSON), `resume`, `saved`, `gameover`/`victory` (stats JSON with `squad`, `recap`, `candy`, `cause`, `build`, …), `wave`, `siegestars`.
+- Feedback: `achievement`, `haptic`, `say` (announcer/subtitles), `tune`, `bindings`, `tutorial`, `usebtn`/`readybtn`, `netversion`.
+- Home Base: `hubopen`/`hubleave`/`hubmenu`, `hubpos`, `hubemote`, `hubreward`.
+- Nemesis: `nemesis` (`kind|again`), `nemesisslain` (rank).
 
-### Pillars
-1. **Feel first.** Every frequent action gets layered feedback, and intensity is always adjustable.
-2. **Readable depth.** Simple controls, deep builds: synergies, evolutions, elements, affixes.
-3. **Three loops.** Infinite (survivor-like), Outbreak (CoD Zombies point economy), Siege (Dungeon Defenders build and fight). All three work in co-op.
-4. **Respectful retention.** Free seasonal pass, dailies and weeklies, unlocks as goals, no FOMO or loot-box mechanics.
-5. **Everywhere.** Keyboard, gamepad and touch; Safari and mobile; accessibility options.
+**Co-op wire format** (`src/net.rs`, `PROTOCOL` = 14; mismatched peers bail with a toast):
+- **Authority model:**
+  - The host owns zombies, waves, enemy shots, gems, pickups and kill credit.
+  - Every player owns their own character and bullets. Clients report hits; the host applies them.
+- **Messages:**
+  - `MSG_PSTATE`, `MSG_HITS`, `MSG_SNAP` (20 Hz, i16 positions)
+  - `MSG_GEMS`, `MSG_EVENTS`, `MSG_HELLO`, `MSG_WORLD`
+  - `MSG_BUILD`, `MSG_DEFENSE`, `MSG_READY`, `MSG_PING`
+  - `MSG_CHECKPOINT` (1 Hz, host-only state for migration)
+- **Events:**
+  - `E_HURT`, `E_KILL`, `E_XP`, `E_HEAL`, `E_FRENZY`, `E_GAMEOVER`, `E_BLAST`, `E_PULL`
+  - `E_WAVE_START`, `E_WAVE_CLEAR`, `E_BOSS`, `E_CHEST`, `E_POWERUP`
+  - `E_BOARDS`, `E_WORLD`, `E_DEFENSE`, `E_DEFCHANGE`, `E_MANA`, `E_CRYSTAL`
+  - `E_PING`, `E_VICTORY`
+- On clients the host's WebRTC link is always keyed `0`; `Net.host_slot` tracks the real host slot after a migration.
 
-### How agents execute a task (token-optimal protocol)
-- **One task = one session = one commit.** Sizes: **S** ≈ under 40k tokens, **M** ≈ 40–120k. Anything larger is already split into subtasks.
-- **Read only what's listed.** `src/game.rs` is about 2,900 lines: `grep -n` for the named anchors and read those ranges, never the whole file. Content goes in `src/content.rs` tables. Mode logic goes in its own module (`src/modes/*.rs`), not more branches in `game.rs`.
-- **Reuse the existing patterns:**
-  - spatial `Grid` (game.rs) for neighbor queries
-  - `world::resolve`/`blocking` for collision
-  - `Game::sfx`/`push_sfx` for positional audio
-  - `burst`/`ring`/`text` for effects
-  - `Banner`/`toast` for messages
-  - `net.event(...)` plus a handler in `coop.rs::apply_events` for anything co-op must see
-  - `Data.*` in `ui/app.js` with matching `server/index.ts` routes for persistence
-  - `server/catalog.ts` must mirror any prices or rewards
+**WebRTC signalling** (over the social socket, `signal` messages):
+- `offer` (with `late`/`migrate`/`roster`), `answer`, `ice`, `nogo`
+- `reoffer`/`restart` (ICE restart), `joinreq` (late join), `alive?`/`alive` (migration check)
+- voice: `v-offer`/`v-answer`/`v-ice`
+
+**Social socket** (`server/social.ts`):
+- Client → server:
+  - friends: `friends.add|accept|remove`
+  - party: `party.create|invite|join|decline|leave|ready|diff|mode{mode,chapter}|look|kick|start|end|voice|public{on}`, `party.list`, `quickplay`
+  - hub: `hub.pos{x,y,aim,look,emote?}`, `hub.leave`
+  - moderation: `chat`, `block`, `unblock`, `report`
+  - other: `signal`, `ping`
+- Server → client: `hello`, `social`, `party`, `party.start`, `invite`, `signal`, `chat`, `hub`, `hub.instance`, `parties`, `toast`, `error`.
+
+**HTTP API** (`server/index.ts`, plus `POST /vendor` in `vendor.ts`):
+- Public: `GET /health`, `GET /leaderboard`, `POST /errors`.
+- Signed-in:
+  - profile: `GET /me`, `PUT /me/settings`, `POST /me/name`, `POST /me/import`
+  - shop and loadout: `POST /shop/buy`, `POST /equip`
+  - saves: `PUT /save`, `POST /save/consume`, `DELETE /save`
+  - runs and rewards: `POST /runs`, `POST /welcome`, `POST /hub/reward`
+  - progression: `POST /meta/buy`, `POST /relics/equip`, `POST /achievement`
+  - networking: `GET /turn`
+
+---
+
+## 6. Conventions & how to work here
+
+- **Feel comes first.** Keep the sim deterministic per step, interpolate everything that moves, and avoid per-frame allocations in hot loops.
+- **Sounds** go through `Game::sfx(sfx, world_pos)`/`push_sfx` (stereo pan + distance). **Entities** are flagged `dead` during a step and removed with `retain` at the end of `step()`.
+- **Reuse the patterns:**
+  - Simulation: the spatial `Grid` for neighbour queries; `world::resolve`/`blocking` for collision.
+  - Feedback: `burst`/`ring`/`push_text` for effects; `Banner`/`toast`/`say` for messages.
+  - Co-op: `net.event(...)` plus a handler in `coop.rs::apply_events` for anything co-op must see.
+  - Persistence: `Data.*` in `ui/app.js` with a matching `server/index.ts` route.
+  - Content: tables go in `content.rs`; mode logic goes in its own `src/modes/*.rs` module, not new branches in `game.rs`.
 - **Done means:**
-  - `cargo test --release` passes; add a native sim test like `coop::tests` or `game::tests` for new rules
-  - `cargo build --target wasm32-unknown-unknown` has no warnings
-  - `trunk build --release` succeeds
-  - a Playwright smoke script in `tests/e2e/` passes (move the ones from the scratchpad there in F5)
-  - this checkbox is ticked
-- **Server changes:** append to `server/schema.sql` (idempotent), then `npm run db:schema` and `npm run deploy:api`. After any edit to `ui/cloud-src.js`, run `npm run build:cloud` (CI also does this).
+  - `cargo test --release` passes, with a native test for new rules.
+  - The wasm build has no warnings.
+  - `trunk build --release` succeeds.
+  - A relevant `tests/e2e/` script passes.
+  - This file is updated.
+- **Commit, push and server rules:**
+  - One feature per commit, pushed to `main` when the tests pass (the owner tests on their phone).
+  - Server changes: append to `server/schema.sql` (idempotent) and note them in §2 until deployed.
+  - Never put secrets in the repo.
+- **Bump protocols** for incompatible changes: `PROTOCOL` for wire or sim-rule changes, `SAVE_VERSION` for save-string changes.
 
-### M0 · Foundations (do first; unblocks everything)
-- [x] F1 (M) **Enemy table.** Move `ZKind::base()` stats, colors and behavior flags into `content.rs::ENEMIES` with an `EnemyDef` struct. Add new kinds by data. Done when zombie behavior is unchanged and all tests pass.
-- [x] F2 (M) **Authored maps.** Add a `Level` trait with `ProceduralWorld` (wraps `world.rs`) and `AuthoredMap`, loaded from `assets/maps/*.json`:
-  - contents: walls as rect/polyline, doors with id/cost/linked zones, spawn windows, props, interactables with type and position
-  - collision via `resolve`; rendering in `render.rs::draw_obstacle_base` style
-  - Done when a test map loads and the player collides with its walls.
-- [x] F3 (M) **Mode abstraction.** Replace `campaign: bool` with `enum Mode { Infinite, Campaign(ch), Outbreak(map), Siege(map) }` plus a `ModeHooks` trait:
-  - hooks: `on_start`, `update_waves`, `on_kill`, `hud`, `is_over`
-  - move the wave and campaign code into `src/modes/{infinite,campaign}.rs`
-  - Done when behavior is identical.
-- [x] F4 (S) **Version fields.** Add `v` to save strings (`save_string`/`load_save`) and to net messages (a hello with protocol version, rejecting mismatches with a toast).
-- [x] F5 (S) **Committed tests.** Move the Playwright scripts (solo, co-op two-browser, mobile) into `tests/e2e/` with an `npm run e2e` script. Document the local NSS-lib workaround.
-  - Done: `npm run e2e` (serve `dist/` on :8765 first: `cd dist && python3 -m http.server 8765`). In WSL without system libnss3, extract the `libnss3`/`libnspr4` debs into `~/.cache/uh-libs` (or set `UH_LIBS`); `UH_CHROME` overrides the Chromium path. Screenshots go to `tests/e2e/out/`.
-- [x] F6 (M) **Action map.** All input goes through `Action` enums (`Move`, `Aim`, `Dash`, `Ult`, `Interact`, `Ping`, `Pause`, `Ability`) bound from a settings table. Key handlers in `main.rs` map codes to actions. Prerequisite for A1 and A2.
+---
 
-### M1 · Modern feel (quick wins, high impact)
-- [x] J1 (S) **Weapon feel.** Per-gun recoil camera kick, shell-casing particles, muzzle light flash.
-  - These go in the `GUNS` table (`content.rs`) and `fire()`.
-- [x] J2 (M) **Hit reactions.**
-  - Squash and stretch on hit, plus directional knockback tilt.
-  - Death variety: gib limbs or dissolve on elemental kills.
-  - Corpses fade instead of popping.
-- [x] J3 (M) **Dynamic light.** A light-mask pass after the world draw: player flashlight cone that follows aim, plus muzzle, explosion, nova and lightning lights punching holes in the night overlay (`draw_lighting`).
-- [x] J4 (M) **Audio 2.0.**
-  - Layered gun sounds (transient, body, tail).
-  - Low-HP heartbeat and muffle filter.
-  - Music stems that crossfade by intensity.
-  - Kill-streak stingers.
-  - Announcer voice lines ("Multi-kill!", "Max ammo!") via short synthesized vocoder-style sounds or the Web Speech API behind a toggle.
-- [x] J5 (S) **Camera.** Slight aim lookahead (toggle; the player stays roughly centered), zoom punch on ult or boss spawn, slow-mo on boss kill (extend `hitstop`).
-- [x] J6 (S) **Haptics.** Gamepad `vibrationActuator` and `navigator.vibrate` on hurt, ult and boss, with an intensity setting.
-- [x] J7 (S) **Callouts.** Kill feed (co-op aware), multi-kill and headshot-style callouts, and a combo multiplier that feeds score.
+## 7. Feature details
 
-### M2 · Combat depth (survivor-like best practices)
-- [x] C1 (S) **Level-up options.** Reroll, Banish and Skip with limited charges (meta-upgradable in P2). Extend `Levels::roll` and `draw_levelup`.
-- [x] C2 (M) **Evolutions.**
-  - A maxed power plus a specific passive evolves at a chest: Blades + Speed → "Reaper Ring", Lightning + Crit → "Storm Crown", and so on (6–8).
-  - Evolution table in `upgrades.rs`; render an EVOLVED card.
-- [x] C3 (M) **Chests.** Elites and bosses drop a chest with a slot-machine reveal of 1, 3 or 5 picks. Weight it so early chests are generous.
-- [x] C4 (M) **Elements.** A status system on `Zombie`:
-  - burn (damage over time)
-  - chill (slow, then freeze)
-  - shock (chains)
-  - poison (stacking)
-  - Combos: chill + shock = shatter; burn + poison = blight.
-  - Rework the Frost Nova, Lightning and Explosive sources to apply them.
-- [x] C5 (M) **Elite affixes.** Shielded, hasted, splitting, vampiric, explosive-death, reflective, with a colored aura, shape icon and nameplate. They spawn by wave scaling.
-- [x] C6 (M) **New archetypes** (via F1 data):
-  - crawler (low, fast)
-  - screamer (buffs nearby)
-  - armored (front-armor, needs pierce or flank)
-  - bat swarm (flyer, ignores obstacles)
-  - burrower (pops up near the player with a telegraph)
-- [x] C7 (M) **Boss 2.0.** Multi-phase bosses with weak points (crit zones), clear telegraphs (ground decals), and enrage timers. Boss intro card (name plus taunt). Add 2 new bosses.
-- [x] C8 (L, split) **Characters / classes** with unique starting weapon, passive and active ability (Q becomes a per-character ability, ultimate moves to R):
-  - [x] C8a (M) character table plus selection UI in the lobby showcase; persist in profile and server `equipped.character`
-  - [x] C8b (M) 4 kits:
-    - **Gunner:** heat-sink burst
-    - **Engineer:** deployable turret (reused by Siege)
-    - **Medic:** heal pulse and faster revives
-    - **Pyro:** flame cone
-  - [x] C8c (S) unlock gating through achievements (P5)
-- [x] C9 (S) **Projectile pressure.** More enemy projectiles with fair telegraphs (dodge skill expression), plus a "danger" outline for bullets hitting the player.
+### 7.1 Original feature list (v1)
+- [x] 1. **Co-op**: real-time WebRTC co-op for **up to 4 players**, host as hub, in Infinite, Campaign (the host's chapter), Outbreak and Siege.
+  - **Down and out:**
+    - Downed players can crawl. A teammate standing within 75 units for 3s revives them; Medic and Second Wind make it faster.
+    - Bleeding out (30s) means spectating until the wave is cleared, then a respawn next to a teammate.
+    - A team wipe ends the run.
+  - **Connecting:**
+    - The host offers per client over the social socket; ICE is trickled in batches.
+    - `GET /turn` returns STUN plus short-lived Metered TURN credentials (`METERED_APP` + `METERED_SECRET_KEY` or `METERED_API_KEY`), falling back to STUN only.
+    - Signals carry a session id (`party.seed`).
+  - **Match start:**
+    - Loading screen (`#coop-load`) with per-player link status.
+    - After 20s the host gets "Start without them / Retry / Cancel"; a client gives up after 40s.
+  - **Resilience:**
+    - ICE restart with a 15s grace period.
+    - Rejoin a running match, and join one in progress.
+    - Host migration (see M7).
+  - **Chat:**
+    - Party text chat in the lobby and in matches (T or / to type, 💬 on touch).
+    - The server caps length at 200, rate-limits, masks profanity and honours blocks.
+    - Click a name for volume / Block / Report.
+  - **Voice** (`ui/voice.js`):
+    - An audio-only mesh: mute, open mic or push-to-talk (hold V), per-player volume, speaking rings, in-game chips.
+    - Blocked players are never connected.
+- [x] 2. **Persistence in Neon**:
+  - Profiles: coins, owned items, equipped loadout/cosmetics, campaign progress, stats, progression JSON.
+  - Saves and every run.
+  - A global leaderboard that auto-refreshes every 5s while visible.
+- [x] 3. **Accounts**: Neon Managed Auth with email+password and Google sign-in; sessions persist across reloads and devices. The first sign-in imports offline progress once (coins capped at 5000). Guests play offline with browser storage.
+- [x] 4. **Shop & customizations**: coins come from waves (scaled by difficulty), bosses and chapter wins. They buy guns, perks, skins, hats, tracers, backpacks, kill/death effects and emotes.
+- [x] 5. **Difficulties**: Rookie, Survivor, Veteran, Nightmare (`content::DIFFICULTIES`).
+- [x] 6. **Loadouts**: 6 guns plus a starting perk, a survivor (character), relics and cosmetics, set in the 🎒 Locker.
+- [x] 7. **Character screen**: an in-engine showcase on a pedestal (party members stand beside you); the Locker updates it instantly.
+- [x] 8. **Campaign**: 5 chapters ("Rook and Mara vs. the Bloom").
+  - Typewriter intros/outros with portraits and panel cutscenes, plus radio chatter per wave.
+  - Unique bosses: Gravedigger, Matriarch, Cinder King, Twin Wraiths, Bloom Heart.
+  - Chapters unlock in order.
+- [x] 9. **Infinite**: endless waves, bosses every 5 waves, ranked on the leaderboard.
+- [x] 10. **CoD/Fortnite-style lobby**:
+  - Friends (codes, requests, presence).
+  - Parties: up to 4 (server deploy pending; 3 live), ready checks, host-set difficulty and mode, and a shareable invite link via the native share sheet on phones.
+  - Party members stand in your lobby.
+- [x] 11. **Save slots**: one Infinite and one Campaign save. A new run of a mode overwrites that mode's save (tooltips warn).
+- [x] 12. **Lobby music picker**: 4 procedural tunes (`audio.rs` `LOBBY_TUNES`), cycled with 🎵.
+- [ ] 13. **Safari and mobile.** Layouts, touch and the PWA are done; a real-device iOS pass is still open (see §2.4).
+  - **Done:**
+    - phone lobby with bottom nav, one panel at a time, and a lifted showcase
+    - touch auto-detect (`pointer: coarse` / first touch); a Settings override (Auto/On/Off) is not built yet
+    - floating joystick, tap-to-dash, auto-aim, touch USE/ready/emote/chat buttons
+    - safe-area insets, portrait zoom, stacked level-up cards
+    - Web Audio unlock on gesture, bearer-JWT auth fallback for ITP
+    - PWA install
+    - level-up power icons now visible on phones (solid card fill)
+  - **To verify on a real device:** see §2.4.
 
-### M3 · Outbreak mode (CoD Zombies homage — use original names, no trademarks)
-- [x] O1 (M) **First map.** "Hollowbrook Asylum" in `assets/maps/asylum.json`: about 6 zones, doors and debris, spawn windows with barricades. Depends on F2 and F3.
-- [x] O2 (M) **Point economy.** Points per hit, kill and headshot-crit; repairing barricades earns points. HUD points counter; co-op has per-player points. New `src/modes/outbreak.rs`.
-- [x] O3 (S) **Interact prompt.** An `Interact` action (E, or a tap button on touch) with a world-space prompt "[E] Open door — 750". Doors open zones; spawns are gated by opened zones.
-- [x] O4 (M) **Ammo, reload and wall-buys.**
-  - Introduce magazines and reload (Outbreak only; Infinite keeps infinite ammo) with a reload bar and an empty-click sound.
-  - Wall-buys: a chalk outline sells a weapon or refills its ammo.
-- [x] O5 (M) **Mystery Box.** Spin animation cycling gun icons, a weighted pool including 2 box-exclusive wonder weapons (e.g. "Ray Rifle", "Thundergun-style" wave gun with original visuals), and a "zombie hand" result that relocates the box.
-- [x] O6 (M) **Perk machines.** 4 perks, original names: *Iron Gut* (+HP), *Quickdraw Cola* (reload/fire), *Second Wind* (fast revive, or solo self-revive ×3), *Fleetfoot* (speed). Max 4 perks, all lost when downed. Jingles via synth.
-- [x] O7 (S) **Upgrade machine.** Power switch, then the upgrade machine ("Pack-a-Punch" homage): ×2 damage, bigger magazine, an element (from C4), a renamed weapon and a camo tint.
-- [x] O8 (S) **Power-ups.** Max Ammo, Insta-Kill, Double Points, Nuke, Carpenter, each with a timer HUD and an announcer line.
-- [x] O9 (S) **Rounds feel.** Tally-mark round counter, round-transition sting, and special "hound rounds" (fast pack) every 5–6 rounds.
-- [x] O10 (M) **Secrets.** Buildables (collect 3 parts to build a shield or trap) and a multi-step easter-egg quest with a reward; secrets are server-tracked achievements.
-- [x] O11 (S) **Traps.** Buyable electric and fire traps (shared code with Siege S4).
-- [x] O12 (M) **Co-op replication.** Host-authoritative door, box, power and perk-machine state through snapshot fields and events. Per-player points via events. Revive costs nothing; Second Wind changes the revive time.
-- [x] O13 (M) **Second map.** "Ashfall Refinery", plus an Outbreak leaderboard (round reached, per map, by player count).
+### 7.2 Home Base (Destiny-style social hub)
+Files: `modes/hub.rs`, `render_hub.rs`, `assets/maps/hub.json`, the stall UI in `ui/app.js`, `server/vendor.ts`.
+- **Entry:** the lobby's "🏠 Enter Home Base" starts `mode=hub`. Esc returns to the lobby (with a confirm).
+- **Vendors** (E or USE opens a docked stall with items to buy/equip, the vendor's line and a "Say something" box):
+  - Rusty Vex: guns
+  - Madame Lucienne: skins/hats
+  - Sgt. Dole: perks/tracers
+  - Ada: the mission terminal; launches Infinite, Campaign, Outbreak and Siege, with your party.
+  - Lines come from `POST /vendor`:
+    - Claude `claude-opus-5-5` at low effort via `@anthropic-ai/sdk`, with a cached persona prompt and server-side fallback.
+    - Per-caller and global rate limits, plus a reuse cache.
+    - Canned fallback lines.
+  - Lines show as speech bubbles and are spoken with per-vendor Web Speech voices (Settings toggle).
+- **Hall of Survivors** monument (leaderboard) and a **firing range** with unkillable dummies and a DPS meter.
+- **The Outskirts** (free roam, east through the gate):
+  - Weapons free, ambient zombies, destructible crates.
+  - A gate turret zaps anything that follows you home.
+  - No XP or gems in the hub.
+  - Going down is a rescue back to base, never a game over.
+  - **Supply Drops** land about every 2 minutes. Hold the beacon ring for 30s against a surge for 🪙 40 (`POST /hub/reward`, at most once per 2 min; guests get local coins).
+- **Social:**
+  - Party members walk the hub, with chat as speech bubbles and emotes over heads.
+  - Proximity voice: full within 250 units, 10% at 1400+.
+  - **Instances:** 16 players per instance, assigned by the server, with party members kept together and blocks respected.
+    - Every `hub.pos` upserts a `hub_presence` row and returns a ≤2 Hz `hub.instance` snapshot.
+    - Strangers have light-blue name plates, party members green; up to 24 are shown.
+- **Hollow Night:** jack-o'-lanterns around the plaza while the event runs.
+- **Ideas not built yet:** walking up to a stranger to invite them, loot caches, more public event types.
 
-### M4 · Siege mode (Dungeon Defenders homage)
-- [x] S1 (M) **Crystal.** Crystal entity with HP and a lose condition. Authored map with lanes and spawn portals. New `src/modes/siege.rs`. Depends on F2 and F3.
-- [x] S2 (S) **Phases.** Build phase (timer or "Ready" vote in co-op) alternates with combat waves; phase HUD and wave preview (enemy icons per lane).
-- [x] S3 (S) **Mana.** Drops from kills and is collected like gems (reuse `Gem` with a kind field). Shared team pool vs per-player: per-player.
-- [x] S4 (L, split) **Defenses:**
-  - S4a (M) placement system: grid snap, ghost preview, range ring, valid/invalid tint, mana cost, sell and upgrade menu
-  - S4b (M) 6 defenses:
-    - arrow tower
-    - flame trap
-    - slow aura
-    - barricade wall (blocks paths)
-    - proximity mine
-    - healing totem
-    - Each has 3 upgrade tiers.
-  - S4c (S) the Engineer class (C8) gets +defense stats, and towers scale with hero level
-- [x] S5 (M) **Pathfinding.**
-  - Flow-field (BFS on a coarse grid) to the crystal, recomputed when defenses change.
-  - Enemies attack blockers in their way.
-  - Flyers ignore the grid.
-  - Add a native test for path recompute.
-- [x] S6 (S) **Siege enemies.** Siege-only types: goblin sapper (targets towers), ogre (high HP), archer (outranges towers).
-- [x] S7 (M) **Maps and ratings.** 3 Siege maps with star ratings (crystal HP left), first-clear rewards, and Siege-specific challenge variants.
-- [x] S8 (M) **Co-op replication.** Host-authoritative defense placement and build-phase ready-vote via the party and net events.
+### 7.3 Roadmap v2 (research-backed; no real-money purchases) — all done except item 13's device test
 
-### M5 · Progression & loot
-- [x] P1 (M) **Account level.** Account XP from all modes; level rewards (coins, cosmetics) shown on a progress track. Server: `profiles.account_xp`; award in `/runs`.
-- [x] P2 (M) **Permanent upgrades.** A coin-sink tree (tiny % boosts, plus reroll and banish charges).
-  - The leaderboard gets a "Pure" filter (no meta upgrades) for fairness.
-  - Server stores ranks and validates costs (mirror in `catalog.ts`).
-- [x] P3 (M) **Relics.** 3 loadout relic slots. Relics drop from bosses with rarity and 1–2 affixes (Dungeon Defenders loot); inventory UI in the Locker. Server: `relics` table; drops validated against run progress.
-- [x] P4 (S) **Weapon mastery.** Kills per gun unlock camo tints (per-gun counters in the profile).
-- [x] P5 (M) **Achievements.** 50+ achievements (some hidden) with toasts. Server table plus client checks; they gate characters, cosmetics and the Outbreak secret rewards.
-- [x] P6 (S) **Bestiary and Codex.** Enemy entries unlocked on first kill, plus a lore page (campaign story).
+**Pillars:**
+1. Feel first.
+2. Readable depth.
+3. Three loops (Infinite / Outbreak / Siege) that all work in co-op.
+4. Respectful retention: a free pass, no FOMO or loot boxes.
+5. Everywhere: keyboard, gamepad and touch.
 
-### M6 · Live & retention (free, no FOMO)
-- [x] L1 (M) **Challenges.** Daily (3) and weekly (5) challenges, generated server-side from a date seed. Progress is reported in `/runs`; rewards are coins and season XP.
-- [x] L2 (M) **Daily seeded run.**
-  - Same seed, mode and mutator for everyone.
-  - One attempt counts for the board; a separate daily leaderboard.
-  - Seed passed via `start|seed=`; the rng already takes a seed.
-- [x] L3 (M) **Free seasonal pass.** 30 tiers of cosmetics. The season config is server JSON; earned through season XP; past seasons' cosmetics rotate back into the shop later (no permanent FOMO).
-- [x] L4 (S) **Mutators.**
-  - Weekly mutators: big-head zombies, glass cannon, fast horde, one-hit, low gravity knockback.
-  - Selectable in a "Custom" mode with no ranking.
-- [x] L5 (S) **Leaderboard upgrades.** Filters: mode, map, player count, friends-only, weekly and all-time. Server query params plus indexes.
-- [x] L6 (S) **Welcome-back bonus.** Gentle, with no streak-loss punishment.
+#### M0 · Foundations
+- [x] F1 Enemy table (`content.rs::ENEMIES`, `EnemyDef`).
+- [x] F2 Authored maps (`Level` trait, JSON maps, collision, `render_map.rs`).
+- [x] F3 `Mode` enum + `ModeHooks`.
+- [x] F4 Versioned saves + `MSG_HELLO` protocol check.
+- [x] F5 Committed Playwright tests (`npm run e2e`).
+- [x] F6 Action map with rebindable keys.
 
-### M7 · Multiplayer & social hardening
-- [x] M1 (S) **TURN relay.** Add a TURN server (Cloudflare Calls TURN, or a free tier) with credentials minted by the `api` function (`/turn`), plus ICE restart on failure. Known gap today.
-  - Metered TURN via `/turn` (relay-only e2e passes). Mid-match, a `disconnected`/`failed` link triggers an ICE restart: the host re-offers (`reoffer` signal) and a client asks with `restart`. The player is kept for a 15s grace period with "reconnecting…" and "Reconnected ✔" toasts.
-  - Caveat: Metered's free plan caps live credentials at 10 (4h expiry). Set `METERED_API_KEY` (or reuse credentials) if `/turn` starts failing with "Maximum credential limit reached".
-- [x] M2 (M) **Reconnect and join in progress.**
-  - Done: a party member not in the running match gets "⚔ Join the match in progress" → `joinreq` signal → the host re-offers (`late`) in the old slot (or the lowest free one), sends `go{late}` + `joined` to the others, and `peerjoin|slot|name` makes the host game send HELLO + a one-off world sync (doors, power, box, boards, defenses, crystal) as `MSG_EVENTS`. Late joiners spectate until the wave is cleared; bled-out players also respawn on wave clear. The server now allows `party.join` into `in_game` parties (needs deploy).
-  - A dropped client rejoins: same slot, host resends a full snapshot.
-  - A new friend joins mid-run as spectator, then spawns on wave clear.
-- [x] M3 (L, split) **Host migration.**
-  - [x] M3a (M) periodic compact world checkpoint from host to clients (`MSG_CHECKPOINT`, 1 Hz: wave counters, uids, Outbreak round state, Siege phase/queue; protocol 14)
-  - [x] M3b (M) on host loss, the lowest slot promotes itself, rebuilds from the checkpoint, and re-signals peers
-    - A client that loses the host first asks it `alive?` over the social socket (2.5s). If it answers, the client was the one who dropped: it leaves and can rejoin (M2). Otherwise everyone picks the lowest slot still in the party: it runs `promote|old` (replicas rescaled to wave stats; a lone spectator respawns) and re-offers with `migrate`; the others run `hostmoved|old|new` and accept only that offer (20s timeout). On clients the host link is always keyed 0; `Net.host_slot` tracks the real slot.
-- [x] M4 (S) **4 players.** `MAX_PLAYERS=4`, party max 4, UI slots. Profile the snapshot size; quantize to i16 if needed.
-- [x] M5 (S) **Ping and quick chat.**
-  - Ping wheel: "Here", "Enemy", "Need revive", "Box here".
-  - World markers and minimap pings, plus quick-chat emotes.
-- [x] M6 (S) **End-of-match scoreboard.** Kills, downs, revives, points, damage, MVP; per-player stats via events.
-- [x] M7 (M) **Public parties and Quick Play.** Opt-in public parties listed via the social server; auto-fill to 3–4.
-  - `parties.public`; `party.public {on}` (host), `party.list` → `{t:'parties'}` (public, room left, host online, no blocks either way, fullest first), `quickplay` joins the fullest squad or hosts a public one. Public parties can be joined without an invite; joining one mid-match auto-sends the M2 `joinreq`. Needs `npm run db:schema && npm run deploy:api`.
-- [x] M8 (S) **Lobby text chat.** Rate limit, length cap, a basic profanity filter, and block/report (server table).
-- [x] M9 (S) **Co-op modes.** Campaign co-op: the host's chapter, with progress credited to all who have it unlocked.
-  - Party mode `campaign` + `parties.chapter` (clamped server-side to the host's unlocked chapter). The host broadcasts `E_VICTORY` (protocol 13) so clients replay the chapter win (and the Siege win, which clients used to miss). `/runs` only credits a chapter win when `chapter <= campaign.unlocked`.
+#### M1 · Modern feel
+- [x] J1 Weapon feel: recoil kick, shell casings, muzzle flash light.
+- [x] J2 Hit reactions: squash/stretch, knockback tilt, gibs/dissolves, fading corpses.
+- [x] J3 Dynamic light: flashlight cone, muzzle/explosion/nova/lightning lights.
+- [x] J4 Audio 2.0: layered guns, low-HP heartbeat + muffle, music stems, streak stingers, Web Speech announcer.
+- [x] J5 Camera: aim lookahead, zoom punch, boss-kill slow-mo.
+- [x] J6 Haptics: gamepad + `navigator.vibrate`, with an intensity setting.
+- [x] J7 Callouts: kill feed, multi-kills, combo score.
 
-### M8 · World & presentation
-- [x] V1 (M) **Day/night and weather.** Day/night cycle in Infinite, plus weather (rain streaks, fog) that changes visibility and spawns (more runners at night).
-- [x] V2 (M) **Biomes.** Biome regions in the procedural world (graveyard, pine forest, town ruins, snowfield) with biome props and native zombie variants (via F1).
-- [x] V3 (S) **Destructibles.** Explosive barrels, breakable crates (drops), and environmental kills.
-- [x] V4 (M) **Character polish.** Better animation (procedural walk bob, reload, hurt flinch) and new cosmetic slots: backpack, kill effect, death effect, emote.
-- [x] V5 (S) **Music picker.** Implements item 12: a data-driven tune list in `audio.rs` and a selector in Settings.
-- [x] V6 (S) **Story presentation.** Campaign dialogue portraits and panel cutscenes in the story overlay.
+#### M2 · Combat depth
+- [x] C1 Reroll / Banish / Skip.
+- [x] C2 8 evolutions.
+- [x] C3 Chests with a 1/3/5 reveal.
+- [x] C4 Elements: burn, chill/freeze, shock, poison, plus shatter and blight combos.
+- [x] C5 Elite affixes: shielded, hasted, splitting, vampiric, explosive, reflective.
+- [x] C6 Archetypes: crawler, screamer, armored, bat swarm, burrower.
+- [x] C7 Boss 2.0: phases, weak points, telegraphs, enrage, intro cards; new bosses Butcher and Hive Queen.
+- [x] C8 Survivors:
+  - Rook/Gunner (heat-sink burst)
+  - Mara/Engineer (turret)
+  - Doc/Medic (heal pulse)
+  - Ash/Pyro (flame cone)
+  - Q is the ability, R the ultimate; survivors unlock via achievements.
+- [x] C9 Projectile pressure, with fair telegraphs and graze outlines.
 
-### M9 · Platform, UX & accessibility
-- [x] A1 (M) **Controls.** Gamepad support (Gamepad API: twin-stick, triggers fire, D-pad UI navigation) and a remapping UI. Depends on F6.
-- [x] A2 (M) **Accessibility.**
-  - colorblind palettes with shape-coded telegraphs and elites
-  - shake and flash intensity sliders, plus reduce-motion
-  - UI scale and high-contrast text (WCAG 4.5:1)
-  - hold vs toggle options
-  - aim-assist strength slider
-  - subtitles for all radio and announcer lines
-- [x] A3 (M) **Safari, iOS and PWA.** (PWA + layouts done; a real-device iOS pass is still worth doing) Finishes item 13: real-device Safari/iOS pass (Web Audio unlock, ITP and auth), a PWA manifest and service worker (offline solo play, install prompt), and landscape vs portrait HUD layouts.
-- [x] A4 (M) **Performance.** (sim: ~0.5 ms/step at 1,000 zombies natively; LOD rendering for big hordes; WebGL not needed yet) Pool particles, bullets and texts; batch draws; add a perf budget test (1,000 zombies at 60 fps). Evaluate a WebGL renderer if Canvas2D tops out (spike only).
-- [x] A5 (S) **Onboarding.** First-run interactive tutorial (move, dash, level-up, revive), contextual tips, and loading tips.
-- [x] A6 (S) **Settings sync.** Sync settings to the cloud profile.
-- [x] A7 (S) **Balance telemetry.** Privacy-light: run summaries (mode, wave, build, cause of death) to Neon, plus a SQL view for balancing.
-- [x] A8 (S) **Localization.** i18n string table framework (en first).
-- [x] A9 (S) **Error reporting.** The panic hook and `window.onerror` post to `/errors` (rate-limited) for live debugging.
+#### M3 · Outbreak (CoD Zombies homage, original names)
+- [x] O1 Hollowbrook Asylum.
+- [x] O2 Points.
+- [x] O3 Interact prompts / doors.
+- [x] O4 Magazines, reload, wall-buys.
+- [x] O5 Mystery Box with 2 wonder weapons.
+- [x] O6 Perks: Iron Gut, Quickdraw Cola, Second Wind, Fleetfoot.
+- [x] O7 Power + upgrade machine.
+- [x] O8 Power-ups: Max Ammo, Insta-Kill, Double Points, Nuke, Carpenter.
+- [x] O9 Rounds feel + hound rounds.
+- [x] O10 Buildables + easter egg.
+- [x] O11 Traps.
+- [x] O12 Co-op replication.
+- [x] O13 Ashfall Refinery + Outbreak leaderboard.
 
-### Beyond v2 (AAA research additions)
-- [x] **AI Director** (`src/director.rs`, Left 4 Dead style): squad stress from crowding, low HP and damage taken drives BuildUp → Peak (hold 4s) → Relax (spawns ×3.5 slower, 8–20s, mercy heart for a hurt player). Quiet build-ups get a telegraphed **horde rush** from one side. Wave totals are unchanged; music intensity follows the tempo. Host/solo only.
-- [x] **Photo mode** (`src/photo.rs`, `ui/photo.js`): 📷 in the solo pause menu. Free camera (drag/WASD/pinch/wheel, leashed to 900 units), HUD and floating text hidden, vignette, 2.39:1 letterbox, hide-player toggle, 7 filters (CSS on the canvas, baked into the capture via `ctx.filter`), watermark. Capture shares through the share sheet on phones and downloads elsewhere. e2e: `photo.mjs`.
-- [x] **Nemesis system** (`src/nemesis.rs`, Shadow of Mordor style): the zombie that kills you in solo Infinite/Campaign rises as a named Nemesis (name + title generated in `ui/app.js`, kept in synced settings). From wave 3 (certain by 8) it hunts you once per run: elite affix, ×8+ HP, red aura, name plate, a taunt. Kill it for a chest; if it kills you again it ranks up (max 5) with a scarier title. Exploders and bats rise as brutes and runners. e2e: `nemesis.mjs`.
-- [x] **Limited-time event: Hollow Night** (Oct 1 – Nov 2, `UHProg.EVENT` in `ui/progression.js`): `event=hollow` start option. A quarter of zombies wear jack-o'-lanterns, ~5% of your credited kills drop 🍬 candy (`candy` in the run summary; the server caps it by kills), jack-o'-lanterns light the Home Base, and 100 candy unlocks the free Jack-o'-Lantern hat (`hat:pumpkin`, not for sale). Career tab event card. e2e: `event.mjs`. Next year: change `EVENT` (id/dates/item); the reward can rotate into the shop later.
-- [x] **Death recap** (Apex style): `hurt_player` logs (time, source, damage); the run summary carries `recap` (last 8s grouped by source, top 4) and the death screen shows "Killed by …" with chips per source.
+#### M4 · Siege (Dungeon Defenders homage)
+- [x] S1 Crystal + lanes/portals.
+- [x] S2 Build/combat phases + wave preview.
+- [x] S3 Per-player mana.
+- [x] S4 Placement + 6 defenses ×3 tiers: arrow tower, flame trap, slow aura, barricade, mine, healing totem.
+- [x] S5 Flow-field pathing.
+- [x] S6 Sapper, ogre and archer enemies.
+- [x] S7 3 maps (Last Keep, River Crossing, Crossroads), stars, first-clear rewards, Glass Crystal.
+- [x] S8 Co-op placement + ready vote. The vote is sized for 4 players; slot 3 used to vote as the host.
 
-### Suggested order
-- M0
-- Then quick wins: J1, J5, J7, C1, C3, A9
-- Then M2 combat depth
-- Then the **Outbreak MVP**: O1–O8
-- Then the **Siege MVP**: S1–S5
-- Then M5 and M6 (meta and live)
-- Then M7: M1 first
-- Then M8 and M9 polish
+#### M5 · Progression & loot (rules in `ui/progression.js`, shared with the server)
+- [x] P1 Account levels.
+- [x] P2 Meta upgrades + a "Pure" leaderboard filter.
+- [x] P3 Relics (3 slots, rarity, affixes).
+- [x] P4 Weapon mastery camos.
+- [x] P5 53 achievements that gate survivors and cosmetics.
+- [x] P6 Bestiary + codex; Career tab.
 
-Use M7 · M1 (TURN) earlier if friends report connection failures.
+#### M6 · Live & retention (free, no FOMO)
+- [x] L1 Daily (3) and weekly (5) challenges.
+- [x] L2 Daily seeded run + daily board.
+- [x] L3 Season 1 "The Bloom" free pass (30 tiers).
+- [x] L4 Mutators + Custom mode (unranked).
+- [x] L5 Leaderboard filters.
+- [x] L6 Welcome-back bonus.
 
-## Backend (Neon)
+#### M7 · Multiplayer & social hardening
+- [x] M1 **TURN + ICE restart.**
+  - Metered TURN via `/turn`; the relay-only e2e passes.
+  - A `disconnected`/`failed` link mid-match triggers an ICE restart: the host re-offers (`reoffer`), and clients ask with `restart`.
+  - Players are kept for a 15s grace period with "reconnecting…" / "Reconnected ✔" toasts.
+- [x] M2 **Rejoin & join in progress.**
+  - "⚔ Join the match in progress" sends `joinreq`. The host re-offers (`late`) in the player's old slot or the lowest free one.
+  - `peerjoin|slot|name` makes the host send HELLO plus a one-off world sync (doors, power, box, boards, defenses, crystal).
+  - Late joiners spectate until the wave is cleared.
+- [x] M3 **Host migration.**
+  - M3a: a 1 Hz `MSG_CHECKPOINT` carries wave counters, uids, Outbreak round state, and the Siege phase/queue.
+  - M3b: a client that loses the host first asks it `alive?` (2.5s).
+    - If it answers, *this* client dropped: it leaves and can rejoin.
+    - Otherwise the lowest slot still in the party promotes: replicas are rescaled to wave stats, and a lone spectator respawns. It then re-offers with `migrate`; the others accept only that offer (20s timeout).
+  - A lone survivor carries on as a solo host.
+- [x] M4 **4 players:** `MAX_PLAYERS` = 4, compressed snapshots.
+- [x] M5 **Pings and quick-chat emotes.**
+- [x] M6 **Squad scoreboard + MVP.**
+- [x] M7 **Public parties & Quick Play:**
+  - `parties.public`; the host toggles it with `party.public`.
+  - `party.list` returns public parties with room and an online host, skipping blocks, fullest first.
+  - `quickplay` joins the fullest squad or hosts a public one.
+  - Joining one mid-match auto-sends `joinreq`.
+- [x] M8 **Lobby chat** with block/report.
+- [x] M9 **Campaign co-op:**
+  - Party mode `campaign` + `parties.chapter`, clamped server-side to the host's unlocked chapter.
+  - `E_VICTORY` replays the win on clients.
+  - `/runs` only credits a chapter win if `chapter <= campaign.unlocked`.
 
-- Project `dawn-base-35494450`, branch `production`, region aws-us-east-2. Config is in `neon.ts` (`auth: true`, function `api`). `.neon` and `.env.local` are gitignored.
-- **API**: `server/index.ts` (Hono, `pg`, JWT verified against the Neon Auth JWKS). Prices and coin caps are in `server/catalog.ts` and **must stay in sync** with `ui/app.js` CATALOG and the coin formulas in `src/game.rs` (`wave_cleared`, boss kill, `campaign_victory`).
-- **Server-authoritative**: purchases (price and ownership checks are atomic in SQL), equips (must own the item), run rewards (coins capped by `waveCoins()` for the reported progress), and campaign unlocks.
-- **Schema**: `server/schema.sql` (idempotent), applied with `npm run db:schema`. Tables are `profiles`, `saves` and `runs`; users live in `neon_auth."user"`.
-- **Deploy the API**: `npm run deploy:api` (`neon deploy --env .env.local`). The function URL and auth URL are public and live in `ui/config.js`.
-- **Browser auth client**: `ui/cloud-src.js`, bundled to the committed `ui/cloud.js` with `npm run build:cloud`. Rebuild after editing it.
-- **CORS**: the allowlist is in `server/index.ts`. Auth trusted domains are managed with `neon neon-auth domain list|add` (https://cpoooo.github.io is added; localhost is allowed by default).
-- **Auth emails**: these use Neon's shared SMTP, which is fine for development. Production should configure custom SMTP (https://neon.com/docs/auth/production-checklist.md). Google sign-in uses Neon's shared dev OAuth credentials until you configure your own.
+#### M8 · World & presentation
+- [x] V1 Day/night + rain/fog.
+- [x] V2 Biomes: graveyard, pine forest, town ruins, snowfield.
+- [x] V3 Explosive barrels / breakable crates.
+- [x] V4 Animation polish + backpack, kill-effect, death-effect and emote slots.
+- [x] V5 Music picker (4 tunes).
+- [x] V6 Portraits + panel cutscenes.
+
+#### M9 · Platform, UX & accessibility
+- [x] A1 Gamepad + remap UI.
+- [x] A2 Accessibility: colorblind palettes + shape coding, shake/flash sliders, reduce motion, UI scale, high contrast, hold/toggle, aim-assist strength, subtitles.
+- [x] A3 PWA: manifest, network-first `sw.js`, install button. A real-device iOS pass is still open.
+- [x] A4 Performance: about 0.5 ms/step at 1,000 zombies natively; LOD rendering for big hordes.
+- [x] A5 Tutorial + loading tips.
+- [x] A6 Settings sync.
+- [x] A7 Balance telemetry (cause of death, build) + SQL views.
+- [x] A8 i18n (en/es).
+- [x] A9 Error reporting to `/errors`.
+
+### 7.4 Beyond v2 (AAA research additions)
+- [x] **AI Director** (`src/director.rs`, Left 4 Dead style):
+  - Squad stress from crowding, low HP and damage drives BuildUp → Peak (hold 4s) → Relax (spawns 3.5× slower for 8–20s, plus a mercy heart for the most hurt player).
+  - Quiet build-ups get a telegraphed **horde rush** from one side.
+  - Wave totals are unchanged, and music follows the tempo. Host/solo only (Infinite + Campaign).
+- [x] **Photo mode** (`src/photo.rs`, `ui/photo.js`), from the solo pause menu:
+  - **Camera:** free camera (drag/WASD/pinch/wheel, leashed to 900 units) with the HUD and floating text hidden.
+  - **Look:** vignette, 2.39:1 letterbox, a hide-player toggle, and 7 filters: None, Noir, Vintage, Vivid, Frost, Blood Moon, Dream.
+  - **Capture:** P or the button saves a watermarked PNG with the filter baked in, via the share sheet on phones or a download elsewhere.
+- [x] **Nemesis system** (`src/nemesis.rs`, Shadow of Mordor style):
+  - **Rising:** the zombie that kills you in solo Infinite/Campaign rises as a named Nemesis. The name and title come from `ui/app.js` and are kept in synced settings.
+  - **Hunting:** from wave 3 (certain by wave 8) it hunts you once per run with an elite affix, 8×+ HP, a red aura, a name plate and a taunt.
+  - **Outcome:** kill it for a chest. If it kills you again it ranks up (max 5) with a scarier title.
+  - Exploders/bats rise as brutes/runners.
+- [x] **Death recap** (Apex style): the death screen shows "Killed by …" plus chips per damage source for the last 8s (`recap` in the run summary).
+- [x] **Limited-time event: Hollow Night** (Oct 1 – Nov 2, `EVENT` in `ui/progression.js`, start option `event=hollow`):
+  - A quarter of zombies wear jack-o'-lanterns.
+  - About 5% of your credited kills drop 🍬. The server caps candy by kills.
+  - The Home Base gets lanterns.
+  - 100 candy unlocks the free **Jack-o'-Lantern** hat (`hat:pumpkin`, not for sale).
+  - The Career tab shows an event card.
+  - **Next event:** change `EVENT` (id/dates/item). Old rewards can rotate into the shop later.
+
+### 7.5 Ideas backlog (not started)
+- Kill cam / "Play of the Run" replay.
+- Weapon attachments.
+- More limited-time events.
+- Hub loot caches and other public event types.
+- Inviting a stranger by walking up to them in the hub.
+- Raising the Siege `final_wave` for endless mode.
+
+---
+
+## 8. Backend (Neon)
+
+- **Project:** `dawn-base-35494450`, branch `production`, region aws-us-east-2.
+  - Config is in `neon.ts` (`auth: true`, function `api`, env `METERED_APP`, `METERED_SECRET_KEY`, `ANTHROPIC_API_KEY`).
+  - `.neon` and `.env.local` are gitignored.
+- **Server-authoritative:**
+  - Purchases: atomic price + ownership checks.
+  - Equips: you must own the item.
+  - Run rewards: coins capped by `waveCoins()`; candy capped by kills; relic drops by bosses.
+  - Unlocks: campaign unlocks and achievements.
+  - Rate limits: Supply Drop rewards and vendor lines.
+- **Tables:**
+  - `profiles`, `saves`, `runs`, `friends`, `parties`, `party_members`, `party_invites`, `events`, `presence`, `blocks`, `reports`, `hub_presence`, relics/progression JSON on `profiles`.
+  - Users live in `neon_auth."user"`; its `id` is a **uuid**, so cast with `id::text` when comparing to `user_id`.
+- **Leaderboards:** best run per player, ranked; e2e test accounts (`uh-test-*@example.com`) are excluded.
+- **Deploy:** `npm run db:schema` (applies `server/schema.sql`), then `npm run deploy:api` (`neon deploy --env .env.local`). The function and auth URLs are public, in `ui/config.js`.
+- **CORS:** the allowlist is in `server/index.ts`. Auth trusted domains are managed with `neon neon-auth domain list|add` (https://cpoooo.github.io is added).
+- **Auth emails/Google:** Neon's shared SMTP and dev OAuth for now. Production should configure its own (https://neon.com/docs/auth/production-checklist.md).
+
+## 9. Known issues & caveats
+- **TURN:** the Metered credential cap (see §2.3).
+- **Pending deploy:** many signed-in features wait on the deploy (see §1).
+- **AI vendors** are untested against the live Claude API locally: there's no local key, but the code typechecks against SDK 0.133.
+- **Flaky e2e:** the party-join step in `coop`/`chat-voice` occasionally times out. Rerun.
+- **Hub mates** are keyed by display name, so two strangers with the same name in one instance merge.
+- **A Nemesis needs a melee or nearby killer;** deaths with no zombie within 900 units create none.
