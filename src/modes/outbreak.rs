@@ -177,6 +177,7 @@ impl Game {
             .or_else(|| m.interact.iter().position(|i| i.kind == "box"))
             .unwrap_or(0);
         self.flow = Some(FlowField::new(&m));
+        self.init_secrets();
         let pistol = crate::content::gun_index("pistol");
         self.gun = pistol;
         self.ob = Some(Box::new(ObState {
@@ -795,6 +796,7 @@ impl Game {
             if self.wave.intermission <= 0.0 {
                 let n = self.wave.n + 1;
                 self.start_round(n);
+                self.check_egg();
             }
             return;
         }

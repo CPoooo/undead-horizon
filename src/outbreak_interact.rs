@@ -20,6 +20,10 @@ pub enum Target {
     Power,
     Upgrade(usize),
     Repair(usize),
+    Trap(usize),
+    Part(usize),
+    Bench,
+    Candle(usize),
 }
 
 pub struct Prompt {
@@ -56,6 +60,20 @@ impl Game {
                 "perk" => consider(&mut best, p, Target::Perk(i), at, USE_R),
                 "power" if !ob.power => consider(&mut best, p, Target::Power, at, USE_R),
                 "upgrade" => consider(&mut best, p, Target::Upgrade(i), at, USE_R),
+                "trap" => consider(&mut best, p, Target::Trap(i), at + v2(0.0, 0.0), USE_R + 20.0),
+                "part" => {
+                    let got = self.secrets.as_ref().map(|s| s.parts.contains(&i) || s.shield).unwrap_or(true);
+                    if !got {
+                        consider(&mut best, p, Target::Part(i), at, USE_R - 20.0);
+                    }
+                }
+                "bench" => consider(&mut best, p, Target::Bench, at, USE_R),
+                "candle" => {
+                    let lit = self.secrets.as_ref().map(|s| s.candles.contains(&i) || s.egg_done).unwrap_or(true);
+                    if !lit {
+                        consider(&mut best, p, Target::Candle(i), at, USE_R - 30.0);
+                    }
+                }
                 "box" if i == ob.box_at && ob.box_away <= 0.0 => {
                     let offer = ob.spin.as_ref().map(|s| s.t >= SPIN_T && !s.hand).unwrap_or(false);
                     let spinning = ob.spin.is_some() && !offer;
@@ -127,6 +145,28 @@ impl Game {
                 }
             }
             Target::Repair(_) => (format!("{} Hold to rebuild the barricade", key), true),
+            Target::Trap(i) => {
+                let cost = m.interact[i].cost;
+                match self.trap_at(i) {
+                    Some(t) if t.active > 0.0 => ("Trap running".into(), false),
+                    Some(t) if t.cooldown > 0.0 => (format!("Trap cooling down ({}s)", t.cooldown.ceil() as i32), false),
+                    Some(t) => (format!("{} {} trap — {}", key, if t.fire { "Fire" } else { "Electric" }, cost), pts >= cost),
+                    None => return None,
+                }
+            }
+            Target::Part(_) => (format!("{} Pick up a shield part", key), true),
+            Target::Bench => {
+                let n = self.secrets.as_ref().map(|s| s.parts.len()).unwrap_or(0);
+                let has = self.secrets.as_ref().map(|s| s.shield).unwrap_or(false);
+                if has {
+                    ("Workbench (you have a shield)".into(), false)
+                } else if n < 3 {
+                    (format!("Workbench — riot shield parts {}/3", n), false)
+                } else {
+                    (format!("{} Build the riot shield", key), true)
+                }
+            }
+            Target::Candle(_) => (format!("{} Light the candle", key), true),
         };
         Some(Prompt { pos: at, text, ok })
     }
@@ -233,6 +273,29 @@ impl Game {
                 if let Some(ob) = self.ob.as_mut() {
                     ob.use_held = 0.25;
                 }
+            }
+            Target::Trap(i) => {
+                let ready = self.trap_at(i).map(|t| t.active <= 0.0 && t.cooldown <= 0.0).unwrap_or(false);
+                if !ready {
+                    self.audio.play(Sfx::UiMove);
+                    return true;
+                }
+                if !self.spend(m.interact[i].cost) {
+                    deny(self);
+                    return true;
+                }
+                self.activate_trap(i);
+            }
+            Target::Part(i) => {
+                self.pick_part(i);
+            }
+            Target::Bench => {
+                if !self.build_shield() {
+                    self.audio.play(Sfx::UiMove);
+                }
+            }
+            Target::Candle(i) => {
+                self.light_candle(i);
             }
         }
         true

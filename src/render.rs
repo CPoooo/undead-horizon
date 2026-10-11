@@ -275,6 +275,7 @@ impl Game {
 
         self.draw_blades(c, ppos, t);
         self.draw_turrets(c, t);
+        self.draw_riot_shield(c, ppos);
         self.draw_bullets(c, a);
         self.draw_particles(c);
         self.draw_lights(c);

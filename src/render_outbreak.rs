@@ -193,6 +193,57 @@ impl Game {
                     c.set_fill_style_str("#ffffff");
                     txt(c, "⚙️", mid.x, mid.y);
                 }
+                "trap" => {
+                    if let Some(tr) = self.trap_at(i) {
+                        let col = if tr.fire { "#ff7a1f" } else { "#7ab8ff" };
+                        c.set_global_alpha(if tr.active > 0.0 { 0.35 } else { 0.12 });
+                        c.set_fill_style_str(col);
+                        c.begin_path();
+                        let _ = c.arc(d(p.x), d(p.y), d(tr.r), 0.0, TAU64);
+                        c.fill();
+                        c.set_global_alpha(1.0);
+                        c.set_stroke_style_str(if tr.cooldown > 0.0 { "#555a66" } else { col });
+                        c.set_line_width(3.0);
+                        let _ = c.set_line_dash(&js_sys::Array::of2(&10.0.into(), &8.0.into()));
+                        c.begin_path();
+                        let _ = c.arc(d(p.x), d(p.y), d(tr.r), 0.0, TAU64);
+                        c.stroke();
+                        let _ = c.set_line_dash(&js_sys::Array::new());
+                        c.set_font(&format!("20px {}", EMOJI));
+                        c.set_fill_style_str("#ffffff");
+                        txt(c, if tr.fire { "🔥" } else { "⚡" }, p.x, p.y);
+                    }
+                }
+                "part" => {
+                    let got = self.secrets.as_ref().map(|s| s.parts.contains(&i) || s.shield).unwrap_or(true);
+                    if !got {
+                        let glint = 0.5 + 0.5 * (t * 4.0 + i as f32).sin();
+                        c.set_global_alpha(d(0.4 + 0.6 * glint));
+                        c.set_font(&format!("16px {}", EMOJI));
+                        c.set_fill_style_str("#ffffff");
+                        txt(c, "⚙️", p.x, p.y);
+                        c.set_global_alpha(1.0);
+                    }
+                }
+                "bench" => {
+                    rect(c, p.x - 34.0, p.y - 14.0, 68.0, 28.0, "#5a3d1f");
+                    rect(c, p.x - 30.0, p.y - 10.0, 60.0, 20.0, "#8a6236");
+                    let n = self.secrets.as_ref().map(|s| s.parts.len()).unwrap_or(0);
+                    c.set_font(&format!("800 10px {}", FONT));
+                    c.set_fill_style_str("#f0e0c0");
+                    txt(c, &format!("🛡️ {}/3", n), p.x, p.y);
+                }
+                "candle" => {
+                    let lit = self.secrets.as_ref().map(|s| s.candles.contains(&i)).unwrap_or(false);
+                    rect(c, p.x - 4.0, p.y - 18.0, 8.0, 18.0, "#e8e0d0");
+                    if lit {
+                        let fl = (t * 13.0 + i as f32).sin() * 1.5;
+                        c.set_fill_style_str("#ffb030");
+                        c.begin_path();
+                        let _ = c.ellipse(d(p.x + fl * 0.3), d(p.y - 24.0), 4.0, d(7.0 + fl), 0.0, 0.0, TAU64);
+                        c.fill();
+                    }
+                }
                 "box" if i == ob.box_at && ob.box_away <= 0.0 => self.draw_box(c, p, t),
                 "box" => {
                     // empty box spot: a faint chalk "?"
@@ -262,6 +313,23 @@ impl Game {
                 outlined(c, GUNS[s.gun].name, float.x, float.y - 24.0, 3.0);
             }
         }
+    }
+
+    /// The riot shield, held in front.
+    pub fn draw_riot_shield(&self, c: &Ctx, ppos: V2) {
+        let has = self.secrets.as_ref().map(|s| s.shield).unwrap_or(false);
+        if !has || self.player.dead {
+            return;
+        }
+        let aim = self.player.aim;
+        let k = self.secrets.as_ref().map(|s| s.shield_hp / crate::secrets::SHIELD_HP).unwrap_or(1.0);
+        c.set_stroke_style_str(if k > 0.35 { "#9fdcff" } else { "#ff8a8a" });
+        c.set_line_width(6.0);
+        c.set_global_alpha(0.85);
+        c.begin_path();
+        let _ = c.arc(d(ppos.x), d(ppos.y - 4.0), 26.0, d(aim - 0.75), d(aim + 0.75));
+        c.stroke();
+        c.set_global_alpha(1.0);
     }
 
     /// Prompt over the interactable in reach (screen space).

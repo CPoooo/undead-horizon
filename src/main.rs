@@ -18,6 +18,7 @@ mod render;
 mod render_light;
 mod render_outbreak;
 mod render_map;
+mod secrets;
 mod status;
 mod upgrades;
 mod world;

@@ -440,6 +440,8 @@ pub struct Game {
     /// pathfinding on authored maps
     pub flow: Option<crate::nav::FlowField>,
     pub nuke_pending: bool,
+    /// Outbreak traps, buildables and the easter egg
+    pub secrets: Option<Box<crate::secrets::Secrets>>,
     /// the touch USE button is visible
     pub use_shown: bool,
     pub boss_intro: Option<crate::boss::BossIntro>,
@@ -589,6 +591,7 @@ impl Game {
             ob: None,
             flow: None,
             nuke_pending: false,
+            secrets: None,
             use_shown: false,
             boss_intro: None,
             pending_chests: 0,
@@ -813,6 +816,7 @@ impl Game {
         self.ob = None;
         self.flow = None;
         self.nuke_pending = false;
+        self.secrets = None;
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -1932,6 +1936,7 @@ impl Game {
             if self.ob.is_some() {
                 self.update_flow();
                 self.update_windows();
+                self.update_traps();
             }
             self.update_zombies();
             self.update_status();
@@ -2704,10 +2709,11 @@ impl Game {
         if self.victory_t >= 0.0 {
             return;
         }
-        let p = &mut self.player;
-        if p.iframes > 0.0 || p.dash_t > 0.0 || p.downed || p.dead {
+        if self.player.iframes > 0.0 || self.player.dash_t > 0.0 || self.player.downed || self.player.dead {
             return;
         }
+        let dmg = self.shield_block(dmg, from);
+        let p = &mut self.player;
         p.hp -= dmg;
         p.iframes = 0.65;
         p.hurt_flash = 1.0;
@@ -4197,5 +4203,48 @@ mod tests {
         g.wave.timer = 0.0;
         g.outbreak_waves_pub();
         assert!(g.zombies.iter().any(|z| z.kind == ZKind::Hound && z.win < 0), "hounds strike in from lightning");
+    }
+
+    #[test]
+    fn traps_shield_and_easter_egg() {
+        let mut g = Game::new(29);
+        g.start("mode=outbreak;diff=rookie");
+        let m = world::map().unwrap();
+        // trap: pay, it runs, then cools down
+        let ti = m.interact.iter().position(|i| i.kind == "trap").unwrap();
+        g.ob.as_mut().unwrap().points = 5000;
+        assert!(g.activate_trap(ti));
+        assert!(!g.activate_trap(ti), "can't stack a running trap");
+        let tp = g.trap_at(ti).unwrap().pos;
+        g.spawn_zombie(ZKind::Walker, tp);
+        g.grid.build(g.player.pos, &g.zombies);
+        for _ in 0..60 {
+            g.update_traps();
+        }
+        assert!(g.zombies[0].dead || g.zombies[0].hp < g.zombies[0].max_hp);
+        // shield: three parts, build, block frontal damage
+        let parts: Vec<usize> = m.interact.iter().enumerate().filter(|(_, i)| i.kind == "part").map(|(i, _)| i).collect();
+        assert!(!g.build_shield());
+        for p in &parts {
+            assert!(g.pick_part(*p));
+        }
+        assert!(g.build_shield());
+        g.player.aim = 0.0;
+        let through = g.shield_block(10.0, g.player.pos + v2(100.0, 0.0));
+        assert!(through < 3.0);
+        let behind = g.shield_block(10.0, g.player.pos - v2(100.0, 0.0));
+        assert_eq!(behind, 10.0);
+        // easter egg: candles need power, then survive the round
+        let candles: Vec<usize> = m.interact.iter().enumerate().filter(|(_, i)| i.kind == "candle").map(|(i, _)| i).collect();
+        g.light_candle(candles[0]);
+        assert!(g.secrets.as_ref().unwrap().candles.is_empty(), "no power, no flame");
+        g.ob.as_mut().unwrap().power = true;
+        for c in &candles {
+            g.light_candle(*c);
+        }
+        g.wave.n += 1;
+        g.check_egg();
+        assert!(g.secrets.as_ref().unwrap().egg_done);
+        assert_eq!(g.ob.as_ref().unwrap().perks.len(), 4);
     }
 }

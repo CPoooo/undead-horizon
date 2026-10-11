@@ -194,8 +194,8 @@ Not scheduled yet; design notes for when we pick it up.
 - [x] O7 (S) **Upgrade machine.** Power switch, then the upgrade machine ("Pack-a-Punch" homage): ×2 damage, bigger magazine, an element (from C4), a renamed weapon and a camo tint.
 - [x] O8 (S) **Power-ups.** Max Ammo, Insta-Kill, Double Points, Nuke, Carpenter, each with a timer HUD and an announcer line.
 - [x] O9 (S) **Rounds feel.** Tally-mark round counter, round-transition sting, and special "hound rounds" (fast pack) every 5–6 rounds.
-- [ ] O10 (M) **Secrets.** Buildables (collect 3 parts to build a shield or trap) and a multi-step easter-egg quest with a reward; secrets are server-tracked achievements.
-- [ ] O11 (S) **Traps.** Buyable electric and fire traps (shared code with Siege S4).
+- [x] O10 (M) **Secrets.** Buildables (collect 3 parts to build a shield or trap) and a multi-step easter-egg quest with a reward; secrets are server-tracked achievements.
+- [x] O11 (S) **Traps.** Buyable electric and fire traps (shared code with Siege S4).
 - [ ] O12 (M) **Co-op replication.** Host-authoritative door, box, power and perk-machine state through snapshot fields and events. Per-player points via events. Revive costs nothing; Second Wind changes the revive time.
 - [ ] O13 (M) **Second map.** "Ashfall Refinery", plus an Outbreak leaderboard (round reached, per map, by player count).
 

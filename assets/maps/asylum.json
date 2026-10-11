@@ -93,6 +93,15 @@
     { "kind": "perk", "pos": [-1100, -620], "id": "fleetfoot", "zone": "westward", "cost": 2000 },
     { "kind": "perk", "pos": [1100, -1320], "id": "secondwind", "zone": "power", "cost": 1500 },
     { "kind": "power", "pos": [600, -1320], "id": "power", "zone": "power" },
-    { "kind": "upgrade", "pos": [0, -1290], "id": "upgrade", "zone": "chapel", "cost": 5000 }
+    { "kind": "upgrade", "pos": [0, -1290], "id": "upgrade", "zone": "chapel", "cost": 5000 },
+    { "kind": "trap", "pos": [0, -330], "id": "trap_lobby", "zone": "lobby", "cost": 1000, "data": "electric:120" },
+    { "kind": "trap", "pos": [-820, -400], "id": "trap_west", "zone": "westward", "cost": 1000, "data": "fire:130" },
+    { "kind": "part", "pos": [-1120, 560], "id": "part1", "zone": "westward", "data": "shield" },
+    { "kind": "part", "pos": [1120, -260], "id": "part2", "zone": "power", "data": "shield" },
+    { "kind": "part", "pos": [-1080, -1320], "id": "part3", "zone": "morgue", "data": "shield" },
+    { "kind": "bench", "pos": [380, 560], "id": "bench", "zone": "courtyard", "data": "shield" },
+    { "kind": "candle", "pos": [-360, -1280], "id": "candle1", "zone": "chapel" },
+    { "kind": "candle", "pos": [360, -980], "id": "candle2", "zone": "chapel" },
+    { "kind": "candle", "pos": [-360, -800], "id": "candle3", "zone": "chapel" }
   ]
 }
