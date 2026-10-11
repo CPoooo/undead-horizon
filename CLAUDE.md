@@ -278,7 +278,7 @@ Original design notes:
 - [ ] V6 (S) **Story presentation.** Campaign dialogue portraits and panel cutscenes in the story overlay.
 
 ### M9 · Platform, UX & accessibility
-- [ ] A1 (M) **Controls.** Gamepad support (Gamepad API: twin-stick, triggers fire, D-pad UI navigation) and a remapping UI. Depends on F6.
+- [x] A1 (M) **Controls.** Gamepad support (Gamepad API: twin-stick, triggers fire, D-pad UI navigation) and a remapping UI. Depends on F6.
 - [ ] A2 (M) **Accessibility.**
   - colorblind palettes with shape-coded telegraphs and elites
   - shake and flash intensity sliders, plus reduce-motion

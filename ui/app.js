@@ -398,6 +398,7 @@
     renderXSettings();
     for (const x of XSETTINGS) if (x.cmd) send(x.cmd(settings[x.key]));
     send('tune|' + (settings.tune || 0));
+    send('bind|' + (settings.binds || '?'));
     for (const id of ['vol', 'vol2']) $(id).value = settings.vol;
     for (const id of ['music', 'music2']) $(id).value = settings.music;
     for (const id of ['autoaim', 'autoaim2']) $(id).checked = settings.autoaim;
@@ -409,6 +410,36 @@
   for (const id of ['vol', 'vol2']) $(id).addEventListener('input', (e) => { settings.vol = +e.target.value; applySettings(); });
   for (const id of ['music', 'music2']) $(id).addEventListener('input', (e) => { settings.music = +e.target.value; applySettings(); });
   for (const id of ['autoaim', 'autoaim2']) $(id).addEventListener('change', (e) => { settings.autoaim = e.target.checked; applySettings(); });
+
+  // ------------------------------------------------------------------ key remapping
+  const BIND_LABELS = { up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right', dash: 'Dash', ability: 'Survivor ability', ult: 'Ultimate', interact: 'Interact / talk', reload: 'Reload (Outbreak)', swap: 'Swap weapon / sell', pause: 'Pause', autoaim: 'Toggle auto-aim', minimap: 'Toggle minimap', ping: 'Ping' };
+  let rebinding = null;
+  const keyName = (c) => c.replace(/^Key/, '').replace(/^Digit/, '').replace('ArrowUp', '↑').replace('ArrowDown', '↓').replace('ArrowLeft', '←').replace('ArrowRight', '→');
+  function renderBinds(spec) {
+    const map = Object.fromEntries(spec.split(';').map((kv) => kv.split('=')));
+    $('binds').innerHTML = Object.entries(BIND_LABELS).map(([id, label]) =>
+      `<div class="bind"><span>${label}</span><span>${(map[id] || '').split(',').filter(Boolean).map((c) => `<span class="kbd">${esc(keyName(c))}</span>`).join(' ') || '—'}</span>
+        <button class="btn small secondary" data-rebind="${id}">${rebinding === id ? 'Press a key…' : 'Change'}</button></div>`).join('');
+  }
+  on('binds', 'click', (e) => {
+    const b = e.target.closest('[data-rebind]');
+    if (!b) return;
+    rebinding = b.dataset.rebind;
+    b.textContent = 'Press a key…';
+  });
+  window.addEventListener('keydown', (e) => {
+    if (!rebinding) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.code !== 'Escape') {
+      const parts = (settings.binds || '').split(';').filter((kv) => kv && !kv.startsWith(rebinding + '='));
+      parts.push(`${rebinding}=${e.code}`);
+      settings.binds = parts.join(';');
+      saveSettings();
+      send('bind|' + settings.binds);
+    } else send('bind|?');
+    rebinding = null;
+  }, true);
+  on('binds-reset', 'click', () => { settings.binds = ''; saveSettings(); send('bind|'); });
 
   // ------------------------------------------------------------------ helpers
   let toastT = 0;
@@ -1132,6 +1163,7 @@
         if (a && await Data.eventAchievement(data)) { toast(`🏅 Achievement: ${a.icon} ${a.name}`); send('sfx|ready'); }
         break;
       }
+      case 'bindings': renderBinds(String(data)); break;
       case 'usebtn': $('t-use').classList.toggle('on', data === '1'); break;
       case 'readybtn': $('t-ready').classList.toggle('on', data === '1'); break;
       case 'haptic': {

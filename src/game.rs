@@ -332,6 +332,11 @@ pub struct Input {
     pub joy_pos: V2,
     /// interact held (rebuilding barricades)
     pub use_down: bool,
+    /// gamepad: left stick (move), right stick (aim), trigger held
+    pub pad_move: V2,
+    pub pad_aim: V2,
+    pub pad_fire: bool,
+    pub pad_active: bool,
 }
 
 /// Uniform spatial hash grid (counting sort) centred on the player; rebuilt each step.
@@ -1482,7 +1487,8 @@ impl Game {
                     Action::Pick1 => self.choose(0),
                     Action::Pick2 => self.choose(1),
                     Action::Pick3 => self.choose(2),
-                    Action::Confirm => self.choose(self.sel),
+                    // gamepad A (dash) confirms too
+                    Action::Confirm | Action::Dash => self.choose(self.sel),
                     Action::Reroll => self.reroll(),
                     Action::Banish => self.toggle_banish(),
                     Action::Skip => self.skip_levelup(),
@@ -2113,6 +2119,9 @@ impl Game {
         if i.touch_active {
             return i.touch_move.clamp_len(1.0);
         }
+        if i.pad_active && i.pad_move.len2() > 0.04 {
+            return i.pad_move.clamp_len(1.0);
+        }
         let mut d = V2::ZERO;
         if i.up {
             d.y -= 1.0;
@@ -2204,8 +2213,11 @@ impl Game {
             self.player.pos
         };
         self.mouse_world = cam + (self.input.mouse - self.screen * 0.5) * (1.0 / self.zoom.max(0.01));
-        let auto = self.auto_aim || self.input.is_touch || !self.input.mouse_seen;
-        let target_angle = if auto {
+        let pad_aim = self.input.pad_active && self.input.pad_aim.len2() > 0.09;
+        let auto = (self.auto_aim || self.input.is_touch || !self.input.mouse_seen) && !pad_aim;
+        let target_angle = if pad_aim {
+            Some(self.assisted_aim(ppos, self.input.pad_aim.angle()))
+        } else if auto {
             self.nearest_zombie(ppos, 650.0, 0).map(|j| {
                 let z = &self.zombies[j];
                 // lead the target a little
@@ -2289,8 +2301,11 @@ impl Game {
         // ---- gun
         self.player.fire_cd -= DT;
         let enemies_near = self.nearest_zombie(ppos, self.spawn_r * 0.95, 0).is_some();
-        let auto = self.auto_aim || self.input.is_touch || !self.input.mouse_seen;
-        let want_fire = if auto {
+        let pad_aim = self.input.pad_active && self.input.pad_aim.len2() > 0.09;
+        let auto = (self.auto_aim || self.input.is_touch || !self.input.mouse_seen) && !pad_aim;
+        let want_fire = if self.input.pad_active && (pad_aim || self.input.pad_fire) {
+            true
+        } else if auto {
             self.nearest_zombie(ppos, 650.0, 0).is_some()
         } else {
             enemies_near || self.input.mouse_down

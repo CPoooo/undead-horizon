@@ -485,6 +485,8 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
         "bind" => {
             if a.is_empty() {
                 g.bindings = input::Bindings::default();
+            } else if a == "?" {
+                // just report the current bindings
             } else {
                 g.bindings.apply(a);
             }
@@ -545,6 +547,19 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
         "hubclose" => {
             if let Some(h) = g.hub.as_mut() {
                 h.open = None;
+            }
+        }
+        // gamepad sticks: mx,my,ax,ay,fire (sent every frame while a pad is in use)
+        "pad" => {
+            let v: Vec<f32> = a.split(',').filter_map(|x| x.parse().ok()).collect();
+            if v.len() >= 5 {
+                g.input.pad_active = true;
+                g.input.pad_move = math::v2(v[0], v[1]);
+                g.input.pad_aim = math::v2(v[2], v[3]);
+                g.input.pad_fire = v[4] > 0.5;
+                g.input.is_touch = false;
+            } else {
+                g.input.pad_active = false;
             }
         }
         // a one-shot action from a gamepad or an on-screen button

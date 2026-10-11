@@ -436,3 +436,7 @@ body:not(.playing) #voice-hud { display: none; }
 .tier.big { border: 1px solid rgba(213,140,255,.4); }
 .tier.got { opacity: 1; background: rgba(255,211,106,.15); }
 .tier b { display: block; }
+
+.binds { display: grid; gap: 6px; }
+.bind { display: grid; grid-template-columns: 1.3fr 1fr auto; gap: 8px; align-items: center; font-size: 13px; }
+:focus-visible { outline: 3px solid #7ad7ff; outline-offset: 2px; }
