@@ -698,7 +698,7 @@ impl Game {
     fn draw_telegraphs(&self, c: &Ctx, a: f32, t: f32) {
         for sl in self.slams.iter() {
             let k = (sl.t / sl.dur).clamp(0.0, 1.0);
-            let col = if sl.fire { "#ff7a1f" } else { "#ff2040" };
+            let col = self.access.color(if sl.fire { "#ff7a1f" } else { "#ff2040" });
             c.set_global_alpha(d(0.12 + 0.2 * k));
             c.set_fill_style_str(col);
             circle(c, sl.pos.x, sl.pos.y, sl.r);
@@ -707,9 +707,14 @@ impl Game {
             c.set_global_alpha(d(0.6 + 0.4 * (t * 25.0).sin().abs()));
             c.set_stroke_style_str(col);
             c.set_line_width(3.0);
+            if self.access.colorblind > 0 {
+                // shape-coded: dashed ring for "area attack incoming"
+                let _ = c.set_line_dash(&js_sys::Array::of2(&14.0.into(), &8.0.into()));
+            }
             c.begin_path();
             let _ = c.arc(d(sl.pos.x), d(sl.pos.y), d(sl.r), 0.0, TAU64);
             c.stroke();
+            let _ = c.set_line_dash(&js_sys::Array::new());
             c.set_global_alpha(1.0);
         }
         for z in self.zombies.iter() {
@@ -1081,8 +1086,8 @@ impl Game {
     fn draw_zombie(&self, c: &Ctx, i: usize, a: f32, t: f32) {
         let z = &self.zombies[i];
         let p = z.prev.lerp(z.pos, self.za(a));
-        let f = z.flash.clamp(0.0, 1.0);
-        let lean = (z.vel.x / 900.0).clamp(-0.22, 0.22) * if z.kind == ZKind::Boss { 0.3 } else { 1.0 };
+        let f = if self.access.reduce_motion { 0.0 } else { z.flash.clamp(0.0, 1.0) };
+        let lean = if self.access.reduce_motion { 0.0 } else { (z.vel.x / 900.0).clamp(-0.22, 0.22) } * if z.kind == ZKind::Boss { 0.3 } else { 1.0 };
         if f < 0.01 && lean.abs() < 0.01 {
             return self.draw_zombie_body(c, i, a, t);
         }
@@ -1450,7 +1455,7 @@ impl Game {
         }
         if st.poison > 0 {
             c.set_global_alpha(0.3);
-            c.set_fill_style_str("#7dff3a");
+            c.set_fill_style_str(self.access.color("#7dff3a"));
             circle(c, body.x, body.y, r * 0.95);
             c.set_global_alpha(0.85);
             c.set_fill_style_str("#b6ff5a");
@@ -1795,7 +1800,7 @@ impl Game {
             c.fill();
         }
         // enemy acid (rocks are drawn solid below)
-        c.set_fill_style_str("#7dff3a");
+        c.set_fill_style_str(self.access.color("#7dff3a"));
         c.set_global_alpha(0.35);
         c.begin_path();
         for s in self.eshots.iter().filter(|s| s.r < 10.0) {
@@ -1805,7 +1810,7 @@ impl Game {
         c.fill();
         let _ = c.set_global_composite_operation("source-over");
         c.set_global_alpha(1.0);
-        c.set_fill_style_str("#c4ff6a");
+        c.set_fill_style_str(self.access.color("#c4ff6a"));
         c.begin_path();
         for s in self.eshots.iter().filter(|s| s.r < 10.0) {
             let p = s.prev.lerp(s.pos, a);
@@ -1826,7 +1831,7 @@ impl Game {
         if self.player_alive() {
             let me = self.player.prev.lerp(self.player.pos, a);
             let pulse = 0.55 + 0.45 * (self.real_time as f32 * 14.0).sin().abs();
-            c.set_stroke_style_str("#ff3040");
+            c.set_stroke_style_str(self.access.color("#ff3040"));
             c.set_line_width(2.0);
             c.set_global_alpha(d(pulse));
             c.begin_path();
@@ -2033,7 +2038,7 @@ impl Game {
         } else {
             0.0
         };
-        let hurt = (self.player.hurt_flash * 0.55).max(low);
+        let hurt = (self.player.hurt_flash * 0.55).max(low) * self.access.flash;
         if hurt > 0.01 {
             if let Ok(g) = c.create_radial_gradient(
                 d(w * 0.5),
@@ -2049,8 +2054,8 @@ impl Game {
                 c.fill_rect(0.0, 0.0, d(w), d(h));
             }
         }
-        if self.ult_flash > 0.0 {
-            c.set_global_alpha(d(self.ult_flash * 0.6));
+        if self.ult_flash > 0.0 && self.access.flash > 0.0 {
+            c.set_global_alpha(d(self.ult_flash * 0.6 * self.access.flash));
             c.set_fill_style_str("#fff6d8");
             c.fill_rect(0.0, 0.0, d(w), d(h));
             c.set_global_alpha(1.0);

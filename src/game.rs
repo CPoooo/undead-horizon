@@ -528,6 +528,7 @@ pub struct Game {
     pub tracer: usize,
     /// permanent upgrades, relic bonuses and gun camo from the profile
     pub meta: content::Meta,
+    pub access: content::Access,
     pub mutators: content::Mutators,
     /// daily run: everyone gets the same seed
     pub daily: String,
@@ -681,6 +682,7 @@ impl Game {
             hat: 0,
             tracer: 0,
             meta: content::Meta::default(),
+            access: content::Access::default(),
             mutators: content::Mutators::default(),
             daily: String::new(),
             relics: content::RelicBonus::default(),
@@ -1076,7 +1078,8 @@ impl Game {
     }
 
     pub fn add_shake(&mut self, amt: f32) {
-        self.shake = (self.shake + amt).min(1.0);
+        let k = if self.access.reduce_motion { 0.0 } else { self.access.shake };
+        self.shake = (self.shake + amt * k).min(1.0);
     }
 
     pub(crate) fn text(&mut self, pos: V2, s: String, color: &'static str, size: f32) {
@@ -1289,12 +1292,16 @@ impl Game {
         self.ult_flash = (self.ult_flash - real_dt * 2.5).max(0.0);
         self.cam_kick = self.cam_kick * (1.0 - damp(16.0, real_dt));
         self.zoom_punch = (self.zoom_punch - real_dt * 0.6).max(0.0);
+        if self.access.reduce_motion {
+            self.zoom_punch = 0.0;
+            self.slowmo = 0.0;
+        }
         self.tick_callouts(real_dt);
         self.tick_boss_intro(real_dt);
         if self.phase != Phase::Paused {
             self.update_corpses(real_dt);
         }
-        let look = if matches!(self.phase, Phase::Playing) && !self.player.downed {
+        let look = if matches!(self.phase, Phase::Playing) && !self.player.downed && !self.access.reduce_motion {
             V2::from_angle(self.player.aim) * (55.0 * self.lookahead)
         } else {
             V2::ZERO
@@ -2268,7 +2275,7 @@ impl Game {
     pub(crate) fn assisted_aim(&self, ppos: V2, raw: f32) -> f32 {
         const RANGE: f32 = 620.0;
         const BASE_CONE: f32 = 0.14; // ~8 degrees
-        const STRENGTH: f32 = 0.5;
+        let strength = self.access.aim_assist;
         let mut best: Option<(f32, f32, f32)> = None; // (score, angle delta, falloff)
         self.grid.query(ppos, RANGE, |j| {
             let z = &self.zombies[j];
@@ -2291,7 +2298,7 @@ impl Game {
             }
         });
         match best {
-            Some((_, delta, falloff)) => raw + delta * STRENGTH * falloff.sqrt(),
+            Some((_, delta, falloff)) => raw + delta * strength * falloff.sqrt(),
             None => raw,
         }
     }

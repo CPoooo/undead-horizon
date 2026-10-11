@@ -1108,3 +1108,62 @@ impl Mutators {
         k
     }
 }
+
+// ------------------------------------------------------------------ accessibility
+
+/// Player comfort settings (A2). Set from the UI with `access|k=v;...`.
+#[derive(Clone, Copy, Debug)]
+pub struct Access {
+    /// 0..1 screen-shake intensity
+    pub shake: f32,
+    /// 0..1 full-screen flash intensity (ultimate, hurt, low health)
+    pub flash: f32,
+    /// no zoom punches, slow motion, lookahead or hit squash
+    pub reduce_motion: bool,
+    /// 0..1 mouse/stick aim assist strength
+    pub aim_assist: f32,
+    /// 0 off, 1 deuteranopia/protanopia, 2 tritanopia
+    pub colorblind: u8,
+    /// tap interact to toggle instead of holding
+    pub toggle_use: bool,
+}
+
+impl Default for Access {
+    fn default() -> Self {
+        Access { shake: 1.0, flash: 1.0, reduce_motion: false, aim_assist: 0.5, colorblind: 0, toggle_use: false }
+    }
+}
+
+impl Access {
+    pub fn apply(&mut self, spec: &str) {
+        for kv in spec.split(';') {
+            let Some((k, v)) = kv.split_once('=') else { continue };
+            let f = v.parse::<f32>().unwrap_or(0.0);
+            match k {
+                "shake" => self.shake = f.clamp(0.0, 1.0),
+                "flash" => self.flash = f.clamp(0.0, 1.0),
+                "motion" => self.reduce_motion = v == "1",
+                "assist" => self.aim_assist = f.clamp(0.0, 1.0),
+                "cb" => self.colorblind = (f as u8).min(2),
+                "toggleuse" => self.toggle_use = v == "1",
+                _ => {}
+            }
+        }
+    }
+    /// Swap the colors that carry meaning (enemy acid, danger red) for
+    /// colorblind-safe ones.
+    pub fn color(&self, c: &'static str) -> &'static str {
+        match (self.colorblind, c) {
+            (1, "#7dff3a") => "#ffe14a",
+            (1, "#c4ff6a") => "#fff08a",
+            (1, "#9be04a") => "#ffe14a",
+            (1, "#ff2040") => "#ff8a00",
+            (1, "#ff3040") => "#ff8a00",
+            (2, "#7dff3a") => "#ff5ab4",
+            (2, "#c4ff6a") => "#ff9ad0",
+            (2, "#9be04a") => "#ff5ab4",
+            (2, "#7ad7ff") => "#e8e8e8",
+            _ => c,
+        }
+    }
+}

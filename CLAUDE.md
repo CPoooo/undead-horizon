@@ -279,7 +279,7 @@ Original design notes:
 
 ### M9 · Platform, UX & accessibility
 - [x] A1 (M) **Controls.** Gamepad support (Gamepad API: twin-stick, triggers fire, D-pad UI navigation) and a remapping UI. Depends on F6.
-- [ ] A2 (M) **Accessibility.**
+- [x] A2 (M) **Accessibility.**
   - colorblind palettes with shape-coded telegraphs and elites
   - shake and flash intensity sliders, plus reduce-motion
   - UI scale and high-contrast text (WCAG 4.5:1)

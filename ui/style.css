@@ -440,3 +440,15 @@ body:not(.playing) #voice-hud { display: none; }
 .binds { display: grid; gap: 6px; }
 .bind { display: grid; grid-template-columns: 1.3fr 1fr auto; gap: 8px; align-items: center; font-size: 13px; }
 :focus-visible { outline: 3px solid #7ad7ff; outline-offset: 2px; }
+
+/* accessibility */
+:root { --ui-scale: 1; }
+.overlay .card, #vendor, #mnav { zoom: var(--ui-scale); }
+body.hc { --muted: #e0e6f0; }
+body.hc .hint, body.hc .ds, body.hc .lbl { color: #f2f5fa !important; }
+body.hc .btn { outline: 2px solid rgba(255,255,255,.6); }
+body.reduce-motion *, body.reduce-motion *::before { transition: none !important; animation: none !important; }
+#subs { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); max-width: min(720px, 92vw); z-index: 12;
+  background: rgba(0,0,0,.78); color: #fff; padding: 8px 14px; border-radius: 10px; font-weight: 600; font-size: 15px;
+  opacity: 0; transition: opacity .2s; pointer-events: none; text-align: center; }
+#subs.show { opacity: 1; }

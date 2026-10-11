@@ -378,12 +378,23 @@
     { key: 'haptics', label: 'Vibration', kind: 'range', min: 0, max: 1, step: 0.1, def: 0.6 },
     { key: 'announcer', label: 'Announcer voice', kind: 'toggle', def: true },
     { key: 'vendorvoice', label: 'Vendor voices (Home Base)', kind: 'toggle', def: true },
+    { key: 'subtitles', label: 'Subtitles for voice lines', kind: 'toggle', def: true },
+    { key: 'shake', label: 'Screen shake', kind: 'range', min: 0, max: 1, step: 0.1, def: 1 },
+    { key: 'flash', label: 'Screen flashes', kind: 'range', min: 0, max: 1, step: 0.1, def: 1 },
+    { key: 'motion', label: 'Reduce motion (no zoom punches, slow-mo, lookahead)', kind: 'toggle', def: false },
+    { key: 'assist', label: 'Aim assist strength', kind: 'range', min: 0, max: 1, step: 0.1, def: 0.5 },
+    { key: 'cb', label: 'Colorblind mode', kind: 'select', def: '0', options: [['0', 'Off'], ['1', 'Deuteranopia / Protanopia'], ['2', 'Tritanopia']] },
+    { key: 'toggleuse', label: 'Tap interact to toggle (instead of hold)', kind: 'toggle', def: false },
+    { key: 'uiscale', label: 'Menu text size', kind: 'range', min: 0.8, max: 1.4, step: 0.05, def: 1 },
+    { key: 'contrast', label: 'High-contrast text', kind: 'toggle', def: false },
   ];
   for (const x of XSETTINGS) if (settings[x.key] === undefined) settings[x.key] = x.def;
   function renderXSettings() {
     for (const box of document.querySelectorAll('.xsettings')) {
       box.innerHTML = XSETTINGS.map((x) => x.kind === 'toggle'
         ? `<label class="toggle"><input type="checkbox" data-x="${x.key}" ${settings[x.key] ? 'checked' : ''} /> ${x.label}</label>`
+        : x.kind === 'select'
+        ? `<div class="setting"><span class="lbl">${x.label}</span><select data-x="${x.key}">${x.options.map(([v, l]) => `<option value="${v}" ${String(settings[x.key]) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`
         : `<div class="setting"><span class="lbl">${x.label}</span><input type="range" data-x="${x.key}" min="${x.min}" max="${x.max}" step="${x.step}" value="${settings[x.key]}" /></div>`).join('');
     }
   }
@@ -391,13 +402,17 @@
     const k = e.target?.dataset?.x;
     if (!k) return;
     const x = XSETTINGS.find((y) => y.key === k);
-    settings[k] = x.kind === 'toggle' ? e.target.checked : +e.target.value;
+    settings[k] = x.kind === 'toggle' ? e.target.checked : x.kind === 'select' ? e.target.value : +e.target.value;
     applySettings();
   });
   function applySettings() {
     renderXSettings();
     for (const x of XSETTINGS) if (x.cmd) send(x.cmd(settings[x.key]));
     send('tune|' + (settings.tune || 0));
+    send(`access|shake=${settings.shake};flash=${settings.flash};motion=${settings.motion ? 1 : 0};assist=${settings.assist};cb=${settings.cb};toggleuse=${settings.toggleuse ? 1 : 0}`);
+    document.documentElement.style.setProperty('--ui-scale', settings.uiscale || 1);
+    document.body.classList.toggle('hc', !!settings.contrast);
+    document.body.classList.toggle('reduce-motion', !!settings.motion);
     send('bind|' + (settings.binds || '?'));
     for (const id of ['vol', 'vol2']) $(id).value = settings.vol;
     for (const id of ['music', 'music2']) $(id).value = settings.music;
@@ -866,6 +881,15 @@
   let stall = null;
   let talkBusy = false;
   let browseT = 0;
+  let subT = 0;
+  function showSub(text) {
+    const el = $('subs');
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(subT);
+    subT = setTimeout(() => el.classList.remove('show'), 2600 + text.length * 30);
+  }
+  window.UHSub = showSub;
   function speak(v, line) {
     if (!settings.vendorvoice || !window.speechSynthesis || !v.pitch) return;
     try {
@@ -895,6 +919,7 @@
     } catch (e) { console.warn('[vendor]', e); }
     if (!line) { const pool = LOCAL_LINES[event] || LOCAL_LINES.chat; line = pool[Math.floor(Math.random() * pool.length)]; }
     if (stall === id) { el.textContent = line; el.classList.remove('thinking'); }
+    if (settings.subtitles && stall !== id) showSub(`${v.name}: ${line}`);
     send('npcsay|' + id + '|' + line.replace(/\|/g, '/'));
     speak(v, line);
     return line;
@@ -1125,6 +1150,7 @@
       }
       case 'autoaim': settings.autoaim = data === '1'; applySettings(); break;
       case 'say': {
+        if (settings.subtitles) showSub('📢 ' + String(data).replace(/^./, (c) => c.toUpperCase()));
         if (!settings.announcer || !window.speechSynthesis) break;
         try {
           const u = new SpeechSynthesisUtterance(String(data));

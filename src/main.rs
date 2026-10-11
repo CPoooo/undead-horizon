@@ -407,7 +407,13 @@ fn set_key(g: &mut Game, code: &str, down: bool) {
     let mut moved = false;
     for a in g.bindings.actions(code).to_vec() {
         if a == input::Action::Interact {
-            g.input.use_down = down;
+            if g.access.toggle_use {
+                if down {
+                    g.input.use_down = !g.input.use_down;
+                }
+            } else {
+                g.input.use_down = down;
+            }
         }
         if !a.is_held() {
             continue;
@@ -470,6 +476,7 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
             g.ui_out.push(("tune", audio::LOBBY_TUNES[g.audio.lobby_tune].name.to_string()));
         }
         "autoaim" => g.auto_aim = a == "1",
+        "access" => g.access.apply(a),
         "lookahead" => g.lookahead = a.parse::<f32>().unwrap_or(1.0).clamp(0.0, 2.0),
         "dash" => g.input.dash_req = true,
         "ult" => g.input.ult_req = true,
