@@ -565,6 +565,8 @@ pub struct Game {
     /// challenge variant (Siege: "glass")
     pub variant: String,
     pub victory_t: f32,
+    /// co-op: joined mid-match, spectating until the wave is cleared
+    pub late_join: bool,
     pub ult_queued: bool,
     // co-op networking (None in single player)
     pub net: Option<Net>,
@@ -727,6 +729,7 @@ impl Game {
             map_id: String::new(),
             variant: String::new(),
             victory_t: -1.0,
+            late_join: false,
             ult_queued: false,
             net: None,
             net_in: Vec::new(),

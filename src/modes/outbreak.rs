@@ -724,6 +724,7 @@ impl Game {
     }
 
     fn round_cleared(&mut self) {
+        self.respawn_spectator();
         self.wave.intermission = 9.0;
         let hounds = self.ob.as_ref().map(|o| o.hound_round).unwrap_or(false);
         if hounds {

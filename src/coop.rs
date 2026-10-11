@@ -88,6 +88,8 @@ impl Game {
         if role == Role::Client {
             self.wave.intermission = 0.0;
         }
+        // joining a match in progress: spectate until the wave is cleared
+        let late = opts.split(';').any(|kv| kv == "late=1");
         let n = net.players();
         // say hello so peers on a different build bail out instead of desyncing
         let peers: Vec<u8> = if role == Role::Host {
@@ -104,6 +106,19 @@ impl Game {
             self.net_out.push((slot, true, w.0));
         }
         self.net = Some(net);
+        if late {
+            self.late_join = true;
+            self.player.dead = true;
+            self.player.hp = 0.0;
+            self.banner = Some(Banner {
+                title: "JOINING THE FIGHT".into(),
+                sub: "Spectating · you drop in when this wave is cleared".into(),
+                t: 0.0,
+                dur: 4.0,
+                color: "#7ad7ff",
+            });
+            return;
+        }
         self.banner = Some(Banner {
             title: "CO-OP".into(),
             sub: format!(
@@ -115,6 +130,121 @@ impl Game {
             dur: 3.0,
             color: "#9cffb8",
         });
+    }
+
+    /// A player joined (or rejoined) mid-match in `slot`. Everyone marks them
+    /// present; the host also sends them the world state that otherwise only
+    /// travels as one-off events (doors, power, box, boards, defenses, crystal).
+    pub fn peer_joined(&mut self, slot: u8, name: &str) {
+        let me = self.my_slot();
+        if slot as usize >= MAX_PLAYERS || slot == me {
+            return;
+        }
+        let host = self.is_host();
+        let Some(net) = &mut self.net else { return };
+        let r = &mut net.remotes[slot as usize];
+        let n: String = name.chars().take(16).collect();
+        r.name = if n.is_empty() { format!("Player {}", slot + 1) } else { n };
+        r.present = true;
+        r.recv_t = 0.0;
+        r.state = NetPlayer { slot, flags: PF_CONNECTED, hp: 100.0, max_hp: 100.0, ..r.state.clone() };
+        self.toast = Some((format!("{} joined the fight", r.name), 2.5));
+        if !host {
+            return;
+        }
+        let mut hello = W::new();
+        hello.u8(MSG_HELLO);
+        hello.u16(PROTOCOL);
+        self.net_out.push((slot, true, hello.0));
+        let sync = self.encode_sync();
+        self.net_out.push((slot, true, sync));
+    }
+
+    /// Host: the persistent world state as a batch of events for a late joiner.
+    fn encode_sync(&self) -> Vec<u8> {
+        use crate::outbreak_interact::{W_BOXMOVE, W_DOOR, W_POWER};
+        let mut ev = W::new();
+        let mut n = 0u16;
+        if let Some(m) = crate::world::map() {
+            for (i, d) in m.doors.iter().enumerate() {
+                if d.open.get() {
+                    ev.u8(E_WORLD);
+                    ev.u8(W_DOOR);
+                    ev.u8(i as u8);
+                    n += 1;
+                }
+            }
+        }
+        if let Some(ob) = &self.ob {
+            if ob.power {
+                ev.u8(E_WORLD);
+                ev.u8(W_POWER);
+                ev.u8(0);
+                n += 1;
+            }
+            ev.u8(E_WORLD);
+            ev.u8(W_BOXMOVE);
+            ev.u8(ob.box_at as u8);
+            n += 1;
+            for (i, w) in ob.windows.iter().enumerate() {
+                ev.u8(E_BOARDS);
+                ev.u8(i as u8);
+                ev.u8(w.boards);
+                n += 1;
+            }
+        }
+        if let Some(s) = &self.siege {
+            for d in &s.defenses {
+                ev.u8(E_DEFENSE);
+                ev.u32(d.uid);
+                ev.u8(d.kind as u8);
+                ev.v2(d.pos);
+                ev.u8(d.tier);
+                n += 1;
+            }
+            ev.u8(E_CRYSTAL);
+            ev.f32(s.crystal_hp);
+            n += 1;
+        }
+        let mut w = W::new();
+        w.u8(MSG_EVENTS);
+        w.u16(n);
+        w.0.extend_from_slice(&ev.0);
+        w.0
+    }
+
+    /// Wave cleared: players who bled out (or joined mid-wave) drop back in
+    /// next to a living teammate.
+    pub fn respawn_spectator(&mut self) {
+        if !self.coop() || !self.player.dead || !matches!(self.phase, Phase::Playing | Phase::LevelUp | Phase::Paused) {
+            return;
+        }
+        let now = self.real_time;
+        let near = self.net.as_ref().and_then(|n| {
+            n.remotes.iter().find(|r| r.present && r.state.alive()).map(|r| r.render_pos(now))
+        });
+        let p = &mut self.player;
+        p.dead = false;
+        p.downed = false;
+        p.revive = 0.0;
+        p.hp = p.max_hp * 0.5;
+        p.hp_ghost = p.hp;
+        p.iframes = 3.0;
+        if let Some(at) = near {
+            p.pos = at + v2(50.0, 0.0);
+            p.prev = p.pos;
+        }
+        let pos = p.pos;
+        self.late_join = false;
+        self.banner = Some(Banner {
+            title: "BACK IN THE FIGHT".into(),
+            sub: "You respawned with your squad".into(),
+            t: 0.0,
+            dur: 2.6,
+            color: "#9cffb8",
+        });
+        self.ring(pos, 140.0, 0.6, "#9cffb8", 6.0);
+        self.push_sfx(Sfx::Heal, pos);
     }
 
     pub fn peer_left(&mut self, slot: u8) {
@@ -1052,6 +1182,7 @@ impl Game {
                         color: "#9cffb8",
                     });
                     self.audio.play(Sfx::WaveClear);
+                    self.respawn_spectator();
                 }
                 E_HEAL => {
                     let (Some(slot), Some(amt)) = (r.u8(), r.f32()) else {
@@ -1310,6 +1441,49 @@ mod tests {
             client.player.xp > 0.0 || client.player.level > 1,
             "team xp reaches the client"
         );
+    }
+
+    #[test]
+    fn dropped_player_rejoins_mid_match_synced_and_respawns_on_wave_clear() {
+        let mut host = Game::new(1);
+        let mut client = Game::new(2);
+        for g in [&mut host, &mut client] {
+            g.screen = v2(1280.0, 720.0);
+            g.zoom = 1.0;
+        }
+        let o = "names=Host,Guest;present=1,1,0;diff=rookie;mode=siege";
+        host.start_coop(&format!("role=host;me=0;{o}"));
+        client.start_coop(&format!("role=client;me=1;{o}"));
+        let mut t = 0.0;
+        pump(&mut host, &mut client, &mut t, 30, |_, _, _| {});
+        // the guest drops; the host builds a tower while they're gone
+        host.peer_left(1);
+        assert!(!host.net.as_ref().unwrap().remotes[1].present);
+        let at = host.player.pos + v2(120.0, 0.0);
+        host.add_defense(crate::modes::siege::DefKind::Tower, at, 2);
+        assert_eq!(host.siege.as_ref().unwrap().defenses.len(), 1);
+        // they come back in the same slot as a late joiner
+        let mut back = Game::new(3);
+        back.screen = v2(1280.0, 720.0);
+        back.start_coop(&format!("role=client;me=1;{o};late=1"));
+        assert!(back.player.dead && back.late_join, "late joiners spectate first");
+        host.peer_joined(1, "Guest");
+        assert!(host.net.as_ref().unwrap().remotes[1].present);
+        pump(&mut host, &mut back, &mut t, 20, |_, _, _| {});
+        let s = back.siege.as_ref().unwrap();
+        assert_eq!(s.defenses.len(), 1, "the tower built while away is synced");
+        assert_eq!(s.defenses[0].tier, 2);
+        assert!(back.player.dead, "still spectating mid-wave");
+        // the wave is cleared: the late joiner drops in next to the host
+        host.wave.n = 1;
+        host.wave_cleared();
+        pump(&mut host, &mut back, &mut t, 10, |_, _, _| {});
+        assert!(!back.player.dead && !back.late_join, "respawned on wave clear");
+        assert!(back.player.hp > 0.0);
+        // the host bled out earlier in a wave? they respawn on the next clear too
+        host.player.dead = true;
+        host.wave_cleared();
+        assert!(!host.player.dead);
     }
 
     #[test]

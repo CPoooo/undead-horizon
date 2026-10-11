@@ -58,6 +58,22 @@ try {
   check(afterRestart[0][0]?.[1] === 'open' && afterRestart[0][0]?.[2] === 'open' && afterRestart[1] === 'connected', `ICE restart mid-match keeps the link ${JSON.stringify(afterRestart)}`);
   await B.screenshot({ path: `${OUT}/coop-game-B.png` });
 
+  // M2: B's connection dies mid-match; B goes back to the party and rejoins the
+  // running match as a late joiner (spectating until the wave is cleared)
+  await B.evaluate(() => window.UHCoop.debug.pcs.forEach((pc) => pc.close()));
+  await B.waitForFunction(() => !window.UHCoop.debug.inGame, null, { timeout: 20000 });
+  await A.waitForFunction(() => window.UHCoop.debug.peers.length === 0, null, { timeout: 20000 });
+  check(await A.evaluate(() => window.UHCoop.debug.inGame), 'host keeps playing after the client drops');
+  await B.evaluate(() => window.UHUI.toMenu());
+  await B.waitForSelector('#party-joinrun', { state: 'attached', timeout: 15000 });
+  await B.evaluate(() => document.getElementById('party-joinrun').click());
+  await B.waitForFunction(() => window.UHCoop.debug.inGame, null, { timeout: 30000 });
+  await A.waitForFunction(() => window.UHCoop.debug.peers[0]?.[1] === 'open', null, { timeout: 15000 });
+  check(true, 'dropped client rejoins the match in progress');
+  check(await B.evaluate(() => window.UHCoop.debug.late), 'rejoiner starts as a late joiner');
+  await B.waitForTimeout(1500);
+  await B.screenshot({ path: `${OUT}/coop-rejoin-B.png` });
+
   // host leaves the match -> both back to the party; B readies again
   await A.keyboard.press('Escape');
   await A.waitForSelector('#pause.show', { timeout: 5000 });

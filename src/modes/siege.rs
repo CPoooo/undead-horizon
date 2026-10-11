@@ -525,6 +525,7 @@ impl Game {
     }
 
     fn siege_wave_cleared(&mut self) {
+        self.respawn_spectator();
         let n = self.wave.n;
         let last = self.siege.as_ref().map(|s| s.final_wave).unwrap_or(15);
         let glass = self.siege.as_ref().map(|s| s.glass).unwrap_or(false);

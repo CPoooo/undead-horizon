@@ -338,7 +338,8 @@ async function handle(uid: string, msg: any): Promise<void> {
       try {
         await client.query("begin");
         const pa = await client.query("select * from parties where id = $1 for update", [partyId]);
-        if (!pa.rows[0] || pa.rows[0].status !== "open") throw new Error("That party is no longer open.");
+        // joining mid-match is fine: the newcomer asks the host to drop them in (M2)
+        if (!pa.rows[0] || !["open", "in_game"].includes(pa.rows[0].status)) throw new Error("That party is no longer open.");
         const n = await client.query("select count(*)::int as n from party_members where party_id = $1", [partyId]);
         if (n.rows[0].n >= MAX_PARTY) throw new Error("Party is full (max 4).");
         await client.query(

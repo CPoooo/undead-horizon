@@ -445,6 +445,10 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
         "start" => g.start(a),
         "coop" => g.start_coop(a),
         "peerleft" => g.peer_left(a.parse().unwrap_or(255)),
+        "peerjoin" => {
+            let (slot, name) = a.split_once('|').unwrap_or((a, ""));
+            g.peer_joined(slot.parse().unwrap_or(255), name);
+        }
         // party members for the lobby showcase: name~skin~hat~gun|...
         "lobbymates" => {
             g.lobby_mates = a

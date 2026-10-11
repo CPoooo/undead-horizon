@@ -264,7 +264,7 @@
         <button class="btn small secondary" id="party-link" title="Anyone signed in with this link joins your party and becomes your friend">${canShare() ? '📤 Share invite link' : '🔗 Copy invite link'}</button>
         <button class="btn small secondary" id="party-leave">Leave</button>
       </div>
-      ${p.status === 'in_game' && !S.inGame && !S.loading ? `<div class="hint" style="margin-top:8px">⚔ A match is in progress. You'll be back here when it ends.</div>` : ''}
+      ${p.status === 'in_game' && !S.inGame && !S.loading && !amHost ? `<button class="btn gold" id="party-joinrun" style="margin-top:8px">⚔ Join the match in progress</button><div class="hint">You'll spectate until the current wave is cleared, then drop in.</div>` : ''}
       ${amHost
         ? `<span class="tip-wrap"><button class="btn gold" id="party-start" style="margin-top:10px" ${allReady && p.members.length > 1 && p.status === 'open' && !S.loading ? '' : 'disabled'}>▶ START CO-OP</button>
            <span class="tip">${p.members.length < 2 ? 'Invite at least one friend first' : allReady ? 'Everyone is ready!' : 'Waiting for everyone to ready up'}</span></span>`
@@ -276,6 +276,11 @@
     if ($('party-ch')) $('party-ch').onchange = (e) => { if (amHost) wsSend({ t: 'party.mode', mode: 'campaign', chapter: Number(e.target.value) }); };
     if ($('party-ready')) $('party-ready').onclick = () => { send('sfx|click'); wsSend({ t: 'party.ready', ready: !me?.ready }); };
     if ($('party-start')) $('party-start').onclick = () => wsSend({ t: 'party.start' });
+    if ($('party-joinrun')) $('party-joinrun').onclick = () => {
+      send('sfx|click');
+      wsSend({ t: 'signal', to: p.hostId, data: { kind: 'joinreq', sid: String(p.seed || p.id) } });
+      UI().toast('Asking the host to drop you in…');
+    };
     box.querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => wsSend({ t: 'party.kick', id: b.dataset.kick })));
     box.querySelectorAll('[data-pmenu]').forEach((b) => (b.onclick = (e) => window.UHChat?.playerMenu(b.dataset.pmenu, b.dataset.pname, e.currentTarget)));
   }
@@ -480,19 +485,21 @@
     }
   }
 
-  async function connectTo(m, attempt) {
+  async function connectTo(m, attempt, late = false) {
     const sid = S.sid;
     const old = S.peers.get(m.slot);
     if (old) { S.peers.delete(m.slot); try { old.pc.close(); } catch {} }
     const servers = await iceServers();
-    if (S.sid !== sid || S.inGame) return;
+    if (S.sid !== sid || (S.inGame && !late)) return;
     const pc = new RTCPeerConnection({ iceServers: servers });
     const peer = wire(m.slot, pc, m.id);
     peer.attempt = attempt;
+    peer.late = late;
     peer.onChannel(pc.createDataChannel('u', { ordered: false, maxRetransmits: 0 }));
     peer.onChannel(pc.createDataChannel('r', { ordered: true }));
     await pc.setLocalDescription(await pc.createOffer());
-    wsSend({ t: 'signal', to: m.id, data: { kind: 'offer', sid, slot: m.slot, attempt, sdp: pc.localDescription.sdp } });
+    wsSend({ t: 'signal', to: m.id, data: { kind: 'offer', sid, slot: m.slot, attempt, late: late ? 1 : 0, roster: late ? S.roster.map(({ id, name, slot }) => ({ id, name, slot })) : undefined, sdp: pc.localDescription.sdp } });
+    if (late) return;
     S.linkStatus[m.slot] = attempt ? 'retrying' : 'connecting';
     renderLoading();
   }
@@ -532,7 +539,31 @@
         await flushPendingIce(peer);
         S.linkStatus = S.linkStatus || {};
         S.linkStatus[0] = 'connecting';
+        if (data.late && Array.isArray(data.roster)) S.roster = data.roster;
+        if (data.late && !S.loading) {
+          // the host is letting us into a match in progress
+          showLoading();
+          clearTimeout(startTimer);
+          startTimer = setTimeout(clientTimedOut, CLIENT_WAIT);
+        }
         renderLoading();
+        break;
+      }
+      case 'joinreq': {
+        // host: a party member wants into the running match (rejoin or a new friend)
+        if (S.mySlot !== 0 || !S.inGame || data.sid !== S.sid) return;
+        const mem = S.party?.members.find((x) => x.id === from);
+        if (!mem) return;
+        let slot = S.roster.find((x) => x.id === from)?.slot;
+        if (slot !== undefined && linkOpen(S.peers.get(slot))) return; // already connected
+        if (slot === undefined) {
+          const inParty = (x) => S.party.members.some((pm) => pm.id === x.id);
+          const taken = (i) => S.peers.has(i) || S.roster.some((x) => x.slot === i && inParty(x));
+          slot = [1, 2, 3].find((i) => !taken(i));
+          if (slot === undefined) { wsSend({ t: 'signal', to: from, data: { kind: 'nogo', sid: S.sid } }); return; }
+          S.roster = S.roster.filter((x) => x.slot !== slot).concat({ ...mem, slot });
+        }
+        connectTo({ ...mem, slot }, 0, true);
         break;
       }
       case 'reoffer': {
@@ -588,11 +619,27 @@
 
   function checkAllOpen() {
     for (const slot of S.peers.keys()) setLinkStatus(slot);
+    if (S.inGame && S.mySlot === 0) {
+      for (const p of S.peers.values()) if (p.late && !p.lateSent && linkOpen(p)) lateGo(p);
+      return;
+    }
     if (S.mySlot !== 0 || S.inGame || !S.loading) return;
     broadcastLoading();
     const want = (S.roster || []).slice(1);
     if (want.every((m) => linkOpen(S.peers.get(m.slot)))) hostGo(false);
     else if (want.every((m) => linkOpen(S.peers.get(m.slot)) || S.linkStatus[m.slot] === 'failed')) hostTimedOut();
+  }
+
+  // host: a late joiner's link is up. Start them as a spectator, tell everyone
+  // else, and let the game send them the world state.
+  function lateGo(p) {
+    p.lateSent = true;
+    const present = [0, 1, 2, 3].map((i) => (i === 0 || linkOpen(S.peers.get(i)) ? 1 : 0));
+    const name = (S.roster.find((x) => x.slot === p.slot)?.name || '').replace(/[|;,=]/g, '');
+    const roster = S.roster.map(({ id, name: n, slot }) => ({ id, name: n, slot }));
+    try { p.r.send(JSON.stringify({ t: 'go', late: 1, present, roster })); } catch {}
+    for (const q of S.peers.values()) if (q !== p && linkOpen(q)) { try { q.r.send(JSON.stringify({ t: 'joined', slot: p.slot, name, roster })); } catch {} }
+    send(`peerjoin|${p.slot}|${name}`);
   }
 
   // host -> clients: who's connected so far, for their loading screens
@@ -631,7 +678,14 @@
   }
 
   function onControl(from, m) {
-    if (m.t === 'go' && S.mySlot !== 0 && !S.inGame) startGame(opts('client', m.present));
+    if (m.t === 'go' && m.late && S.mySlot !== 0 && !S.inGame) {
+      if (Array.isArray(m.roster)) S.roster = m.roster;
+      S.late = true;
+      startGame(opts('client', m.present) + ';late=1');
+    } else if (m.t === 'joined' && S.inGame && S.mySlot !== 0) {
+      if (Array.isArray(m.roster)) S.roster = m.roster;
+      send(`peerjoin|${m.slot}|${String(m.name || '').replace(/[|;]/g, '')}`);
+    } else if (m.t === 'go' && S.mySlot !== 0 && !S.inGame) { S.late = false; startGame(opts('client', m.present)); }
     else if (m.t === 'load' && S.mySlot !== 0 && !S.inGame) { S.hostView = m.status; renderLoading(); }
   }
 
@@ -768,6 +822,7 @@
       S.inGame = false;
       closePeers();
       if (S.party && S.me && S.party.hostId === S.me.id) wsSend({ t: 'party.end' });
+      render(); // e.g. offer "Join the match in progress" if the host is still playing
     },
     setDiff(diff) { if (S.party && S.party.hostId === S.me?.id) wsSend({ t: 'party.diff', diff }); },
     lookChanged() { if (S.party) wsSend({ t: 'party.look', look: look() }); },
@@ -780,7 +835,7 @@
     get me() { return S.me; },
     get social() { return S.social; },
     /** for tests/debugging */
-    get debug() { return { restarts: S.restarts || 0, restart: (slot) => { const p = S.peers.get(slot); if (p) { p.troubleAt = Date.now(); restartIce(p); } }, slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
+    get debug() { return { late: !!S.late, restarts: S.restarts || 0, restart: (slot) => { const p = S.peers.get(slot); if (p) { p.troubleAt = Date.now(); restartIce(p); } }, slot: S.mySlot, inGame: S.inGame, loading: S.loading, sid: S.sid, links: S.linkStatus, peers: [...S.peers.entries()].map(([k, p]) => [k, p.u?.readyState, p.r?.readyState]), pcs: [...S.peers.values()].map((p) => p.pc), party: S.party, me: S.me }; },
     inviteLink,
     /** Home Base: share our position with the party, and read theirs */
     hubPos(x, y, aim) { if (S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },

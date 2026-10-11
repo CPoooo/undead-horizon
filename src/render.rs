@@ -3195,7 +3195,11 @@ impl Game {
             c.set_stroke_style_str("rgba(0,0,0,0.85)");
             outlined(
                 c,
-                "SPECTATING · you'll be back next run",
+                if self.late_join {
+                    "JOINING · you drop in when this wave is cleared"
+                } else {
+                    "SPECTATING · you respawn when this wave is cleared"
+                },
                 w * 0.5,
                 h - 140.0,
                 5.0,

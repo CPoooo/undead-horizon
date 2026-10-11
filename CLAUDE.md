@@ -256,7 +256,8 @@ Original design notes:
 - [x] M1 (S) **TURN relay.** Add a TURN server (Cloudflare Calls TURN, or a free tier) with credentials minted by the `api` function (`/turn`), plus ICE restart on failure. Known gap today.
   - Metered TURN via `/turn` (relay-only e2e passes). Mid-match, a `disconnected`/`failed` link triggers an ICE restart: the host re-offers (`reoffer` signal) and a client asks with `restart`. The player is kept for a 15s grace period with "reconnecting…" and "Reconnected ✔" toasts.
   - Caveat: Metered's free plan caps live credentials at 10 (4h expiry). Set `METERED_API_KEY` (or reuse credentials) if `/turn` starts failing with "Maximum credential limit reached".
-- [ ] M2 (M) **Reconnect and join in progress.**
+- [x] M2 (M) **Reconnect and join in progress.**
+  - Done: a party member not in the running match gets "⚔ Join the match in progress" → `joinreq` signal → the host re-offers (`late`) in the old slot (or the lowest free one), sends `go{late}` + `joined` to the others, and `peerjoin|slot|name` makes the host game send HELLO + a one-off world sync (doors, power, box, boards, defenses, crystal) as `MSG_EVENTS`. Late joiners spectate until the wave is cleared; bled-out players also respawn on wave clear. The server now allows `party.join` into `in_game` parties (needs deploy).
   - A dropped client rejoins: same slot, host resends a full snapshot.
   - A new friend joins mid-run as spectator, then spawns on wave clear.
 - [ ] M3 (L, split) **Host migration.**

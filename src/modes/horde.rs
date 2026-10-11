@@ -206,6 +206,7 @@ impl Game {
         }
     }
     pub(crate) fn wave_cleared(&mut self) {
+        self.respawn_spectator();
         self.wave.intermission = 3.5;
         for g in self.gems.iter_mut() {
             g.magnet = true;
