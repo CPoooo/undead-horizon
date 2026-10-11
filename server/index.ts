@@ -76,6 +76,9 @@ app.post("/errors", async (c) => {
   return c.json({ ok: true });
 });
 
+// e2e test accounts (tests/e2e/lib.mjs signs up uh-test-*@example.com) never rank
+const NOT_TEST = `user_id not in (select id::text from neon_auth."user" where email like 'uh-test-%@example.com')`;
+
 app.get("/leaderboard", async (c) => {
   const q = (k: string) => c.req.query(k);
   if (q("mode") === "outbreak") {
@@ -84,7 +87,7 @@ app.get("/leaderboard", async (c) => {
     const { rows } = await pool.query(
       `select * from (
          select distinct on (user_id) id, user_id, name, wave, level, kills, time, diff, gun, players, score, created_at
-         from runs where mode = 'outbreak' and map = $1 and not abandoned
+         from runs where mode = 'outbreak' and map = $1 and not abandoned and ${NOT_TEST}
          order by user_id, wave desc, score desc
        ) best order by wave desc, score desc limit 25`,
       [map],
@@ -98,7 +101,7 @@ app.get("/leaderboard", async (c) => {
     const { rows } = await pool.query(
       `select * from (
          select distinct on (user_id) id, user_id, name, wave, level, kills, time, diff, gun, players, score, created_at
-         from runs where daily = $1 order by user_id, created_at asc
+         from runs where daily = $1 and ${NOT_TEST} order by user_id, created_at asc
        ) first order by wave desc, score desc, kills desc limit 25`,
       [day],
     );
@@ -106,7 +109,7 @@ app.get("/leaderboard", async (c) => {
     return c.json(rows.map(lbRow));
   }
   // filters: diff, scope=week, players=solo|coop, pure=1, friends=1 (signed in)
-  const where = ["mode = 'infinite'", "not abandoned", "not mutated", "daily = ''"];
+  const where = ["mode = 'infinite'", "not abandoned", "not mutated", "daily = ''", NOT_TEST];
   const args: unknown[] = [];
   const diff = q("diff");
   if (diff && DIFFS.includes(diff)) {
