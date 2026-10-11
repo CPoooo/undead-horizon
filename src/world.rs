@@ -93,12 +93,74 @@ pub fn blocking(pos: V2, dir: V2, look: f32, r: f32) -> Option<Obstacle> {
 
 pub struct ProceduralWorld;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Biome {
+    Graveyard,
+    Forest,
+    Town,
+    Snow,
+}
+
+pub const BIOME_CELL: f32 = 1800.0;
+
+impl Biome {
+    pub fn name(self) -> &'static str {
+        match self {
+            Biome::Graveyard => "Hollowbrook Graveyard",
+            Biome::Forest => "Whispering Pines",
+            Biome::Town => "Town Ruins",
+            Biome::Snow => "The Frozen Reach",
+        }
+    }
+    /// ground tint laid over the base grass (color, alpha)
+    pub fn tint(self) -> Option<(&'static str, f32)> {
+        match self {
+            Biome::Graveyard => None,
+            Biome::Forest => Some(("#0f1a0c", 0.55)),
+            Biome::Town => Some(("#2a2a2c", 0.75)),
+            Biome::Snow => Some(("#b9c6d0", 0.85)),
+        }
+    }
+}
+
+/// Biome of a biome cell; the start area is always the graveyard.
+pub fn biome_of_cell(bx: i32, by: i32) -> Biome {
+    if bx.abs() <= 0 && by.abs() <= 0 {
+        return Biome::Graveyard;
+    }
+    let h = hashf(bx, by, 555);
+    if h < 0.3 {
+        Biome::Graveyard
+    } else if h < 0.58 {
+        Biome::Forest
+    } else if h < 0.8 {
+        Biome::Town
+    } else {
+        Biome::Snow
+    }
+}
+
+pub fn biome_at(p: V2) -> Biome {
+    let bx = ((p.x + BIOME_CELL * 0.5) / BIOME_CELL).floor() as i32;
+    let by = ((p.y + BIOME_CELL * 0.5) / BIOME_CELL).floor() as i32;
+    biome_of_cell(bx, by)
+}
+
 pub fn obstacle_at(cx: i32, cy: i32) -> Option<Obstacle> {
     let p = hashf(cx, cy, 11);
+    let centre = v2((cx as f32 + 0.5) * OBST_CELL, (cy as f32 + 0.5) * OBST_CELL);
+    let biome = biome_at(centre);
     // low-frequency "biome" density so there are forests and clearings
     let bx = (cx as f32 / 6.0).floor() as i32;
     let by = (cy as f32 / 6.0).floor() as i32;
-    let density = 0.08 + hashf(bx, by, 99) * 0.28;
+    let density = 0.08
+        + hashf(bx, by, 99) * 0.28
+        + match biome {
+            Biome::Forest => 0.18,
+            Biome::Town => 0.1,
+            Biome::Snow => -0.04,
+            Biome::Graveyard => 0.02,
+        };
     if p > density {
         return None;
     }
@@ -110,12 +172,42 @@ pub fn obstacle_at(cx: i32, cy: i32) -> Option<Obstacle> {
         return None;
     }
     let k = hashf(cx, cy, 5);
-    let (kind, r) = if k < 0.62 {
-        (ObKind::Tree, 20.0 + hashf(cx, cy, 6) * 12.0)
-    } else if k < 0.88 {
-        (ObKind::Rock, 18.0 + hashf(cx, cy, 6) * 18.0)
-    } else {
-        (ObKind::Grave, 15.0)
+    let size = hashf(cx, cy, 6);
+    let (kind, r) = match biome {
+        Biome::Forest => {
+            if k < 0.88 {
+                (ObKind::Tree, 22.0 + size * 14.0)
+            } else {
+                (ObKind::Rock, 18.0 + size * 14.0)
+            }
+        }
+        Biome::Town => {
+            if k < 0.45 {
+                (ObKind::Crate, 20.0)
+            } else if k < 0.7 {
+                (ObKind::Pillar, 18.0 + size * 10.0)
+            } else if k < 0.85 {
+                (ObKind::Barrel, 16.0)
+            } else {
+                (ObKind::Rock, 16.0 + size * 12.0)
+            }
+        }
+        Biome::Snow => {
+            if k < 0.35 {
+                (ObKind::Tree, 18.0 + size * 10.0)
+            } else {
+                (ObKind::Rock, 20.0 + size * 20.0)
+            }
+        }
+        Biome::Graveyard => {
+            if k < 0.45 {
+                (ObKind::Tree, 20.0 + size * 12.0)
+            } else if k < 0.62 {
+                (ObKind::Rock, 18.0 + size * 18.0)
+            } else {
+                (ObKind::Grave, 15.0)
+            }
+        }
     };
     Some(Obstacle { pos, r, kind, seed })
 }
@@ -667,6 +759,33 @@ pub fn load_builtin(id: &str) -> Option<Rc<AuthoredMap>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn biomes_vary_and_shape_the_world() {
+        assert_eq!(biome_at(v2(0.0, 0.0)), Biome::Graveyard, "start in the graveyard");
+        let mut seen = std::collections::HashSet::new();
+        for by in -8..8 {
+            for bx in -8..8 {
+                seen.insert(format!("{:?}", biome_of_cell(bx, by)));
+            }
+        }
+        assert_eq!(seen.len(), 4, "all biomes appear: {seen:?}");
+        // town cells grow crates and pillars, forests grow trees
+        let mut town = 0;
+        let mut forest_trees = 0;
+        for cy in -120..120 {
+            for cx in -120..120 {
+                if let Some(o) = obstacle_at(cx, cy) {
+                    match biome_at(o.pos) {
+                        Biome::Town if matches!(o.kind, ObKind::Crate | ObKind::Pillar | ObKind::Barrel) => town += 1,
+                        Biome::Forest if o.kind == ObKind::Tree => forest_trees += 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        assert!(town > 50 && forest_trees > 50, "town {town}, forest trees {forest_trees}");
+    }
 
     #[test]
     fn test_map_loads_and_walls_collide() {

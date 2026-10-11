@@ -461,6 +461,7 @@ pub struct Game {
     pub hub: Option<Box<crate::modes::hub::HubState>>,
     pub tutorial: Option<crate::tutorial::Tutorial>,
     pub weather: crate::weather::Weather,
+    pub biome: Option<world::Biome>,
     /// the touch USE button is visible
     pub use_shown: bool,
     /// render big hordes with cheap zombies
@@ -634,6 +635,7 @@ impl Game {
             hub: None,
             tutorial: None,
             weather: crate::weather::Weather::new(),
+            biome: None,
             use_shown: false,
             lod: false,
             ready_shown: false,
@@ -893,6 +895,7 @@ impl Game {
         self.hub = None;
         self.tutorial = None;
         self.weather = crate::weather::Weather::new();
+        self.biome = None;
         self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
@@ -1321,6 +1324,15 @@ impl Game {
         self.tick_boss_intro(real_dt);
         self.tick_tutorial(real_dt);
         self.tick_weather(real_dt);
+        if self.world_has_sky() && self.phase == Phase::Playing {
+            let b = world::biome_at(self.player.pos);
+            if Some(b) != self.biome {
+                if self.biome.is_some() {
+                    self.toast = Some((format!("Entering {}", b.name()), 2.2));
+                }
+                self.biome = Some(b);
+            }
+        }
         if self.phase != Phase::Paused {
             self.update_corpses(real_dt);
         }
@@ -3799,6 +3811,7 @@ impl Game {
 
     pub(crate) fn pick_kind(&mut self) -> ZKind {
         let n = self.scale_n() as f32;
+        let biome = if self.world_has_sky() { world::biome_at(self.player.pos) } else { world::Biome::Graveyard };
         let weight = |k: ZKind| {
             let d = k.def();
             if d.min_wave == 0 || n < d.min_wave as f32 {
@@ -3809,7 +3822,18 @@ impl Game {
                 } else {
                     1.0
                 };
-                (d.weight.0 + d.weight.1 * n).min(d.weight.2) * night
+                // native zombies of the biome you're in
+                let native = match (biome, k) {
+                    (world::Biome::Forest, ZKind::Crawler) => 2.5,
+                    (world::Biome::Forest, ZKind::Bat) => 1.8,
+                    (world::Biome::Town, ZKind::Armored) => 2.5,
+                    (world::Biome::Town, ZKind::Exploder) => 1.5,
+                    (world::Biome::Snow, ZKind::Brute) => 1.6,
+                    (world::Biome::Graveyard, ZKind::Walker) => 1.3,
+                    (world::Biome::Graveyard, ZKind::Burrower) => 2.0,
+                    _ => 1.0,
+                };
+                (d.weight.0 + d.weight.1 * n).min(d.weight.2) * night * native
             }
         };
         let total: f32 = ZKind::ALL.iter().map(|k| weight(*k)).sum();

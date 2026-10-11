@@ -485,7 +485,6 @@ impl Game {
     fn draw_ground(&self, c: &Ctx, vmin: V2, vmax: V2) {
         c.set_fill_style_str("#1f2b1b");
         c.fill_rect(d(vmin.x), d(vmin.y), d(vmax.x - vmin.x), d(vmax.y - vmin.y));
-
         // large soft biome patches
         let big = 320.0;
         let bx0 = (vmin.x / big).floor() as i32 - 1;
@@ -531,6 +530,55 @@ impl Game {
         }
         c.fill();
 
+        // biome regions tint the ground (soft-edged with a feathered border)
+        let bc = world::BIOME_CELL;
+        let bx0 = ((vmin.x + bc * 0.5) / bc).floor() as i32;
+        let by0 = ((vmin.y + bc * 0.5) / bc).floor() as i32;
+        let bx1 = ((vmax.x + bc * 0.5) / bc).floor() as i32;
+        let by1 = ((vmax.y + bc * 0.5) / bc).floor() as i32;
+        for by in by0..=by1 {
+            for bx in bx0..=bx1 {
+                let Some((col, alpha)) = world::biome_of_cell(bx, by).tint() else { continue };
+                let x = bx as f32 * bc - bc * 0.5;
+                let y = by as f32 * bc - bc * 0.5;
+                c.set_fill_style_str(col);
+                for (k, inset) in [(0.35f32, 0.0f32), (0.65, 60.0), (1.0, 140.0)] {
+                    c.set_global_alpha(d(alpha * k));
+                    c.fill_rect(d(x + inset), d(y + inset), d(bc - inset * 2.0), d(bc - inset * 2.0));
+                }
+                c.set_global_alpha(1.0);
+                if world::biome_of_cell(bx, by) == world::Biome::Town {
+                    // worn paving stones, staggered rows
+                    let (x0, y0) = ((x + 140.0).max(vmin.x), (y + 140.0).max(vmin.y));
+                    let (x1, y1) = ((x + bc - 140.0).min(vmax.x), (y + bc - 140.0).min(vmax.y));
+                    if x1 > x0 && y1 > y0 {
+                        let (tw, th) = (72.0f32, 40.0f32);
+                        c.set_stroke_style_str("rgba(255,255,255,0.05)");
+                        c.set_line_width(2.0);
+                        c.begin_path();
+                        let r0 = (y0 / th).floor() as i32;
+                        let r1 = (y1 / th).ceil() as i32;
+                        for r in r0..=r1 {
+                            let yy = r as f32 * th;
+                            c.move_to(d(x0), d(yy));
+                            c.line_to(d(x1), d(yy));
+                            let off = if r % 2 == 0 { 0.0 } else { tw * 0.5 };
+                            let c0 = ((x0 - off) / tw).floor() as i32;
+                            let c1 = ((x1 - off) / tw).ceil() as i32;
+                            for col in c0..=c1 {
+                                let xx = col as f32 * tw + off;
+                                if xx >= x0 && xx <= x1 {
+                                    c.move_to(d(xx), d(yy));
+                                    c.line_to(d(xx), d((yy + th).min(y1)));
+                                }
+                            }
+                        }
+                        c.stroke();
+                    }
+                }
+            }
+        }
+
         // grass tufts
         c.set_stroke_style_str("#3b5530");
         c.set_line_width(2.0);
@@ -549,6 +597,13 @@ impl Game {
                 let f = (hv >> 8) as f32 / 16777216.0;
                 let px = gx as f32 * gs + ((hv & 31) as f32 / 31.0) * gs;
                 let py = gy as f32 * gs + (((hv >> 5) & 31) as f32 / 31.0) * gs;
+                // no grass or flowers on snow and paving
+                if matches!(world::biome_at(v2(px, py)), world::Biome::Snow | world::Biome::Town) {
+                    if f > 0.47 && f < 0.55 {
+                        pebbles.push(v2(px, py));
+                    }
+                    continue;
+                }
                 if f < 0.42 {
                     for k in 0..3 {
                         let ox = (k as f32 - 1.0) * 3.5;
@@ -1292,6 +1347,9 @@ impl Game {
         }
         let (cloth, skin, dark) = if z.kind == ZKind::Boss {
             z.boss_var.colors()
+        } else if self.world_has_sky() && world::biome_at(z.pos) == world::Biome::Snow {
+            // the Frozen Reach: frostbitten locals
+            ("#a9bccb", "#c6d8e2", "#4a5a68")
         } else {
             let n = def.cloth.len();
             (def.cloth[((z.tint * n as f32) as usize).min(n - 1)], def.skin, def.dark)

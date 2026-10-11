@@ -271,7 +271,7 @@ Original design notes:
 
 ### M8 · World & presentation
 - [x] V1 (M) **Day/night and weather.** Day/night cycle in Infinite, plus weather (rain streaks, fog) that changes visibility and spawns (more runners at night).
-- [ ] V2 (M) **Biomes.** Biome regions in the procedural world (graveyard, pine forest, town ruins, snowfield) with biome props and native zombie variants (via F1).
+- [x] V2 (M) **Biomes.** Biome regions in the procedural world (graveyard, pine forest, town ruins, snowfield) with biome props and native zombie variants (via F1).
 - [ ] V3 (S) **Destructibles.** Explosive barrels, breakable crates (drops), and environmental kills.
 - [ ] V4 (M) **Character polish.** Better animation (procedural walk bob, reload, hurt flinch) and new cosmetic slots: backpack, kill effect, death effect, emote.
 - [x] V5 (S) **Music picker.** Implements item 12: a data-driven tune list in `audio.rs` and a selector in Settings.

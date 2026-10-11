@@ -532,6 +532,20 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
                 g.spawn_boss(var, p);
                 g.boss_intro(var);
             }
+            if let Some(v) = a.strip_prefix("biome=") {
+                'find: for r in 1..12i32 {
+                    for by in -r..=r {
+                        for bx in -r..=r {
+                            if format!("{:?}", world::biome_of_cell(bx, by)).to_lowercase() == v {
+                                let p = math::v2(bx as f32 * world::BIOME_CELL, by as f32 * world::BIOME_CELL);
+                                g.player.pos = world::resolve(p, 16.0).0;
+                                g.player.prev = g.player.pos;
+                                break 'find;
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(v) = a.strip_prefix("sky=") {
                 let (sky, clock) = v.split_once(',').unwrap_or((v, "0.25"));
                 g.weather.sky = match sky {
