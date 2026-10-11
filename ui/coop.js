@@ -178,6 +178,28 @@
     return `${location.origin}${location.pathname}?party=${S.party.id}&t=${S.party.token}`;
   }
 
+  // Native share sheet (Messages, WhatsApp, Discord…) on phones and tablets;
+  // desktop browsers keep the plain copy, since their share dialogs are clunky.
+  function canShare() {
+    return !!navigator.share && matchMedia('(pointer: coarse)').matches;
+  }
+
+  async function copyInvite(link) {
+    try { await navigator.clipboard.writeText(link); UI().toast('Invite link copied! Send it to your friends 🧟'); }
+    catch { prompt('Copy this invite link:', link); }
+  }
+
+  async function shareInvite() {
+    const link = inviteLink();
+    if (!link) return;
+    const data = { title: 'Undead Horizon', text: `${S.me?.name || 'A friend'} wants you in their squad. Join the party in Undead Horizon 🧟`, url: link };
+    if (canShare() && (!navigator.canShare || navigator.canShare(data))) {
+      try { await navigator.share(data); return; }
+      catch (e) { if (e?.name === 'AbortError') return; } // closed the sheet
+    }
+    copyInvite(link);
+  }
+
   function renderParty() {
     const box = $('party-box');
     if (!box) return;
@@ -216,7 +238,7 @@
       <div class="pms">${slots}</div>
       <div id="voice-ctl"></div>
       <div class="row" style="margin-top:8px">
-        <button class="btn small secondary" id="party-link" title="Anyone signed in with this link joins your party and becomes your friend">🔗 Copy invite link</button>
+        <button class="btn small secondary" id="party-link" title="Anyone signed in with this link joins your party and becomes your friend">${canShare() ? '📤 Share invite link' : '🔗 Copy invite link'}</button>
         <button class="btn small secondary" id="party-leave">Leave</button>
       </div>
       ${p.status === 'in_game' && !S.inGame && !S.loading ? `<div class="hint" style="margin-top:8px">⚔ A match is in progress. You'll be back here when it ends.</div>` : ''}
@@ -225,11 +247,7 @@
            <span class="tip">${p.members.length < 2 ? 'Invite at least one friend first' : allReady ? 'Everyone is ready!' : 'Waiting for everyone to ready up'}</span></span>`
         : `<button class="btn ${me?.ready ? 'secondary' : ''}" id="party-ready" style="margin-top:10px">${me?.ready ? 'Not ready' : '✔ Ready up'}</button>`}
     </div>`;
-    $('party-link').onclick = async () => {
-      const link = inviteLink();
-      try { await navigator.clipboard.writeText(link); UI().toast('Invite link copied! Send it to your friends 🧟'); }
-      catch { prompt('Copy this invite link:', link); }
-    };
+    $('party-link').onclick = () => shareInvite();
     $('party-leave').onclick = () => wsSend({ t: 'party.leave' });
     if ($('party-ready')) $('party-ready').onclick = () => { send('sfx|click'); wsSend({ t: 'party.ready', ready: !me?.ready }); };
     if ($('party-start')) $('party-start').onclick = () => wsSend({ t: 'party.start' });

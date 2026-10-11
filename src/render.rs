@@ -2390,6 +2390,9 @@ impl Game {
                     "{}px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif",
                     (ch * 0.36).min(44.0).round()
                 ));
+                // solid fill: Safari draws text under a gradient fillStyle as a
+                // flat silhouette, which hid the emoji against the dark card
+                c.set_fill_style_str("#ffffff");
                 text(c, def.icon, x + ch * 0.42, yy + ch * 0.5 + bob);
                 let tx = x + ch * 0.82;
                 c.set_text_align("left");
