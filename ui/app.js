@@ -103,6 +103,28 @@
     },
   ];
 
+  // ------------------------------------------------------------------ error reporting
+  // Crashes and uncaught errors go to POST /errors (deduped, max 3 per page load).
+  const reported = new Set();
+  function reportError(kind, message, stack) {
+    const base = window.UH_CONFIG?.apiBase;
+    const key = kind + String(message).slice(0, 120);
+    if (!base || reported.has(key) || reported.size >= 3) return;
+    reported.add(key);
+    const build = (document.querySelector('script[type="module"]')?.src || '').split('/').pop().slice(0, 40);
+    Promise.resolve(window.UHCloud?.token?.().catch(() => null))
+      .then((tok) => fetch(base + '/errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) },
+        body: JSON.stringify({ kind, message: String(message), stack: String(stack || ''), url: location.href, build }),
+        keepalive: true,
+      }))
+      .catch(() => {});
+  }
+  window.addEventListener('error', (e) => reportError('error', e.message, e.error?.stack || `${e.filename}:${e.lineno}`));
+  window.addEventListener('unhandledrejection', (e) => reportError('promise', e.reason?.message || e.reason, e.reason?.stack));
+  window.UHReportError = reportError;
+
   // ------------------------------------------------------------------ bridge
   const queue = [];
   window.uhPoll = () => (queue.length ? queue.shift() : undefined);
@@ -652,6 +674,7 @@
         break;
       case 'resume': state = 'playing'; show(null); break;
       case 'crash': {
+        reportError('panic', data, '');
         state = 'crash';
         show('auth');
         $('auth-title').textContent = 'Something went wrong';

@@ -1,6 +1,6 @@
 // Undead Horizon API, a Neon Function (Hono + node-postgres).
 //
-// Public:   GET  /health, GET /leaderboard?diff=
+// Public:   GET  /health, GET /leaderboard?diff=, POST /errors (client crash reports)
 // Signed-in (Neon Auth JWT in `Authorization: Bearer`):
 //           GET  /me                     profile (+ save summary), created on first call
 //           POST /me/import              one-time import of offline progress
@@ -47,6 +47,29 @@ app.onError((err, c) => {
 
 // ---------------------------------------------------------------- public
 app.get("/health", (c) => c.json({ ok: true }));
+
+// Client crash reports. Rate-limited per address (in this isolate) and capped
+// globally per hour so a crash loop can't flood the table.
+const errorHits = new Map<string, { n: number; at: number }>();
+app.post("/errors", async (c) => {
+  const ip = c.req.header("x-forwarded-for")?.split(",")[0].trim() || "?";
+  const now = Date.now();
+  const h = errorHits.get(ip);
+  if (h && now - h.at < 60_000 && h.n >= 5) return c.json({ ok: false, error: "rate_limited" }, 429);
+  errorHits.set(ip, h && now - h.at < 60_000 ? { n: h.n + 1, at: h.at } : { n: 1, at: now });
+  if (errorHits.size > 5000) errorHits.clear();
+  const b = await c.req.json().catch(() => ({}));
+  const cut = (v: unknown, n: number) => String(v ?? "").slice(0, n);
+  const auth = c.req.header("authorization");
+  const uid = auth?.toLowerCase().startsWith("bearer ") ? await verifyToken(auth.slice(7)).catch(() => null) : null;
+  const { rows } = await pool.query(`select count(*)::int as n from client_errors where created_at > now() - interval '1 hour'`);
+  if (rows[0].n >= 1000) return c.json({ ok: false, error: "busy" }, 429);
+  await pool.query(
+    `insert into client_errors (user_id, kind, message, stack, url, ua, build) values ($1,$2,$3,$4,$5,$6,$7)`,
+    [uid, cut(b.kind, 20) || "error", cut(b.message, 1000), cut(b.stack, 4000), cut(b.url, 300), cut(c.req.header("user-agent"), 300), cut(b.build, 40)],
+  );
+  return c.json({ ok: true });
+});
 
 app.get("/leaderboard", async (c) => {
   const diff = c.req.query("diff");

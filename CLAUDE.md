@@ -286,7 +286,7 @@ Not scheduled yet; design notes for when we pick it up.
 - [ ] A6 (S) **Settings sync.** Sync settings to the cloud profile.
 - [ ] A7 (S) **Balance telemetry.** Privacy-light: run summaries (mode, wave, build, cause of death) to Neon, plus a SQL view for balancing.
 - [ ] A8 (S) **Localization.** i18n string table framework (en first).
-- [ ] A9 (S) **Error reporting.** The panic hook and `window.onerror` post to `/errors` (rate-limited) for live debugging.
+- [x] A9 (S) **Error reporting.** The panic hook and `window.onerror` post to `/errors` (rate-limited) for live debugging.
 
 ### Suggested order
 - M0

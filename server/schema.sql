@@ -129,3 +129,17 @@ create table if not exists reports (
   message     text not null default '',
   created_at  timestamptz not null default now()
 );
+
+-- Client error reports (panic hook + window.onerror), for live debugging.
+create table if not exists client_errors (
+  id         bigserial primary key,
+  user_id    text,
+  kind       text not null default 'error',
+  message    text not null default '',
+  stack      text not null default '',
+  url        text not null default '',
+  ua         text not null default '',
+  build      text not null default '',
+  created_at timestamptz not null default now()
+);
+create index if not exists client_errors_time_idx on client_errors (created_at desc);
