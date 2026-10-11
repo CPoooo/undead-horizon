@@ -1900,15 +1900,16 @@ impl Game {
             }
             owned += 1;
             let def = u.def();
+            let evo = self.evolved.iter().find(|e| e.def().base == *u).map(|e| e.def());
             round_rect(c, ix, iy - 16.0, 32.0, 32.0, 7.0);
-            c.set_fill_style_str("rgba(10,12,20,0.7)");
+            c.set_fill_style_str(if evo.is_some() { "rgba(60,40,10,0.85)" } else { "rgba(10,12,20,0.7)" });
             c.fill();
-            c.set_stroke_style_str(def.color);
-            c.set_line_width(1.5);
+            c.set_stroke_style_str(if evo.is_some() { "#ffd36a" } else { def.color });
+            c.set_line_width(if evo.is_some() { 2.5 } else { 1.5 });
             c.stroke();
             c.set_font("16px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif");
             c.set_fill_style_str("#ffffff");
-            text(c, def.icon, ix + 16.0, iy - 2.0);
+            text(c, evo.map(|e| e.icon).unwrap_or(def.icon), ix + 16.0, iy - 2.0);
             // pips
             for k in 0..def.max {
                 c.set_fill_style_str(if k < l {
@@ -2476,7 +2477,8 @@ impl Game {
             round_rect(c, x, y, size, size, 14.0);
             c.set_fill_style_str(if done { "#2a1f10" } else { "#14161e" });
             c.fill();
-            c.set_stroke_style_str(if done { u.def().color } else { "#5a4a2a" });
+            let evo = matches!(u, crate::chest::ChestPick::Evo(_));
+            c.set_stroke_style_str(if done { u.color() } else { "#5a4a2a" });
             c.set_line_width(if done { 3.0 } else { 2.0 });
             c.stroke();
             c.save();
@@ -2487,7 +2489,7 @@ impl Game {
             if done {
                 let pop = 1.0 + 0.25 * (1.0 - ((ch.t - stop) / 0.2).min(1.0));
                 c.set_font(&format!("{}px {}", (size * 0.5 * pop).round(), emoji));
-                text(c, u.def().icon, x + size * 0.5, y + size * 0.5);
+                text(c, u.icon(), x + size * 0.5, y + size * 0.5);
             } else {
                 // spinning strip of icons
                 let spin = ch.t * 14.0 + i as f32 * 1.7;
@@ -2502,7 +2504,12 @@ impl Game {
             if done {
                 c.set_font(&format!("800 {}px {}", if small { 10 } else { 12 }, font));
                 c.set_fill_style_str("#ffffff");
-                let lines = wrap(c, u.def().name, size + 6.0);
+                if evo {
+                    c.set_fill_style_str("#ffd36a");
+                    text(c, "EVOLVED!", x + size * 0.5, y - 12.0);
+                    c.set_fill_style_str("#ffffff");
+                }
+                let lines = wrap(c, u.name(), size + 6.0);
                 for (li, l) in lines.iter().take(2).enumerate() {
                     text(c, l, x + size * 0.5, y + size + 14.0 + li as f32 * 14.0);
                 }

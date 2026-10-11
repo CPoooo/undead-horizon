@@ -6,10 +6,37 @@
 
 use crate::audio::Sfx;
 use crate::game::{Game, Phase};
-use crate::upgrades::{Up, ALL};
+use crate::upgrades::{Evo, Up, ALL};
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ChestPick {
+    Up(Up),
+    Evo(Evo),
+}
+
+impl ChestPick {
+    pub fn icon(self) -> &'static str {
+        match self {
+            ChestPick::Up(u) => u.def().icon,
+            ChestPick::Evo(e) => e.def().icon,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            ChestPick::Up(u) => u.def().name,
+            ChestPick::Evo(e) => e.def().name,
+        }
+    }
+    pub fn color(self) -> &'static str {
+        match self {
+            ChestPick::Up(u) => u.def().color,
+            ChestPick::Evo(e) => e.def().color,
+        }
+    }
+}
 
 pub struct Chest {
-    pub picks: Vec<Up>,
+    pub picks: Vec<ChestPick>,
     pub coins: u32,
     pub t: f32,
 }
@@ -44,7 +71,19 @@ impl Game {
     pub fn open_chest(&mut self) {
         let n = self.chest_count();
         let mut picks = Vec::new();
-        for _ in 0..n {
+        // an evolution, when one is ready, takes the first reel
+        if let Some(e) = self.evo_ready() {
+            self.evolved.push(e);
+            picks.push(ChestPick::Evo(e));
+            self.banner = Some(crate::game::Banner {
+                title: "EVOLUTION!".into(),
+                sub: format!("{}: {}", e.def().name, e.def().desc),
+                t: 0.0,
+                dur: 3.2,
+                color: e.def().color,
+            });
+        }
+        while picks.len() < n {
             // favor powers you already have (evolving a build), then anything open
             let owned: Vec<Up> = ALL
                 .iter()
@@ -61,7 +100,7 @@ impl Game {
                 }
             };
             self.apply_upgrade(pick);
-            picks.push(pick);
+            picks.push(ChestPick::Up(pick));
         }
         let coins = ((15 + 10 * n as u32) as f32 * self.difficulty().coins) as u32;
         self.coins += coins;

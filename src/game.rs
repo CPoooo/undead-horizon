@@ -5,7 +5,7 @@ use crate::input::{Action, Bindings};
 use crate::modes::Mode;
 use crate::status::Elem;
 use crate::net::{self, Net};
-use crate::upgrades::{Levels, Up};
+use crate::upgrades::{Evo, Levels, Up, EVOS};
 use crate::world;
 use std::f32::consts::{PI, TAU};
 
@@ -384,6 +384,7 @@ pub struct Game {
     /// an open treasure chest (drawn over the level-up phase)
     pub chest: Option<crate::chest::Chest>,
     pub chests_opened: u32,
+    pub evolved: Vec<Evo>,
     /// chests picked up while another overlay was open
     pub pending_chests: u32,
     pub rng: Rng,
@@ -518,6 +519,7 @@ impl Game {
             banish_mode: false,
             chest: None,
             chests_opened: 0,
+            evolved: Vec::new(),
             pending_chests: 0,
             rng: Rng::new(seed),
             grid: Grid::new(),
@@ -725,6 +727,7 @@ impl Game {
         self.banish_mode = false;
         self.chest = None;
         self.chests_opened = 0;
+        self.evolved.clear();
         self.pending_chests = 0;
         self.kills = 0;
         self.score = 0;
@@ -773,6 +776,17 @@ impl Game {
     }
 
     // ---------------------------------------------------------------- stats
+    pub fn has_evo(&self, e: Evo) -> bool {
+        self.evolved.contains(&e)
+    }
+
+    /// The next evolution a chest would grant, if any.
+    pub fn evo_ready(&self) -> Option<Evo> {
+        EVOS.iter()
+            .copied()
+            .find(|e| !self.evolved.contains(e) && e.ready(&self.ups))
+    }
+
     pub fn dmg_mult(&self) -> f32 {
         (1.0 + 0.25 * self.ups.f(Up::Damage)) * (1.0 + 0.08 * self.ups.f(Up::Velocity))
     }
@@ -801,14 +815,14 @@ impl Game {
         if l == 0 {
             0
         } else {
-            l + 1
+            l + 1 + if self.has_evo(Evo::ReaperRing) { 2 } else { 0 }
         }
     }
     pub fn blade_radius(&self) -> f32 {
-        80.0 + 6.0 * self.ups.f(Up::Blades)
+        (80.0 + 6.0 * self.ups.f(Up::Blades)) * if self.has_evo(Evo::ReaperRing) { 1.3 } else { 1.0 }
     }
     pub fn nova_radius(&self) -> f32 {
-        150.0 + 25.0 * self.ups.f(Up::Nova)
+        (150.0 + 25.0 * self.ups.f(Up::Nova)) * if self.has_evo(Evo::AbsoluteZero) { 1.4 } else { 1.0 }
     }
     pub fn alive(&self) -> u32 {
         self.zombies.iter().filter(|z| !z.dead).count() as u32
@@ -1546,7 +1560,14 @@ impl Game {
 
     /// Detailed snapshot for the pause screen's stats panel.
     pub fn run_json(&self) -> String {
-        let ups: Vec<String> = crate::upgrades::ALL
+        let evos = self.evolved.iter().map(|e| {
+            let d = e.def();
+            format!(
+                "{{\"icon\":\"{}\",\"name\":\"{} (evolved)\",\"lvl\":1,\"max\":1,\"color\":\"{}\"}}",
+                d.icon, d.name, d.color
+            )
+        });
+        let ups: Vec<String> = evos.chain(crate::upgrades::ALL
             .iter()
             .filter(|u| self.ups.get(**u) > 0)
             .map(|u| {
@@ -1559,7 +1580,7 @@ impl Game {
                     d.max,
                     d.color
                 )
-            })
+            }))
             .collect();
         let shots_per_sec = 1.0 / self.fire_interval();
         format!(
@@ -1592,7 +1613,7 @@ impl Game {
         let ups: Vec<String> = self.ups.0.iter().map(|l| l.to_string()).collect();
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={};score={};charges={},{},{};ban={}",
+            "v={};name={};mode={};chapter={};diff={};gun={};perk={};savewave={};level={};xp={:.1};hp={:.1};maxhp={:.1};ups={};kills={};coins={};time={:.1};ult={:.3};combo={};best={};score={};charges={},{},{};ban={};evo={}",
             SAVE_VERSION,
             self.player_name.replace([';', '=', '|'], ""),
             self.mode.id(),
@@ -1619,6 +1640,11 @@ impl Game {
             self.banished
                 .iter()
                 .map(|u| (*u as u8).to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            self.evolved
+                .iter()
+                .map(|e| (*e as u8).to_string())
                 .collect::<Vec<_>>()
                 .join(",")
         )
@@ -1660,6 +1686,13 @@ impl Game {
                     if c.len() == 3 {
                         (self.rerolls, self.banishes, self.skips) = (c[0], c[1], c[2]);
                     }
+                }
+                "evo" => {
+                    self.evolved = v
+                        .split(',')
+                        .filter_map(|x| x.parse::<usize>().ok())
+                        .filter_map(|i| EVOS.get(i).copied())
+                        .collect()
                 }
                 "ban" => {
                     self.banished = v
@@ -1979,7 +2012,8 @@ impl Game {
         if nb > 0 {
             self.player.blade_angle += DT * (3.0 + 0.15 * nb as f32);
             let br = self.blade_radius();
-            let dmg = 13.0 * (1.0 + 0.2 * (self.ups.f(Up::Blades) - 1.0)) * self.dmg_mult() * 0.75;
+            let reap = if self.has_evo(Evo::ReaperRing) { 2.0 } else { 1.0 };
+            let dmg = 13.0 * (1.0 + 0.2 * (self.ups.f(Up::Blades) - 1.0)) * self.dmg_mult() * 0.75 * reap;
             for k in 0..nb {
                 let a = self.player.blade_angle + k as f32 * TAU / nb as f32;
                 let bp = ppos + V2::from_angle(a) * br;
@@ -2013,6 +2047,9 @@ impl Game {
                         let dir = (z.pos - ppos).norm();
                         let power = self.elem_power();
                         self.afflict(j, Elem::Chill, power);
+                        if self.has_evo(Evo::AbsoluteZero) && !self.zombies[j].dead {
+                            self.afflict(j, Elem::Chill, power);
+                        }
                         if !self.zombies[j].dead {
                             self.damage_zombie(j, dmg, dir, 260.0, false);
                         }
@@ -2030,8 +2067,9 @@ impl Game {
         if ll > 0 {
             self.player.bolt_t -= DT;
             if self.player.bolt_t <= 0.0 {
-                self.player.bolt_t = (2.3 - 0.22 * ll as f32).max(0.8);
-                let chains = 2 + ll as usize;
+                let crown = self.has_evo(Evo::StormCrown);
+                self.player.bolt_t = (2.3 - 0.22 * ll as f32).max(0.8) * if crown { 0.5 } else { 1.0 };
+                let chains = 2 + ll as usize + if crown { 3 } else { 0 };
                 let dmg = (16.0 + 9.0 * ll as f32) * self.dmg_mult();
                 // first target: random-ish zombie near the player
                 let mut cands = Vec::new();
@@ -2053,7 +2091,9 @@ impl Game {
                         let power = self.elem_power();
                         self.afflict(cur, Elem::Shock, power);
                         if !self.zombies[cur].dead {
-                            self.damage_zombie(cur, dmg, dir, 120.0, false);
+                            let crit = crown && self.rng.chance(self.crit_chance());
+                            let d = if crit { dmg * 2.5 } else { dmg };
+                            self.damage_zombie(cur, d, dir, 120.0, crit);
                         }
                         self.burst(zp, 6, 220.0, "#cfe0ff", 2.5, 0.25, false, true);
                         let mut next = None;
@@ -2084,11 +2124,12 @@ impl Game {
         let gun = GUNS[self.gun];
         let ppos = self.player.pos;
         let aim = self.player.aim;
-        let extra = self.ups.get(Up::Multishot) as i32;
+        let hail = self.has_evo(Evo::Hailstorm);
+        let extra = self.ups.get(Up::Multishot) as i32 + if hail { 2 } else { 0 };
         let speed = 920.0 * gun.speed * (1.0 + 0.2 * self.ups.f(Up::Velocity));
         let life = 0.62 * gun.life * (1.0 + 0.15 * self.ups.f(Up::Velocity));
         let dmg = 10.0 * gun.dmg * self.dmg_mult();
-        let pierce = self.ups.get(Up::Pierce) as i32 + gun.pierce;
+        let pierce = self.ups.get(Up::Pierce) as i32 + gun.pierce + if hail { 4 } else { 0 };
         let bounces = self.ups.get(Up::Ricochet) as i32;
         let crit_c = self.crit_chance();
         let shoot = |g: &mut Game, a: f32| {
@@ -2831,7 +2872,9 @@ impl Game {
 
     pub(crate) fn update_bullets(&mut self) {
         let mut bullets = std::mem::take(&mut self.bullets);
-        let homing = self.ups.get(Up::Homing);
+        let homing = self.ups.get(Up::Homing) + if self.has_evo(Evo::SmartMissiles) { 3 } else { 0 };
+        let missiles = self.has_evo(Evo::SmartMissiles);
+        let plague = self.has_evo(Evo::PlagueCarrier);
         let expl = self.ups.get(Up::Explosive);
         let venom = self.ups.get(Up::Venom);
         for b in bullets.iter_mut() {
@@ -2876,9 +2919,16 @@ impl Game {
             if let Some(j) = hit {
                 let uid = self.zombies[j].uid;
                 let dir = b.vel.norm();
-                if venom > 0 && self.rng.chance(0.22 + 0.13 * venom as f32) {
+                if venom > 0 && (plague || self.rng.chance(0.22 + 0.13 * venom as f32)) {
                     let power = self.elem_power();
                     self.afflict(j, Elem::Poison, power);
+                    if plague && b.bounces < self.ups.get(Up::Ricochet) as i32 && !self.zombies[j].dead {
+                        // a bounced round: spread two more stacks
+                        self.afflict(j, Elem::Poison, power);
+                        if !self.zombies[j].dead {
+                            self.afflict(j, Elem::Poison, power);
+                        }
+                    }
                 }
                 if self.zombies[j].dead {
                     b.dead = true;
@@ -2893,8 +2943,10 @@ impl Game {
                     let r = b.blast * (1.0 + 0.3 * expl as f32);
                     self.small_blast(b.pos, r, b.dmg * 0.7, uid);
                     self.add_shake(0.08);
+                } else if missiles && expl == 0 {
+                    self.small_blast(b.pos, 40.0, b.dmg * 0.35, uid);
                 } else if expl > 0 {
-                    let r = 55.0 * (1.0 + 0.3 * (expl as f32 - 1.0));
+                    let r = 55.0 * (1.0 + 0.3 * (expl as f32 - 1.0)) * if self.has_evo(Evo::Napalm) { 1.5 } else { 1.0 };
                     let d = b.dmg * 0.45 * (1.0 + 0.3 * (expl as f32 - 1.0));
                     self.small_blast(b.pos, r, d, uid);
                 }
@@ -2924,7 +2976,7 @@ impl Game {
     pub(crate) fn small_blast(&mut self, pos: V2, r: f32, dmg: f32, skip: u32) {
         let mut hits = Vec::new();
         self.grid.query(pos, r + 50.0, |j| hits.push(j));
-        let power = self.elem_power();
+        let power = self.elem_power() * if self.has_evo(Evo::Napalm) { 2.0 } else { 1.0 };
         for j in hits {
             let z = &self.zombies[j];
             if !z.dead && z.uid != skip && z.pos.dist(pos) < r + z.r {
@@ -3486,5 +3538,30 @@ mod tests {
         // snapshot bits round-trip the visible statuses
         let b = g.zombies[0].st.bits();
         assert_eq!(crate::status::Status::from_bits(b).poison > 0, g.zombies[0].st.poison > 0);
+    }
+
+    #[test]
+    fn evolutions_need_max_plus_partner_and_come_from_chests() {
+        let mut g = Game::new(17);
+        g.start("diff=rookie");
+        g.chests_opened = 5;
+        for _ in 0..6 {
+            g.apply_upgrade(Up::Blades);
+        }
+        assert!(g.evo_ready().is_none(), "needs the partner passive");
+        g.apply_upgrade(Up::Speed);
+        assert_eq!(g.evo_ready(), Some(Evo::ReaperRing));
+        let before = g.blade_count();
+        g.open_chest();
+        assert!(g.has_evo(Evo::ReaperRing));
+        assert_eq!(g.blade_count(), before + 2);
+        assert_eq!(
+            g.chest.as_ref().unwrap().picks[0],
+            crate::chest::ChestPick::Evo(Evo::ReaperRing)
+        );
+        assert!(g.evo_ready().is_none(), "evolves once");
+        let mut h = Game::new(18);
+        h.load_save(&g.save_string());
+        assert!(h.has_evo(Evo::ReaperRing));
     }
 }

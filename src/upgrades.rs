@@ -215,3 +215,62 @@ impl Levels {
         out
     }
 }
+
+// ------------------------------------------------------------------ evolutions
+
+/// A maxed power plus a specific passive evolves when you open a chest.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Evo {
+    ReaperRing,
+    StormCrown,
+    AbsoluteZero,
+    Napalm,
+    Hailstorm,
+    SmartMissiles,
+    BloodPact,
+    PlagueCarrier,
+}
+
+pub const EVOS: [Evo; 8] = [
+    Evo::ReaperRing,
+    Evo::StormCrown,
+    Evo::AbsoluteZero,
+    Evo::Napalm,
+    Evo::Hailstorm,
+    Evo::SmartMissiles,
+    Evo::BloodPact,
+    Evo::PlagueCarrier,
+];
+
+pub struct EvoDef {
+    pub name: &'static str,
+    pub icon: &'static str,
+    pub color: &'static str,
+    /// the power that must be maxed
+    pub base: Up,
+    /// the passive you must own (any level)
+    pub with: Up,
+    pub desc: &'static str,
+}
+
+impl Evo {
+    pub fn def(self) -> EvoDef {
+        let (name, icon, color, base, with, desc) = match self {
+            Evo::ReaperRing => ("Reaper Ring", "💀", "#e0f0ff", Up::Blades, Up::Speed, "+2 scythes, double damage, wider orbit"),
+            Evo::StormCrown => ("Storm Crown", "👑", "#9fb8ff", Up::Lightning, Up::Crit, "Twice the strikes, +3 chains, bolts can crit"),
+            Evo::AbsoluteZero => ("Absolute Zero", "🧊", "#bff4ff", Up::Nova, Up::Regen, "Novas freeze instantly and reach 40% farther"),
+            Evo::Napalm => ("Napalm", "☄️", "#ff8a3a", Up::Explosive, Up::Damage, "+50% blast radius, double burn"),
+            Evo::Hailstorm => ("Hailstorm", "🌨️", "#c9d6ff", Up::Multishot, Up::Pierce, "+2 projectiles that pierce 4 more"),
+            Evo::SmartMissiles => ("Smart Missiles", "🚀", "#d0a0ff", Up::Homing, Up::Velocity, "Hard-homing rounds that burst on impact"),
+            Evo::BloodPact => ("Blood Pact", "🫀", "#ff2a4a", Up::Vampire, Up::Vitality, "Triple lifesteal chance, heals 6"),
+            Evo::PlagueCarrier => ("Plague Carrier", "☣️", "#8fff5a", Up::Venom, Up::Ricochet, "Every hit poisons; bounces spread +2 stacks"),
+        };
+        EvoDef { name, icon, color, base, with, desc }
+    }
+
+    /// Ready to evolve: base maxed and the partner passive owned.
+    pub fn ready(self, l: &Levels) -> bool {
+        let d = self.def();
+        l.maxed(d.base) && l.get(d.with) > 0
+    }
+}

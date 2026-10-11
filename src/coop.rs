@@ -213,10 +213,13 @@ impl Game {
             self.toast = Some(("ULTIMATE READY — press Q".into(), 2.2));
         }
         let vl = self.ups.get(Up::Vampire);
-        if vl > 0 && self.rng.chance(0.04 * vl as f32) && self.player_alive() {
-            self.player.hp = (self.player.hp + 3.0).min(self.player.max_hp);
+        let pact = self.has_evo(crate::upgrades::Evo::BloodPact);
+        let chance = 0.04 * vl as f32 * if pact { 3.0 } else { 1.0 };
+        if vl > 0 && self.rng.chance(chance) && self.player_alive() {
+            let heal = if pact { 6.0 } else { 3.0 };
+            self.player.hp = (self.player.hp + heal).min(self.player.max_hp);
             let pp = self.player.pos;
-            self.push_text(pp, "+3".into(), "#ff4d6d", 14.0);
+            self.push_text(pp, format!("+{}", heal as i32), "#ff4d6d", 14.0);
         }
     }
 
