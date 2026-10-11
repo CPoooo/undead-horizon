@@ -82,7 +82,8 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
 - Party members in the hub are relayed through the social socket (`hub.pos` → `{t:'hub'}`), drawn walking around, with chat as speech bubbles.
 - **The Outskirts (free roam):** east through the gate (`hub.json` zone `outskirts`). Weapons are free there, ambient zombies spawn (no XP or gems in the hub), and the gate turret zaps anything following you into the plaza. Going down is a rescue back to base, never a game over. **Supply Drops** land every ~2 min while you're out there: hold the beacon ring for 30s against a surge for 🪙 40 (`POST /hub/reward`, once per 2 min per account; local profile for guests). `dev|drop` forces one.
 - **Emotes:** Y (or the emote button) in the hub shows your emote over your head for party members (`hub.pos` carries `emote`; needs deploy).
-- **Still open:** instanced hubs with strangers (16–24), hub-wide proximity voice.
+- **Proximity voice:** in the hub, party voice volume follows distance (full within 250 units, 10% at 1400+) via `UHVoice.setProximity`; reset on leaving.
+- **Still open:** instanced hubs with strangers (16–24).
 
 Original design notes:
 

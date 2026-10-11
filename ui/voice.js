@@ -24,6 +24,8 @@
     localAn: null,
     peers: new Map(), // uid -> { pc, nonce, audio, an, described, pending: [] }
     volumes: store.get('volumes', {}),
+    // Home Base proximity: per-player factor from distance (1 = full)
+    prox: {},
     speaking: new Set(),
   };
 
@@ -134,7 +136,7 @@
       a.autoplay = true;
       a.setAttribute('playsinline', '');
       a.srcObject = e.streams[0] || new MediaStream([e.track]);
-      a.volume = Math.min(1, V.volumes[uid] ?? 1);
+      a.volume = Math.min(1, (V.volumes[uid] ?? 1) * (V.prox[uid] ?? 1));
       document.body.appendChild(a);
       a.play?.().catch(() => {});
       peer.audio = a;
@@ -255,8 +257,14 @@
       V.volumes[uid] = v;
       store.set('volumes', V.volumes);
       const p = V.peers.get(uid);
-      if (p?.audio) p.audio.volume = Math.min(1, v);
+      if (p?.audio) p.audio.volume = Math.min(1, v * (V.prox[uid] ?? 1));
     },
+    /** Home Base proximity voice: { uid: 0..1 } (empty = everyone at full volume). */
+    setProximity(map) {
+      V.prox = map || {};
+      for (const [uid, p] of V.peers) if (p.audio) p.audio.volume = Math.min(1, (V.volumes[uid] ?? 1) * (V.prox[uid] ?? 1));
+    },
+    get proximity() { return { ...V.prox }; },
     get debug() {
       return { on: V.on, muted: V.muted, ptt: V.ptt, live: micLive(), speaking: [...V.speaking],
         peers: [...V.peers.entries()].map(([u, p]) => ({ uid: u, state: p.pc.connectionState, audio: !!p.audio, level: level(p.an) })) };

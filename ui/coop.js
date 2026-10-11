@@ -949,10 +949,11 @@
     inviteLink,
     /** Home Base: share our position with the party, and read theirs */
     hubPos(x, y, aim) { S.hubAt = { x, y, aim }; if (S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', x, y, aim, look: look() }); },
+    hubAt: () => S.hubAt,
     hubEmote(e) { const p = S.hubAt; if (p && S.party && S.ws?.readyState === 1) wsSend({ t: 'hub.pos', ...p, look: look(), emote: e }); },
     hubMates() {
       const now = Date.now();
-      return Object.values(S.hubMates).filter((m) => now - m.at < 3000);
+      return Object.entries(S.hubMates).filter(([, m]) => now - m.at < 3000).map(([id, m]) => Object.assign(m, { id }));
     },
   };
 

@@ -1182,9 +1182,22 @@
   // lobby music picker (tunes live in src/audio.rs LOBBY_TUNES)
   on('tune-btn', 'click', () => { settings.tune = ((settings.tune || 0) + 1) % 4; saveSettings(); send('tune|' + settings.tune); });
   // party members walking around the hub, and their chat as speech bubbles
+  let proxOn = false;
   setInterval(() => {
-    if (state !== 'hub') return;
+    if (state !== 'hub') {
+      if (proxOn) { proxOn = false; window.UHVoice?.setProximity?.({}); }
+      return;
+    }
     const mates = window.UHCoop?.hubMates?.() || [];
+    // proximity voice: full volume within 250 units, fading to 10% at 1400
+    const me = window.UHCoop?.hubAt?.();
+    if (me && window.UHVoice?.setProximity) {
+      proxOn = true;
+      window.UHVoice.setProximity(Object.fromEntries(mates.map((m) => {
+        const d = Math.hypot(m.x - me.x, m.y - me.y);
+        return [m.id, Math.max(0.1, Math.min(1, 1 - (d - 250) / 1150))];
+      })));
+    }
     send('hubmates|' + mates.map((m) => {
       // a fresh emote goes to the game once
       const e = m.emote && !m.emote.sent && Date.now() - m.emote.at < 2500 ? m.emote.e : -1;
