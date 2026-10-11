@@ -526,6 +526,8 @@ pub struct Game {
     pub coins: u32,
     /// authored map id (`start|map=asylum`); empty = the procedural world
     pub map_id: String,
+    /// challenge variant (Siege: "glass")
+    pub variant: String,
     pub victory_t: f32,
     pub ult_queued: bool,
     // co-op networking (None in single player)
@@ -665,6 +667,7 @@ impl Game {
             turrets: Vec::new(),
             coins: 0,
             map_id: String::new(),
+            variant: String::new(),
             victory_t: -1.0,
             ult_queued: false,
             net: None,
@@ -750,6 +753,7 @@ impl Game {
                 "tracer" => self.tracer = content::tracer_index(v),
                 "char" => self.character = content::character_index(v),
                 "map" => self.map_id = v.to_string(),
+                "variant" => self.variant = v.to_string(),
                 _ => {}
             }
         }
@@ -787,6 +791,7 @@ impl Game {
         self.audio.set_track(Track::Gameplay);
         self.best_wave = 0;
         self.map_id.clear();
+        self.variant.clear();
         self.mode = Mode::Infinite;
         self.pending_chapter = 0;
         self.apply_opts(opts);

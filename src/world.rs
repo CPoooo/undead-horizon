@@ -653,6 +653,8 @@ pub fn builtin_map(id: &str) -> Option<&'static str> {
         "asylum" => Some(include_str!("../assets/maps/asylum.json")),
         "refinery" => Some(include_str!("../assets/maps/refinery.json")),
         "keep" => Some(include_str!("../assets/maps/keep.json")),
+        "bridge" => Some(include_str!("../assets/maps/bridge.json")),
+        "crossroads" => Some(include_str!("../assets/maps/crossroads.json")),
         _ => None,
     }
 }
@@ -699,6 +701,19 @@ mod tests {
         assert!(nrm.len2() > 0.0 && pp.dist(prop.pos) >= prop.r + 15.9);
         use_map(None);
         assert!(map().is_none());
+    }
+
+    #[test]
+    fn siege_maps_connect_every_portal_to_the_crystal() {
+        for id in ["keep", "bridge", "crossroads"] {
+            let m = load_builtin(id).expect("siege map parses");
+            let crystal = m.interact.iter().find(|i| i.kind == "crystal").expect("crystal");
+            let mut f = crate::nav::FlowField::new(&m);
+            f.compute(&[v2(crystal.pos[0], crystal.pos[1])]);
+            for p in m.interact.iter().filter(|i| i.kind == "portal") {
+                assert!(f.reachable_from(v2(p.pos[0], p.pos[1])), "{id}: portal {} reaches the crystal", p.id);
+            }
+        }
     }
 
     #[test]

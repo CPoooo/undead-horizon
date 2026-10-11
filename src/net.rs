@@ -15,7 +15,7 @@ pub const MAX_PLAYERS: usize = 3;
 
 /// Bump whenever the wire format or sim rules change in a way that would
 /// desync peers running different builds.
-pub const PROTOCOL: u16 = 8;
+pub const PROTOCOL: u16 = 9;
 
 pub const MSG_PSTATE: u8 = 1; // client -> host (unreliable): own player state
 pub const MSG_HITS: u8 = 2; // client -> host (reliable): damage dealt to zombies
@@ -26,6 +26,7 @@ pub const MSG_HELLO: u8 = 6; // everyone (reliable), once per match: protocol ve
 pub const MSG_WORLD: u8 = 7; // client -> host (reliable): bought a door / flipped the power
 pub const MSG_BUILD: u8 = 8; // client -> host: place a Siege defense (kind, pos)
 pub const MSG_DEFENSE: u8 = 9; // client -> host: upgrade / sell a defense (B_*, uid)
+pub const MSG_READY: u8 = 10; // client -> host: ready to end the Siege build phase
 
 // events
 pub const E_HURT: u8 = 1;

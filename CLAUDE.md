@@ -220,8 +220,8 @@ Not scheduled yet; design notes for when we pick it up.
   - Flyers ignore the grid.
   - Add a native test for path recompute.
 - [x] S6 (S) **Siege enemies.** Siege-only types: goblin sapper (targets towers), ogre (high HP), archer (outranges towers).
-- [ ] S7 (M) **Maps and ratings.** 3 Siege maps with star ratings (crystal HP left), first-clear rewards, and Siege-specific challenge variants.
-- [ ] S8 (M) **Co-op replication.** Host-authoritative defense placement and build-phase ready-vote via the party and net events.
+- [x] S7 (M) **Maps and ratings.** 3 Siege maps with star ratings (crystal HP left), first-clear rewards, and Siege-specific challenge variants.
+- [x] S8 (M) **Co-op replication.** Host-authoritative defense placement and build-phase ready-vote via the party and net events.
 
 ### M5 · Progression & loot
 - [ ] P1 (M) **Account level.** Account XP from all modes; level rewards (coins, cosmetics) shown on a progress track. Server: `profiles.account_xp`; award in `/runs`.

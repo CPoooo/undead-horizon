@@ -63,7 +63,7 @@ impl Game {
         }
         self.start(opts);
         // co-op supports Infinite and Outbreak
-        if self.mode != crate::modes::Mode::Outbreak {
+        if !matches!(self.mode, crate::modes::Mode::Outbreak | crate::modes::Mode::Siege) {
             self.mode = crate::modes::Mode::Infinite;
         }
         let mut net = Net::new(role, me);
@@ -666,6 +666,7 @@ impl Game {
                         .push(("netversion", format!("{}:{}", PROTOCOL, theirs)));
                 }
             }
+            MSG_READY if host => self.mark_ready(from),
             MSG_BUILD if host => {
                 let (Some(k), Some(p)) = (r.u8(), r.v2()) else { return };
                 if let Some(kind) = crate::modes::siege::DefKind::from_u8(k) {
