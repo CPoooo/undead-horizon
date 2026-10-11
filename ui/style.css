@@ -452,3 +452,11 @@ body.reduce-motion *, body.reduce-motion *::before { transition: none !important
   background: rgba(0,0,0,.78); color: #fff; padding: 8px 14px; border-radius: 10px; font-weight: 600; font-size: 15px;
   opacity: 0; transition: opacity .2s; pointer-events: none; text-align: center; }
 #subs.show { opacity: 1; }
+
+/* campaign cutscene panels + dialogue portraits */
+#story-panel { cursor: pointer; margin-bottom: 14px; }
+#story-panel .sp { position: relative; height: 220px; border-radius: 14px; overflow: hidden; border: 3px solid #0b0e14; box-shadow: 0 0 0 2px rgba(255,255,255,.08); display: grid; place-items: center; }
+#story-panel .sp-art { font-size: 64px; line-height: 1.15; text-align: center; animation: kenburns 2.8s ease-out forwards; filter: drop-shadow(0 6px 10px rgba(0,0,0,.6)); }
+#story-panel .sp-cap { position: absolute; left: 12px; bottom: 10px; right: 12px; background: #f6efd8; color: #1a1408; font-weight: 800; font-size: 14px; padding: 6px 10px; border-radius: 4px; box-shadow: 3px 3px 0 #0b0e14; }
+@keyframes kenburns { from { transform: scale(1.12) translateY(8px); opacity: .3; } to { transform: scale(1) translateY(0); opacity: 1; } }
+.story-text .pt { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-style: normal; margin-right: 6px; vertical-align: middle; font-size: 15px; }

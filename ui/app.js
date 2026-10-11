@@ -851,24 +851,72 @@
 
   let storyResolve = null;
   let storyTimer = 0;
+  // comic-style panels before each chapter's intro (art is layered emoji over a painted sky)
+  const PANELS = [
+    [
+      { bg: 'linear-gradient(#1a1030, #3a1a40 60%, #0b0e14)', art: '🌠 🌠\n🪦 🪦 🪦', cap: 'Three days after the meteor shower…' },
+      { bg: 'linear-gradient(#0b0e14, #1f2b1b)', art: '🧟 🧟‍♀️ 🧟', cap: '…the dead got up.' },
+      { bg: 'linear-gradient(#20140c, #0b0e14)', art: '🚚💨  📻', cap: 'A courier with a busted truck hears a voice on the radio.' },
+    ],
+    [
+      { bg: 'linear-gradient(#0f1a0c, #0b0e14)', art: '🌲 🌫️ 🌲 🌲', cap: 'The pines are too quiet.' },
+      { bg: 'linear-gradient(#1a2a10, #0b0e14)', art: '🕷️ 🧟‍♀️ 🕸️', cap: 'Something nests in the trees, and it spits.' },
+    ],
+    [
+      { bg: 'linear-gradient(#3a1a0a, #120806)', art: '🏭 🔥 🏭', cap: 'Ash falls like grey rain over the refinery.' },
+      { bg: 'linear-gradient(#2a0a04, #0b0e14)', art: '👑🔥', cap: 'Whatever wears the crown in there is the source.' },
+    ],
+    [
+      { bg: 'linear-gradient(#10182a, #050810)', art: '🏚️ 🎶 🏚️', cap: 'The town sings at night.' },
+      { bg: 'linear-gradient(#0a1020, #000)', art: '👻   👻', cap: 'Two voices. One choir.' },
+    ],
+    [
+      { bg: 'linear-gradient(#2a0a20, #0b0e14)', art: '🗼 ⚡ 🌅', cap: 'The lighthouse at the horizon.' },
+      { bg: 'linear-gradient(#400a30, #0b0e14)', art: '🫀🌸🫀', cap: 'And under the cliff, the Bloom has a heart.' },
+    ],
+  ];
+  const PORTRAITS = { Rook: ['🧢', '#3b7bea'], Mara: ['📻', '#9cffb8'], Courier: ['🧢', '#3b7bea'] };
+  function withPortraits(html) {
+    return html.replace(/<span class="speaker">([A-Za-z]+):/g, (m, who) => {
+      const p = PORTRAITS[who];
+      return p ? `<span class="speaker"><i class="pt" style="background:${p[1]}">${p[0]}</i>${who}:` : m;
+    });
+  }
+  async function playPanels(list) {
+    const box = $('story-panel');
+    if (!list?.length) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    for (const p of list) {
+      box.innerHTML = `<div class="sp" style="background:${p.bg}"><div class="sp-art">${p.art.replace(/\\n/g, '<br>')}</div><div class="sp-cap">${esc(p.cap)}</div></div>`;
+      await new Promise((res) => {
+        const t = setTimeout(res, 2600);
+        box.onclick = () => { clearTimeout(t); res(); };
+      });
+    }
+    box.style.display = 'none';
+  }
   function showStory(i, which, btnLabel) {
     const s = STORY[i];
     $('story-ch').textContent = which === 'outro' ? `CHAPTER ${i + 1} COMPLETE` : `CHAPTER ${i + 1}`;
     $('story-title').textContent = s.title;
     $('story-go').textContent = btnLabel;
     // typewriter, HTML-aware (speaker tags appear whole)
-    const html = s[which];
+    const html = withPortraits(s[which]);
     const el = $('story-text');
     el.innerHTML = '';
     let k = 0;
     clearInterval(storyTimer);
-    storyTimer = setInterval(() => {
-      if (k >= html.length) { clearInterval(storyTimer); return; }
-      if (html[k] === '<') k = html.indexOf('>', k) + 1;
-      else k += 2;
-      el.innerHTML = html.slice(0, k);
-    }, 16);
-    $('story-skip').onclick = () => { clearInterval(storyTimer); el.innerHTML = html; };
+    const type = () => {
+      storyTimer = setInterval(() => {
+        if (k >= html.length) { clearInterval(storyTimer); return; }
+        if (html[k] === '<') k = html.indexOf('>', k) + 1;
+        else k += 2;
+        el.innerHTML = html.slice(0, k);
+      }, 16);
+    };
+    if (which === 'intro' && !settings.motion) playPanels(PANELS[i]).then(type);
+    else { $('story-panel').style.display = 'none'; type(); }
+    $('story-skip').onclick = () => { clearInterval(storyTimer); $('story-panel').style.display = 'none'; el.innerHTML = html; };
     state = 'story';
     show('story');
     return new Promise((res) => { storyResolve = res; });

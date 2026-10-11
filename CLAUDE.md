@@ -275,7 +275,7 @@ Original design notes:
 - [x] V3 (S) **Destructibles.** Explosive barrels, breakable crates (drops), and environmental kills.
 - [x] V4 (M) **Character polish.** Better animation (procedural walk bob, reload, hurt flinch) and new cosmetic slots: backpack, kill effect, death effect, emote.
 - [x] V5 (S) **Music picker.** Implements item 12: a data-driven tune list in `audio.rs` and a selector in Settings.
-- [ ] V6 (S) **Story presentation.** Campaign dialogue portraits and panel cutscenes in the story overlay.
+- [x] V6 (S) **Story presentation.** Campaign dialogue portraits and panel cutscenes in the story overlay.
 
 ### M9 · Platform, UX & accessibility
 - [x] A1 (M) **Controls.** Gamepad support (Gamepad API: twin-stick, triggers fire, D-pad UI navigation) and a remapping UI. Depends on F6.
