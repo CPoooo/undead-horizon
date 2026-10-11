@@ -1128,6 +1128,20 @@ impl Game {
 
     /// Layout of the three level-up cards in CSS pixels: (x, y, w, h).
     pub fn card_rects(&self) -> [(f32, f32, f32, f32); 3] {
+        // phones in portrait: three wide cards stacked vertically
+        if self.screen.x < 600.0 {
+            let cw = (self.screen.x - 28.0).min(440.0);
+            let gap = 12.0;
+            // fit between the title and the touch buttons at the bottom
+            let ch = ((self.screen.y * 0.5 - 2.0 * gap) / 3.0).clamp(84.0, 118.0);
+            let x = (self.screen.x - cw) * 0.5;
+            let y0 = (self.screen.y * 0.22).max(150.0);
+            return [
+                (x, y0, cw, ch),
+                (x, y0 + ch + gap, cw, ch),
+                (x, y0 + 2.0 * (ch + gap), cw, ch),
+            ];
+        }
         let w = (self.screen.x * 0.27).clamp(150.0, 260.0);
         let h = (w * 1.35).min(self.screen.y * 0.55);
         let gap = (self.screen.x * 0.025).clamp(10.0, 28.0);

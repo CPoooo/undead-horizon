@@ -29,7 +29,10 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
 
 ## Features to be implemented
 
-- [ ] 1. **Co-op mode**: live online, real-time co-op for up to 3 players for now, with the ability to revive a downed teammate. Needs a realtime/websocket server.
+- [x] 1. **Co-op mode**: real-time online co-op for up to 3 players (Infinite mode).
+  - Gameplay is WebRTC peer-to-peer with the host as the hub. `src/net.rs` defines the wire format and authority model; `src/coop.rs` holds snapshots, replicas, hit reporting, kill credit, shared XP and revive; `ui/coop.js` holds the transport.
+  - Downed players can crawl. A teammate standing within 75 units for 3s revives them. Bleed-out after 30s leads to spectating, and a team wipe ends the game for everyone.
+  - Known gap: no TURN relay yet, so players behind strict NATs or firewalls may fail to connect.
 - [x] 2. **Persistence in Neon DB**: profiles (coins, owned items, equipped loadout and cosmetics, campaign progress, stats), save states and every run are stored in Neon Postgres. The leaderboard is global (each player's best infinite run) and auto-refreshes every 5s while visible.
 - [x] 3. **Login / accounts**: Neon Managed Auth (Better Auth), with email and password sign-up/sign-in and Google sign-in. Sessions persist across reloads and devices. On the first sign-in, offline progress is imported once (coins capped at 5000). Guests can still play offline with browser storage.
 - [x] 4. **Shop & customizations**: coins are earned by clearing waves (scaled by difficulty) plus boss and chapter bonuses. They buy guns, perks, skins, hats and bullet tracers in the 🛒 Shop.
@@ -38,11 +41,20 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
 - [x] 7. **Character / inventory screen**: the lobby renders your character in-engine on a pedestal, live, facing your cursor. The Locker equips owned items and updates the model instantly.
 - [x] 8. **Campaign mode**: 5 chapters with a story ("Rook and Mara vs. the Bloom"). Each has a typewriter intro and outro, radio chatter per wave, and a unique boss fight (Gravedigger, Matriarch, Cinder King, Twin Wraiths, Bloom Heart). Chapters unlock in order.
 - [x] 9. **Infinite mode**: endless survival. Bosses rotate every 5 waves, and it is the only mode ranked on the leaderboard.
-- [ ] 10. **Fortnite / CoD-style lobby**: before starting infinite co-op, players can invite friends to their lobby, customize their character, and see their friends list. The host sets the difficulty before loading into the game. *(The solo lobby already exists: character showcase, customization, mode and difficulty selection. Invites and friends need the realtime backend.)*
+- [x] 10. **Fortnite / CoD-style lobby**: before starting infinite co-op, players can invite friends to their lobby, customize their character, and see their friends list. The host sets the difficulty before loading into the game.
+  - The social server is in `server/social.ts`: a Neon WebSocket with fan-out across isolates through the `events` table.
+  - **Friends:** friend codes, requests, presence, and an invite button.
+  - **Parties:** up to 3 players, with ready checks and a host-set difficulty. A shareable `?party=ID&t=TOKEN` link joins the party and makes you friends with the host.
+  - **Lobby:** party members stand next to you in the lobby showcase.
 
 - [x] 11. **Separate save slots**: one Infinite save and one Campaign save, which can coexist. Starting a new run of a mode overwrites that mode's save. Tooltips on Play and Save warn before that happens.
 - [ ] 12. **Lobby music picker**: let players choose the lobby song on the home screen (cycle through pre-made procedural tunes). The first lobby tune ("Graveyard Shuffle") is in `src/audio.rs`; tunes should be data-driven so new ones are easy to add.
-- [ ] 13. **Make it playable in Safari and on mobile**: support Safari (desktop and iOS) and offer mobile play as an option.
+- [ ] 13. **Make it playable in Safari and on mobile** *(mobile layout done; Safari and iOS real-device testing still open)*. Done so far:
+  - **Lobby:** the phone lobby uses a bottom nav with one panel at a time, a lifted character showcase, and large touch targets.
+  - **Level-up:** cards stack vertically on narrow screens.
+  - **Overlays:** they scroll full-width.
+  - **Banners:** they stay clear of the touch minimap.
+  - **Still open:** the items below.: support Safari (desktop and iOS) and offer mobile play as an option.
   - **Detecting mobile**: decide when mobile controls appear. Use `matchMedia('(pointer: coarse)')` together with `(hover: none)`, and switch on the first `touchstart` instead of sniffing the user agent. That way touch laptops and iPads with keyboards aren't misdetected, and the controls never get in the way on a laptop. Add an explicit override in Settings ("Touch controls: Auto / On / Off").
   - **Overhaul or adapt?** The game canvas already scales to any size and has a floating joystick, tap-to-dash, auto-aim and touch buttons. So in-game play does **not** need a redesign: add safe-area insets, bigger HUD hit targets, and a portrait-mode zoom. The HTML menus (lobby 3-column grid, shop and locker grids, pause stats) collapse into one column below 980px today but are long and scroll-heavy. A good middle ground is a **tabbed bottom-nav lobby on mobile** (Play / Party / Shop / Locker / Board), reusing the same panels, instead of a separate mobile UI.
   - **Safari specifics**:

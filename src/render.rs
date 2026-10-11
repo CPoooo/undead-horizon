@@ -185,7 +185,9 @@ impl Game {
 
         // ---------------- world space
         c.save();
-        let _ = c.translate(d(w * 0.5 + shake.x), d(h * 0.5 + shake.y));
+        // phones: the lobby panels cover the lower screen, so lift the showcase into view
+        let cy = if self.phase == Phase::Menu && w < 760.0 { (h * 0.2 + 40.0).min(h * 0.5) } else { h * 0.5 };
+        let _ = c.translate(d(w * 0.5 + shake.x), d(cy + shake.y));
         let _ = c.scale(d(self.zoom), d(self.zoom));
         let _ = c.translate(d(-self.cam.x), d(-self.cam.y));
         let vmin = self.cam - half - v2(80.0, 80.0);
@@ -1416,7 +1418,8 @@ impl Game {
 
     // ------------------------------------------------------------- lighting & screen fx
     fn draw_lighting(&self, c: &Ctx, w: f32, h: f32, ppos: V2, t: f32) {
-        let sp = v2(w * 0.5, h * 0.5) + (ppos - self.cam) * self.zoom;
+        let cy = if self.phase == Phase::Menu && w < 760.0 { (h * 0.2 + 40.0).min(h * 0.5) } else { h * 0.5 };
+        let sp = v2(w * 0.5, cy) + (ppos - self.cam) * self.zoom;
         let outer = (w.max(h)) * 0.75;
         let inner = 140.0 * self.zoom;
         let dark = if self.phase == Phase::Menu {
@@ -1830,7 +1833,9 @@ impl Game {
             };
             let sz = if small { 34.0 } else { 58.0 };
             c.save();
-            let _ = c.translate(d(w * 0.5), d(h * 0.3));
+            // on touch screens keep banners clear of the minimap (top-right)
+            let by = if self.input.is_touch { (h * 0.3).max(300.0).min(h * 0.45) } else { h * 0.3 };
+            let _ = c.translate(d(w * 0.5), d(by));
             let _ = c.scale(d(0.6 + 0.4 * k_in), d(0.6 + 0.4 * k_in));
             c.set_global_alpha(d(k_out * (b.t / 0.15).min(1.0)));
             c.set_text_align("center");
@@ -2377,6 +2382,42 @@ impl Game {
                 1 => ("RARE", "#6cc8ff"),
                 _ => ("COMMON", "#a0a8b8"),
             };
+            if cw > ch * 1.6 {
+                // compact horizontal card (phones): icon left, text right
+                let bob = if sel { (t * 5.0).sin() * 2.0 } else { 0.0 };
+                c.set_text_align("center");
+                c.set_font(&format!(
+                    "{}px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif",
+                    (ch * 0.36).min(44.0).round()
+                ));
+                text(c, def.icon, x + ch * 0.42, yy + ch * 0.5 + bob);
+                let tx = x + ch * 0.82;
+                c.set_text_align("left");
+                c.set_font(&format!("800 10px {}", font));
+                c.set_fill_style_str(rc);
+                text(c, rl, tx, yy + 16.0);
+                c.set_text_align("right");
+                c.set_font(&format!("800 12px {}", font));
+                if lvl == 0 {
+                    c.set_fill_style_str("#7dffa0");
+                    text(c, "NEW!", x + cw - 14.0, yy + 16.0);
+                } else {
+                    c.set_fill_style_str("#ffd36a");
+                    text(c, &format!("Lv {} → {}", lvl, lvl + 1), x + cw - 14.0, yy + 16.0);
+                }
+                c.set_text_align("left");
+                c.set_font(&format!("800 17px {}", font));
+                c.set_fill_style_str("#ffffff");
+                text(c, def.name, tx, yy + 38.0);
+                c.set_font(&format!("500 13px {}", font));
+                c.set_fill_style_str("#c8d2e8");
+                let lines = wrap(c, &u.desc(lvl + 1), cw - (tx - x) - 14.0);
+                for (li, l) in lines.iter().take(((ch - 58.0) / 16.0).max(1.0) as usize).enumerate() {
+                    text(c, l, tx, yy + 60.0 + li as f32 * 16.0);
+                }
+                c.set_text_align("center");
+                continue;
+            }
             c.set_font(&format!("800 10px {}", font));
             c.set_fill_style_str(rc);
             text(c, rl, x + cw * 0.5, yy + 18.0);

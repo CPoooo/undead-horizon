@@ -308,6 +308,7 @@
   function show(id) {
     for (const o of ['menu', 'pause', 'gameover', 'story', 'auth']) $(o).classList.toggle('show', o === id);
     document.body.classList.toggle('playing', id === null);
+    document.body.classList.toggle('in-menu', id === 'menu');
   }
 
   // ------------------------------------------------------------------ lobby
@@ -803,6 +804,17 @@
   }
   on('account-pill', 'click', openAccount);
   on('auth-x', 'click', () => toMenu());
+  // ---------------------------------------------------------------- phone lobby nav
+  // On narrow screens the lobby shows one panel at a time (CSS), picked here.
+  function setMobileTab(m) {
+    document.body.dataset.mtab = m;
+    for (const b of document.querySelectorAll('#mnav button')) b.classList.toggle('on', b.dataset.m === m);
+    if (m !== 'play') document.querySelector(`#tabs button[data-tab="${m}"]`)?.click();
+    document.querySelector('.side-tabs')?.scrollTo({ top: 0 });
+  }
+  on('mnav', 'click', (e) => { const b = e.target.closest('button'); if (b) setMobileTab(b.dataset.m); });
+  setMobileTab('play');
+
   window.UHDiffName = (d) => DIFF[d]?.name || d;
   window.UHUI = {
     send,

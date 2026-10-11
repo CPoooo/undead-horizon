@@ -257,3 +257,52 @@ body.touch.playing #pause-btn { display: block; }
 #invite-pop.show { transform: translate(-50%, 0); }
 #invite-pop .btn { width: auto; }
 .seg button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---------------- phones: one lobby panel at a time + bottom nav ---------------- */
+#mnav { display: none; }
+@media (max-width: 760px) {
+  #menu { background: linear-gradient(180deg, rgba(5,6,12,.2) 0%, rgba(5,6,12,.55) 34%, rgba(5,6,12,.92) 46%); overflow: hidden; }
+  .lobby { display: flex; flex-direction: column; height: 100%; gap: 10px;
+    padding: max(10px, env(safe-area-inset-top)) 12px calc(74px + env(safe-area-inset-bottom)) 12px; }
+  .topbar { margin-bottom: 0; flex: none; }
+  .logo { font-size: 30px; }
+  .pill { padding: 7px 11px; font-size: 14px; }
+  #account-name { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* character showcase sits on top; panels fill the rest */
+  .center { order: 0; flex: 0 0 26vh; min-height: 150px; padding-bottom: 0; }
+  .loadout-tag { padding: 6px 14px; }
+  .loadout-tag .who { font-size: 15px; }
+  .side { order: 1; flex: 1 1 auto; min-height: 0; padding: 16px; border-radius: 16px; display: none; }
+  body[data-mtab="play"] .side-play { display: block; }
+  body:not([data-mtab="play"]) .side-tabs { display: block; }
+  .side-tabs .tabs { display: none; } /* the bottom nav replaces the tab bar */
+  label.field { font-size: 12px; }
+  input[type=text], input[type=password], input[type=email] { font-size: 16px; } /* no iOS zoom-on-focus */
+  .seg button { padding: 12px 4px; font-size: 14px; }
+  .play-big { font-size: 22px; padding: 18px; }
+  .items { grid-template-columns: repeat(2, 1fr); }
+  .item .btn.small { padding: 10px; font-size: 14px; }
+  .btn.small { min-height: 40px; }
+  table.lb { font-size: 14px; }
+  table.lb th:nth-child(5), table.lb td:nth-child(5) { display: none; }
+  .frow { padding: 10px 12px; font-size: 15px; }
+  #mnav { display: flex; position: fixed; z-index: 20; left: 0; right: 0; bottom: 0;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: rgba(10,12,20,.96);
+    border-top: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  body:not(.in-menu) #mnav { display: none; }
+  #mnav button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; border: 0; background: none;
+    color: var(--muted); font: inherit; font-size: 11px; font-weight: 800; padding: 6px 0; border-radius: 10px; min-height: 52px; }
+  #mnav button i { font-style: normal; font-size: 20px; line-height: 1.1; }
+  #mnav button.on { color: var(--text); background: rgba(255,255,255,.08); }
+  /* overlays: full-width cards that scroll */
+  .overlay { padding: 10px; align-items: flex-start; }
+  .card { padding: 18px; border-radius: 16px; }
+  .dead-title { font-size: 48px; }
+  .stat .v { font-size: 22px; }
+  .row { flex-wrap: wrap; }
+  .row > .btn { min-height: 48px; }
+  .tip { display: none; } /* hover tooltips don't exist on touch; key info is shown inline */
+  #invite-pop { left: 10px; right: 10px; transform: translateY(-140%); flex-wrap: wrap; }
+  #invite-pop.show { transform: translateY(0); }
+}
+#invite-pop:not(.show) { visibility: hidden; }

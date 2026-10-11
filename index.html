@@ -30,7 +30,7 @@
       </div>
 
       <!-- left: play setup -->
-      <div class="side">
+      <div class="side side-play">
         <div id="party-box"></div>
         <label class="field" for="name">Survivor name</label>
         <input id="name" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off" spellcheck="false" />
@@ -70,7 +70,7 @@
       </div>
 
       <!-- right: tabs -->
-      <div class="side">
+      <div class="side side-tabs">
         <div class="tabs" id="tabs">
           <button data-tab="lb" class="on">🏆 Leaderboard</button>
           <button data-tab="shop">🛒 Shop</button>
@@ -215,6 +215,15 @@
     </div>
   </div>
 
+  <!-- phone-only bottom navigation for the lobby -->
+  <nav id="mnav" aria-label="Lobby sections">
+    <button data-m="play" class="on"><i>▶</i>Play</button>
+    <button data-m="friends"><i>👥</i>Friends</button>
+    <button data-m="lb"><i>🏆</i>Board</button>
+    <button data-m="shop"><i>🛒</i>Shop</button>
+    <button data-m="locker"><i>🎒</i>Locker</button>
+    <button data-m="settings"><i>⚙️</i>More</button>
+  </nav>
   <div id="invite-pop"></div>
   <button id="pause-btn" aria-label="Pause">II</button>
   <div id="touch-ui">
