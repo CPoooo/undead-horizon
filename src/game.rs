@@ -531,6 +531,12 @@ pub struct Game {
     pub skin: usize,
     pub hat: usize,
     pub tracer: usize,
+    /// V4 cosmetics: backpack, kill effect, death effect, emote; and a shown emote
+    pub pack: usize,
+    pub killfx: usize,
+    pub deathfx: usize,
+    pub emote: usize,
+    pub emote_t: f32,
     /// permanent upgrades, relic bonuses and gun camo from the profile
     pub meta: content::Meta,
     pub access: content::Access,
@@ -693,6 +699,11 @@ impl Game {
             skin: 0,
             hat: 0,
             tracer: 0,
+            pack: 0,
+            killfx: 0,
+            deathfx: 0,
+            emote: 0,
+            emote_t: 0.0,
             meta: content::Meta::default(),
             access: content::Access::default(),
             mutators: content::Mutators::default(),
@@ -794,6 +805,10 @@ impl Game {
                 "skin" => self.skin = content::skin_index(v),
                 "hat" => self.hat = content::hat_index(v),
                 "tracer" => self.tracer = content::tracer_index(v),
+                "pack" => self.pack = content::idx_of(&content::PACKS, v),
+                "killfx" => self.killfx = content::idx_of(&content::KILLFX, v),
+                "deathfx" => self.deathfx = content::idx_of(&content::DEATHFX, v),
+                "emote" => self.emote = content::EMOTES.iter().position(|e| e.0 == v).unwrap_or(0),
                 "char" => self.character = content::character_index(v),
                 "meta" => self.meta = content::Meta::parse(v),
                 "mut" => self.mutators = content::Mutators::parse(v),
@@ -972,6 +987,44 @@ impl Game {
             0.25
         } else {
             1.0
+        }
+    }
+
+    /// The player's chosen death effect.
+    fn death_fx(&mut self, pos: V2) {
+        match content::DEATHFX[self.deathfx] {
+            "ghost" => {
+                self.burst(pos, 30, 200.0, "#e8f0ff", 5.0, 2.0, false, true);
+                self.text(pos + v2(0.0, -40.0), "👻".into(), "#ffffff", 34.0);
+            }
+            "fireworks" => {
+                for (k, col) in ["#ff4a5a", "#ffd34a", "#7ad7ff", "#9cffb8", "#d58cff"].iter().enumerate() {
+                    let at = pos + V2::from_angle(k as f32 * 1.26) * 60.0;
+                    self.burst(at, 24, 420.0, col, 3.5, 1.2, false, true);
+                    self.ring(at, 80.0, 0.6, col, 4.0);
+                }
+            }
+            "kaboom" => {
+                self.ring(pos, 260.0, 0.5, "#ffb24a", 14.0);
+                self.burst(pos, 60, 700.0, "#ffb24a", 5.0, 0.9, false, true);
+                self.light(pos, 500.0, 0.6, "#ff9040");
+            }
+            _ => self.burst(pos, 70, 520.0, "#b0101a", 4.0, 1.4, true, false),
+        }
+    }
+
+    /// Flair on our own kills (cosmetic).
+    pub fn kill_fx(&mut self, pos: V2) {
+        match content::KILLFX[self.killfx] {
+            "confetti" => {
+                for col in ["#ff4a5a", "#ffd34a", "#7ad7ff", "#9cffb8"] {
+                    self.burst(pos, 3, 260.0, col, 2.5, 0.8, true, false);
+                }
+            }
+            "flames" => self.burst(pos, 8, 180.0, "#ff7a1f", 4.0, 0.5, false, true),
+            "sparkle" => self.burst(pos, 8, 220.0, "#fff6c0", 2.5, 0.6, false, true),
+            "ghost" => self.burst(pos, 5, 90.0, "#c8d8ff", 4.0, 0.9, false, true),
+            _ => {}
         }
     }
 
@@ -1316,6 +1369,7 @@ impl Game {
         }
         self.ult_flash = (self.ult_flash - real_dt * 2.5).max(0.0);
         self.cam_kick = self.cam_kick * (1.0 - damp(16.0, real_dt));
+        self.emote_t = (self.emote_t - real_dt).max(0.0);
         self.zoom_punch = (self.zoom_punch - real_dt * 0.6).max(0.0);
         if self.access.reduce_motion {
             self.zoom_punch = 0.0;
@@ -1478,6 +1532,10 @@ impl Game {
                 Action::Interact => return self.try_interact(),
                 Action::Ult => self.try_ult(),
                 Action::Ability => return self.try_ability(),
+                Action::Emote => {
+                    self.emote_t = 2.5;
+                    self.audio.play(Sfx::UiMove);
+                }
                 Action::Reload if self.ob.is_some() => self.start_reload(),
                 Action::Confirm if self.siege.is_some() => return self.ready_up(),
                 Action::Swap if self.siege.is_some() => return self.sell_defense(),
@@ -2933,7 +2991,7 @@ impl Game {
             self.phase = Phase::Dying;
             self.dying_t = 0.0;
             self.audio.play(Sfx::GameOver);
-            self.burst(pos, 70, 520.0, "#b0101a", 4.0, 1.4, true, false);
+            self.death_fx(pos);
             self.add_shake(1.0);
             self.hitstop = 0.15;
         }

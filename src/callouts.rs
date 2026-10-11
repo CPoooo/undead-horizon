@@ -69,6 +69,7 @@ impl Game {
             if kind == ZKind::Boss {
                 self.bosses_killed += 1;
             }
+            self.kill_fx(_pos);
             let pts = (kind.def().xp.max(1) * 10) as f32 * self.score_mult();
             self.score += pts as u64;
             self.multi_n += 1;

@@ -316,7 +316,8 @@ app.post("/equip", async (c) => {
   if (!CATEGORIES.includes(cat)) return c.json({ error: "bad_category" }, 400);
   await ensureProfile(uid);
   // free items (survivors) need no ownership row
-  const free = PRICES[`${cat}:${id}`] === 0 && cat === "char";
+  // free defaults (survivors, the starter cosmetics) need no ownership row
+  const free = PRICES[`${cat}:${id}`] === 0;
   const { rowCount } = await pool.query(
     `update profiles set equipped = jsonb_set(equipped, array[$2], to_jsonb($3::text)), updated_at = now()
      where user_id = $1 and (($2 || ':' || $3) = any(owned) or $4)`,

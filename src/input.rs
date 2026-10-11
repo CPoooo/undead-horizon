@@ -29,9 +29,10 @@ pub enum Action {
     Next,
     Reload,
     Swap,
+    Emote,
 }
 
-pub const ACTIONS: [Action; 25] = [
+pub const ACTIONS: [Action; 26] = [
     Action::Up,
     Action::Down,
     Action::Left,
@@ -57,6 +58,7 @@ pub const ACTIONS: [Action; 25] = [
     Action::Next,
     Action::Reload,
     Action::Swap,
+    Action::Emote,
 ];
 
 impl Action {
@@ -87,6 +89,7 @@ impl Action {
             Action::Next => "next",
             Action::Reload => "reload",
             Action::Swap => "swap",
+            Action::Emote => "emote",
         }
     }
 
@@ -126,6 +129,7 @@ impl Action {
             Action::Next => &["ArrowRight", "KeyD", "ArrowDown"],
             Action::Reload => &["KeyC"],
             Action::Swap => &["Tab", "KeyX"],
+            Action::Emote => &["KeyY"],
         }
     }
 }

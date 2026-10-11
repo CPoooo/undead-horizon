@@ -88,6 +88,8 @@ impl Game {
             hat: n.hat,
             downed: false,
             revive: 0.0,
+            pack: 0,
+            reload: false,
         }
     }
 
@@ -107,6 +109,8 @@ impl Game {
             hat: m.hat,
             downed: false,
             revive: 0.0,
+            pack: 0,
+            reload: false,
         }
     }
 

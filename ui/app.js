@@ -64,6 +64,35 @@
       { id: 'rainbow', name: 'Prism', color: 'conic-gradient(#f44,#fb4,#ff4,#4f7,#4cf,#c4f,#f44)', price: 1000, rarity: 'epic' },
     ],
   };
+  // V4 cosmetic slots (ids must match content::PACKS / KILLFX / DEATHFX / EMOTES)
+  CATALOG.pack = [
+    { id: 'pack', name: 'Courier Pack', icon: '🎒', price: 0 },
+    { id: 'jet', name: 'Jetpack', icon: '🚀', price: 900, desc: 'Flames when you run. Purely for style.' },
+    { id: 'shell', name: 'Turtle Shell', icon: '🐢', price: 400 },
+    { id: 'wings', name: 'Bat Wings', icon: '🦇', price: 1200, rarity: 'epic' },
+    { id: 'none', name: 'Travel Light', icon: '🚫', price: 50 },
+  ];
+  CATALOG.killfx = [
+    { id: 'default', name: 'Classic Gore', icon: '🩸', price: 0 },
+    { id: 'confetti', name: 'Party Time', icon: '🎉', price: 600 },
+    { id: 'flames', name: 'Hellfire', icon: '🔥', price: 500 },
+    { id: 'sparkle', name: 'Stardust', icon: '✨', price: 500 },
+    { id: 'ghost', name: 'Spirit Release', icon: '👻', price: 800, rarity: 'epic' },
+  ];
+  CATALOG.deathfx = [
+    { id: 'default', name: 'Messy', icon: '🩸', price: 0 },
+    { id: 'ghost', name: 'Ascension', icon: '👻', price: 500 },
+    { id: 'fireworks', name: 'Going Out With a Bang', icon: '🎆', price: 900 },
+    { id: 'kaboom', name: 'Kaboom', icon: '💥', price: 700 },
+  ];
+  CATALOG.emote = [
+    { id: 'wave', name: 'Wave', icon: '👋', price: 0 },
+    { id: 'laugh', name: 'LOL', icon: '😂', price: 150 },
+    { id: 'skull', name: 'Dead Inside', icon: '💀', price: 200 },
+    { id: 'flex', name: 'Flex', icon: '💪', price: 250 },
+    { id: 'heart', name: 'Wholesome', icon: '❤️', price: 150 },
+    { id: 'zzz', name: 'Bored', icon: '😴', price: 200 },
+  ];
   // Survivors (ids must match content::CHARACTERS). Free for now.
   CATALOG.char = [
     { id: 'rook', name: 'Rook · Gunner', icon: '🎯', price: 0, desc: 'Q: Heat Sink (double fire rate, ricochets). Passive: +10% fire rate. Signature: M9.' },
@@ -71,7 +100,9 @@
     { id: 'doc', name: 'Doc Hale · Medic', icon: '⛑️', price: 0, desc: 'Q: Heal Pulse (heals, shoves zombies). Passive: regen, 2× revive speed. Signature: Marksman.' },
     { id: 'ash', name: 'Ash · Pyro', icon: '🔥', price: 0, desc: 'Q: Flame Cone. Passive: hits can ignite. Signature: Boomstick.' },
   ];
+  const CAT_LABEL_EXTRA = { pack: '🎒 Backpacks', killfx: '💫 Kill effects', deathfx: '☠️ Death effects', emote: '😀 Emotes (Y)' };
   const CAT_LABEL = { gun: '🔫 Guns', perk: '✨ Perks', skin: '👕 Skins', hat: '🎩 Hats', tracer: '☄️ Tracers' };
+  Object.assign(CAT_LABEL, CAT_LABEL_EXTRA);
   const find = (cat, id) => CATALOG[cat].find((i) => i.id === id) || CATALOG[cat][0];
 
   const DIFF = {
@@ -148,8 +179,9 @@
 
   const freshProfile = () => ({
     coins: 0,
-    owned: ['gun:pistol', 'perk:none', 'skin:default', 'hat:none', 'tracer:default', 'char:rook', 'char:mara', 'char:doc', 'char:ash'],
-    equipped: { gun: 'pistol', perk: 'none', skin: 'default', hat: 'none', tracer: 'default', char: 'rook' },
+    owned: ['gun:pistol', 'perk:none', 'skin:default', 'hat:none', 'tracer:default', 'char:rook', 'char:mara', 'char:doc', 'char:ash',
+      'pack:pack', 'killfx:default', 'deathfx:default', 'emote:wave'],
+    equipped: { gun: 'pistol', perk: 'none', skin: 'default', hat: 'none', tracer: 'default', char: 'rook', pack: 'pack', killfx: 'default', deathfx: 'default', emote: 'wave' },
     campaign: { unlocked: 0, cleared: [] },
     saves: { infinite: null, campaign: null },
     stats: { runs: 0, kills: 0, bestWave: 0 },
@@ -498,7 +530,8 @@
     let ch = settings.char || e.char || 'rook';
     if (!window.UHProg.charUnlocked(ch, pr)) ch = 'rook';
     return `gun=${e.gun};perk=${e.perk === 'none' ? '' : e.perk};skin=${e.skin};hat=${e.hat};tracer=${e.tracer};char=${ch}` +
-      `;meta=${window.UHProg.metaSpec(pr.meta)};relics=${relics};camo=${window.UHProg.camoTier(pr.gunKills[e.gun])}`;
+      `;meta=${window.UHProg.metaSpec(pr.meta)};relics=${relics};camo=${window.UHProg.camoTier(pr.gunKills[e.gun])}` +
+      `;pack=${e.pack || 'pack'};killfx=${e.killfx || 'default'};deathfx=${e.deathfx || 'default'};emote=${e.emote || 'wave'}`;
   };
   const pushEquip = () => send('equip|' + equipString());
 
@@ -668,7 +701,7 @@
 
   // ------------------------------------------------------------------ shop
   let shopCat = 'gun';
-  $('shop-cats').innerHTML = Object.keys(CATALOG).map((c) => `<button data-c="${c}" class="${c === shopCat ? 'on' : ''}">${CAT_LABEL[c]}</button>`).join('');
+  $('shop-cats').innerHTML = Object.keys(CATALOG).filter((c) => c !== 'char').map((c) => `<button data-c="${c}" class="${c === shopCat ? 'on' : ''}">${CAT_LABEL[c]}</button>`).join('');
   on('shop-cats', 'click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -749,7 +782,8 @@
     }).join('')}</div>` : '<div class="empty">No relics yet. Kill bosses to find them.</div>'}</div>`;
     $('locker').innerHTML =
       `<h2>Survivor</h2>${chars}${relicBox}<h2 style="margin-top:20px">Loadout</h2>${group('gun', 'Primary weapon')}${group('perk', 'Starting perk')}
-       <h2 style="margin-top:20px">Character</h2>${group('skin', 'Outfit')}${group('hat', 'Headgear')}${group('tracer', 'Bullet tracers')}
+       <h2 style="margin-top:20px">Character</h2>${group('skin', 'Outfit')}${group('hat', 'Headgear')}${group('pack', 'Backpack')}${group('tracer', 'Bullet tracers')}
+       ${group('killfx', 'Kill effect')}${group('deathfx', 'Death effect')}${group('emote', 'Emote (press Y)')}
        <div class="hint" style="margin-top:12px">Buy more in the 🛒 Shop with coins earned by surviving waves.</div>`;
   }
   on('locker', 'click', async (e) => {

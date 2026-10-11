@@ -108,6 +108,9 @@ pub struct PView {
     pub hat: usize,
     pub downed: bool,
     pub revive: f32,
+    /// backpack style (content::PACKS) and reloading (gun tilts)
+    pub pack: usize,
+    pub reload: bool,
 }
 
 enum Draw {
@@ -141,6 +144,8 @@ impl Game {
             hat: self.hat,
             downed: pl.downed,
             revive: pl.revive,
+            pack: self.pack,
+            reload: self.reload_frac().is_some(),
         }
     }
 
@@ -164,6 +169,8 @@ impl Game {
             hat: s.hat as usize,
             downed: s.downed(),
             revive: s.revive,
+            pack: 0,
+            reload: false,
         }
     }
 
@@ -377,6 +384,8 @@ impl Game {
                     hat: *hat,
                     downed: false,
                     revive: 0.0,
+                    pack: 0,
+                    reload: false,
                 };
                 self.draw_player(c, mp, t, &view);
                 c.set_text_align("center");
@@ -392,6 +401,17 @@ impl Game {
         self.draw_hub_overlays(c, t);
         self.draw_texts(c);
         self.draw_teammate_tags(c, t);
+        if self.emote_t > 0.0 && !self.player.dead {
+            let e = crate::content::EMOTES[self.emote.min(crate::content::EMOTES.len() - 1)].1;
+            let pop = 1.0 + 0.3 * ((2.5 - self.emote_t) * 8.0).min(1.0).sin();
+            c.set_global_alpha(d(self.emote_t.min(1.0)));
+            c.set_text_align("center");
+            c.set_text_baseline("middle");
+            c.set_font(&format!("{}px 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif", (26.0 * pop).round()));
+            c.set_fill_style_str("#ffffff");
+            text(c, e, ppos.x, ppos.y - 48.0);
+            c.set_global_alpha(1.0);
+        }
         c.restore();
 
         // ---------------- screen space
@@ -951,15 +971,63 @@ impl Game {
         circle(c, f1.x, f1.y + 4.0, 5.0);
         circle(c, f2.x, f2.y + 4.0, 5.0);
 
+        // the body bobs with each step, breathes when idle, and flinches when hit
+        let bob = if moving { (v.walk * 4.4).sin().abs() * 1.6 } else { (t * 2.0).sin() * 0.6 };
+        let p = p + v2(0.0, -bob) - fwd * (v.hurt * 4.0);
+
         // backpack
         let bp = p - fwd * 11.0;
-        c.set_fill_style_str("#5a4630");
-        circle(c, bp.x, bp.y - 2.0, 8.5);
+        match crate::content::PACKS[v.pack.min(crate::content::PACKS.len() - 1)] {
+            "jet" => {
+                c.set_fill_style_str("#7d8290");
+                for s2 in [-1.0f32, 1.0] {
+                    let q = bp + side * (4.5 * s2);
+                    circle(c, q.x, q.y - 2.0, 5.0);
+                }
+                if moving {
+                    let _ = c.set_global_composite_operation("lighter");
+                    c.set_fill_style_str(if (t * 30.0).sin() > 0.0 { "#ffb030" } else { "#ff6a1f" });
+                    for s2 in [-1.0f32, 1.0] {
+                        let q = bp + side * (4.5 * s2) - fwd * 7.0;
+                        circle(c, q.x, q.y, 3.5);
+                    }
+                    let _ = c.set_global_composite_operation("source-over");
+                }
+            }
+            "shell" => {
+                c.set_fill_style_str("#3d7a3a");
+                circle(c, bp.x, bp.y - 2.0, 10.5);
+                c.set_stroke_style_str("#245022");
+                c.set_line_width(1.5);
+                c.begin_path();
+                let _ = c.arc(d(bp.x), d(bp.y - 2.0), 6.0, 0.0, TAU64);
+                c.stroke();
+            }
+            "wings" => {
+                let flap = (t * 6.0).sin() * 0.25;
+                c.set_fill_style_str("#2a1a30");
+                for s2 in [-1.0f32, 1.0] {
+                    let tip = bp + side * (20.0 * s2) - fwd * (6.0 + flap * 10.0);
+                    c.begin_path();
+                    c.move_to(d(bp.x), d(bp.y - 4.0));
+                    c.line_to(d(tip.x), d(tip.y - 8.0));
+                    c.line_to(d(bp.x + side.x * 8.0 * s2), d(bp.y + 4.0));
+                    c.close_path();
+                    c.fill();
+                }
+            }
+            "none" => {}
+            _ => {
+                c.set_fill_style_str("#5a4630");
+                circle(c, bp.x, bp.y - 2.0, 8.5);
+            }
+        }
 
-        // gun
+        // gun (tilted up while reloading)
         let rec = v.recoil * 4.0;
+        let gdir = if v.reload { V2::from_angle(aim + 0.9) } else { fwd };
         let g0 = p + fwd * (6.0 - rec) + side * 5.0;
-        let g1 = p + fwd * (gun.len + 6.0 - rec) + side * 5.0;
+        let g1 = g0 + gdir * gun.len;
         let camo = if v.gun == self.gun && !crate::content::CAMOS[self.camo].is_empty() {
             crate::content::CAMOS[self.camo]
         } else {

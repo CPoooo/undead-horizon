@@ -1,7 +1,7 @@
 // Server-authoritative prices and reward rules.
 // Keep in sync with ui/app.js (CATALOG) and src/content.rs / src/game.rs (coin formulas).
 
-export const CATEGORIES = ["gun", "perk", "skin", "hat", "tracer", "char"];
+export const CATEGORIES = ["gun", "perk", "skin", "hat", "tracer", "char", "pack", "killfx", "deathfx", "emote"];
 
 export const PRICES: Record<string, number> = {
   "gun:pistol": 0, "gun:smg": 400, "gun:shotgun": 650, "gun:rifle": 900, "gun:minigun": 1500, "gun:launcher": 2000,
@@ -15,6 +15,10 @@ export const PRICES: Record<string, number> = {
   "tracer:rainbow": 1000,
   // survivors are free (gating comes from achievements)
   "char:rook": 0, "char:mara": 0, "char:doc": 0, "char:ash": 0,
+  "pack:pack": 0, "pack:jet": 900, "pack:shell": 400, "pack:wings": 1200, "pack:none": 50,
+  "killfx:default": 0, "killfx:confetti": 600, "killfx:flames": 500, "killfx:sparkle": 500, "killfx:ghost": 800,
+  "deathfx:default": 0, "deathfx:ghost": 500, "deathfx:fireworks": 900, "deathfx:kaboom": 700,
+  "emote:wave": 0, "emote:laugh": 150, "emote:skull": 200, "emote:flex": 250, "emote:heart": 150, "emote:zzz": 200,
 };
 
 export const DIFFS = ["rookie", "survivor", "veteran", "nightmare"];

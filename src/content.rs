@@ -1167,3 +1167,21 @@ impl Access {
         }
     }
 }
+
+// ------------------------------------------------------------------ extra cosmetic slots (V4)
+
+pub const PACKS: [&str; 5] = ["pack", "jet", "shell", "wings", "none"];
+pub const KILLFX: [&str; 5] = ["default", "confetti", "flames", "sparkle", "ghost"];
+pub const DEATHFX: [&str; 4] = ["default", "ghost", "fireworks", "kaboom"];
+pub const EMOTES: [(&str, &str); 6] = [
+    ("wave", "👋"),
+    ("laugh", "😂"),
+    ("skull", "💀"),
+    ("flex", "💪"),
+    ("heart", "❤️"),
+    ("zzz", "😴"),
+];
+
+pub fn idx_of(list: &[&str], id: &str) -> usize {
+    list.iter().position(|x| *x == id).unwrap_or(0)
+}
