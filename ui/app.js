@@ -269,7 +269,29 @@
   // ------------------------------------------------------------------ settings
   const settings = Object.assign({ vol: 0.7, music: 0.5, autoaim: false, name: '', mode: 'infinite', diff: 'survivor', chapter: 0 }, store.get(SET_KEY, {}));
   const saveSettings = () => store.set(SET_KEY, settings);
+  // Extra settings, rendered into every `.xsettings` box from this table.
+  // kind 'toggle' stores a boolean, 'range' a number; `cmd` sends it to the game.
+  const XSETTINGS = [
+    { key: 'lookahead', label: 'Camera lookahead (leads your aim)', kind: 'toggle', def: true, cmd: (v) => 'lookahead|' + (v ? 1 : 0) },
+  ];
+  for (const x of XSETTINGS) if (settings[x.key] === undefined) settings[x.key] = x.def;
+  function renderXSettings() {
+    for (const box of document.querySelectorAll('.xsettings')) {
+      box.innerHTML = XSETTINGS.map((x) => x.kind === 'toggle'
+        ? `<label class="toggle"><input type="checkbox" data-x="${x.key}" ${settings[x.key] ? 'checked' : ''} /> ${x.label}</label>`
+        : `<div class="setting"><span class="lbl">${x.label}</span><input type="range" data-x="${x.key}" min="${x.min}" max="${x.max}" step="${x.step}" value="${settings[x.key]}" /></div>`).join('');
+    }
+  }
+  document.addEventListener('change', (e) => {
+    const k = e.target?.dataset?.x;
+    if (!k) return;
+    const x = XSETTINGS.find((y) => y.key === k);
+    settings[k] = x.kind === 'toggle' ? e.target.checked : +e.target.value;
+    applySettings();
+  });
   function applySettings() {
+    renderXSettings();
+    for (const x of XSETTINGS) if (x.cmd) send(x.cmd(settings[x.key]));
     for (const id of ['vol', 'vol2']) $(id).value = settings.vol;
     for (const id of ['music', 'music2']) $(id).value = settings.music;
     for (const id of ['autoaim', 'autoaim2']) $(id).checked = settings.autoaim;

@@ -387,6 +387,13 @@ pub struct Game {
     pub shake: f32,
     /// recoil camera offset, decays back to zero
     pub cam_kick: V2,
+    /// aim lookahead offset (smoothed) and its strength setting (0 = off)
+    pub cam_look: V2,
+    pub lookahead: f32,
+    /// brief zoom-in (ult, boss spawn), decays to 0
+    pub zoom_punch: f32,
+    /// real seconds of slow motion left (boss kills)
+    pub slowmo: f32,
     pub screen: V2,
     pub dpr: f32,
     pub zoom: f32,
@@ -497,6 +504,10 @@ impl Game {
             menu_t: 0.0,
             shake: 0.0,
             cam_kick: V2::ZERO,
+            cam_look: V2::ZERO,
+            lookahead: 1.0,
+            zoom_punch: 0.0,
+            slowmo: 0.0,
             screen: v2(1280.0, 720.0),
             dpr: 1.0,
             zoom: 1.0,
@@ -957,7 +968,12 @@ impl Game {
     pub(crate) fn simulate(&mut self, real_dt: f32) {
         {
             {
-                let scale = if self.phase == Phase::Dying { 0.3 } else { 1.0 };
+                let mut scale = if self.phase == Phase::Dying { 0.3 } else { 1.0 };
+                if self.slowmo > 0.0 {
+                    self.slowmo -= real_dt;
+                    // ease back to full speed over the last third
+                    scale *= 0.3 + 0.7 * (1.0 - (self.slowmo / 0.5).min(1.0));
+                }
                 if self.hitstop > 0.0 {
                     self.hitstop -= real_dt;
                 } else {
@@ -1004,6 +1020,13 @@ impl Game {
         }
         self.ult_flash = (self.ult_flash - real_dt * 2.5).max(0.0);
         self.cam_kick = self.cam_kick * (1.0 - damp(16.0, real_dt));
+        self.zoom_punch = (self.zoom_punch - real_dt * 0.6).max(0.0);
+        let look = if matches!(self.phase, Phase::Playing) && !self.player.downed {
+            V2::from_angle(self.player.aim) * (55.0 * self.lookahead)
+        } else {
+            V2::ZERO
+        };
+        self.cam_look = self.cam_look.lerp(look, damp(3.0, real_dt));
         for l in self.lights.iter_mut() {
             l.life -= real_dt;
         }
@@ -1332,6 +1355,7 @@ impl Game {
         self.add_shake(0.9);
         self.hitstop = 0.09;
         self.ult_flash = 1.0;
+        self.zoom_punch = 0.12;
         self.player.iframes = self.player.iframes.max(1.0);
         self.audio.play(Sfx::Ultimate);
     }
@@ -1646,8 +1670,13 @@ impl Game {
         }
 
         // aim
-        self.mouse_world =
-            self.player.pos + (self.input.mouse - self.screen * 0.5) * (1.0 / self.zoom.max(0.01));
+        // the camera leads the aim and recoils, so map the cursor through it
+        let cam = if self.cam.dist2(self.player.pos) < 400.0 * 400.0 {
+            self.cam
+        } else {
+            self.player.pos
+        };
+        self.mouse_world = cam + (self.input.mouse - self.screen * 0.5) * (1.0 / self.zoom.max(0.01));
         let auto = self.auto_aim || self.input.is_touch || !self.input.mouse_seen;
         let target_angle = if auto {
             self.nearest_zombie(ppos, 650.0, 0).map(|j| {
@@ -2129,6 +2158,7 @@ impl Game {
             ZKind::Boss => {
                 self.add_shake(0.8);
                 self.hitstop = 0.12;
+                self.slowmo = 1.4;
                 let bonus = (50.0 * self.difficulty().coins) as u32;
                 self.coins += bonus;
                 let name = self.zombies[j].boss_var.name();
@@ -3079,5 +3109,21 @@ mod tests {
         assert!(g.cam_kick.x < 0.0, "camera recoils against the aim");
         assert_eq!(g.lights.len(), 1);
         assert!(g.particles.iter().any(|p| p.color == GUNS[g.gun].casing));
+    }
+
+    #[test]
+    fn boss_kill_slows_time_then_recovers() {
+        let mut g = Game::new(11);
+        g.start("diff=rookie");
+        g.spawn_boss(BossVar::Gravedigger, v2(300.0, 0.0));
+        g.grid.build(g.player.pos, &g.zombies);
+        g.damage_zombie(0, 1.0e9, v2(1.0, 0.0), 0.0, false);
+        assert!(g.slowmo > 1.0);
+        let mut t = 0.0;
+        for _ in 0..200 {
+            t += 16.7;
+            g.frame(t);
+        }
+        assert!(g.slowmo <= 0.0, "slow motion wears off");
     }
 }

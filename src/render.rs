@@ -165,9 +165,10 @@ impl Game {
         self.screen = v2(w, h);
         self.dpr = dpr;
         // constant visible area regardless of window size
-        self.zoom = ((w * h).sqrt() / 960.0).clamp(0.45, 2.2);
+        let base_zoom = ((w * h).sqrt() / 960.0).clamp(0.45, 2.2);
+        self.spawn_r = (v2(w, h) * (0.5 / base_zoom)).len() + 70.0;
+        self.zoom = base_zoom * (1.0 + self.zoom_punch);
         let half = v2(w, h) * (0.5 / self.zoom);
-        self.spawn_r = half.len() + 70.0;
 
         let a = self.alpha;
         let ppos = self.player.prev.lerp(self.player.pos, a);
@@ -177,7 +178,7 @@ impl Game {
             ((t * 61.0).sin() + (t * 23.0).sin() * 0.5) * sh,
             ((t * 53.0).cos() + (t * 31.0).cos() * 0.5) * sh,
         );
-        self.cam = self.camera_pos(ppos) + self.cam_kick;
+        self.cam = self.camera_pos(ppos) + self.cam_kick + self.cam_look;
 
         let _ = c.set_transform(d(dpr), 0.0, 0.0, d(dpr), 0.0, 0.0);
         c.set_image_smoothing_enabled(true);

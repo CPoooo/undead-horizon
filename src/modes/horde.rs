@@ -180,6 +180,7 @@ impl Game {
                     self.spawn_boss(var, p2);
                 }
                 self.toast = Some((var.name().to_string(), 2.5));
+                self.zoom_punch = 0.08;
                 self.sfx(Sfx::BossRoar, self.player.pos);
                 self.add_shake(0.5);
             }
