@@ -363,7 +363,11 @@ impl Game {
             self.draw_coop_hud(c, w, h, t);
         }
         if self.phase == Phase::LevelUp {
-            self.draw_levelup(c, w, h, t);
+            if self.chest.is_some() {
+                self.draw_chest(c, w, h, t);
+            } else {
+                self.draw_levelup(c, w, h, t);
+            }
         }
         if self.show_fps {
             c.set_font("12px monospace");
@@ -599,6 +603,7 @@ impl Game {
                 PickKind::Heart => "#ff4d6d",
                 PickKind::Vacuum => "#b48cff",
                 PickKind::Frenzy => "#ffd84a",
+                PickKind::Chest => "#ffb830",
             };
             let blink = p.t > 24.0 && ((t * 10.0) as i32 % 2 == 0);
             if blink {
@@ -615,6 +620,7 @@ impl Game {
                 PickKind::Heart => "❤️",
                 PickKind::Vacuum => "🧲",
                 PickKind::Frenzy => "⚡",
+                PickKind::Chest => "🎁",
             };
             text(c, icon, p.pos.x, p.pos.y - 4.0 + bob);
         }
@@ -2050,6 +2056,7 @@ impl Game {
                 PickKind::Heart => "#ff5c7a",
                 PickKind::Vacuum => "#b48cff",
                 PickKind::Frenzy => "#ffd84a",
+                PickKind::Chest => "#ffb830",
             };
             c.set_fill_style_str(col);
             let m = to_map(p.pos);
@@ -2368,6 +2375,100 @@ impl Game {
                 5.0,
             );
         }
+    }
+
+    /// Slot-machine chest reveal: one reel per pick, stopping left to right.
+    fn draw_chest(&self, c: &Ctx, w: f32, h: f32, t: f32) {
+        let Some(ch) = &self.chest else { return };
+        let font = "'Inter','Segoe UI',system-ui,sans-serif";
+        let emoji = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif";
+        let k = ease_out((ch.t / 0.3).min(1.0));
+        c.set_global_alpha(d(0.75 * k));
+        c.set_fill_style_str("#05060c");
+        c.fill_rect(0.0, 0.0, d(w), d(h));
+        c.set_global_alpha(d(k));
+        // golden god-rays
+        let _ = c.set_global_composite_operation("lighter");
+        c.set_fill_style_str("rgba(255,200,80,0.06)");
+        for i in 0..12 {
+            let a = t * 0.3 + i as f32 * TAU / 12.0;
+            c.begin_path();
+            c.move_to(d(w * 0.5), d(h * 0.45));
+            let r = w.max(h);
+            c.line_to(d(w * 0.5 + a.cos() * r), d(h * 0.45 + a.sin() * r));
+            c.line_to(d(w * 0.5 + (a + 0.12).cos() * r), d(h * 0.45 + (a + 0.12).sin() * r));
+            c.fill();
+        }
+        let _ = c.set_global_composite_operation("source-over");
+        c.set_text_align("center");
+        c.set_text_baseline("middle");
+        c.set_stroke_style_str("rgba(0,0,0,0.85)");
+        c.set_line_join("round");
+        let small = w < 640.0;
+        let n = ch.picks.len();
+        c.set_font(&format!("900 {}px {}", if small { 30 } else { 46 }, font));
+        c.set_fill_style_str("#ffd36a");
+        let title = match n {
+            5 => "LEGENDARY CHEST!",
+            3 => "TREASURE CHEST!",
+            _ => "CHEST",
+        };
+        outlined(c, title, w * 0.5, h * 0.2, 7.0);
+        let size = if small { (w - 40.0) / n.max(1) as f32 - 8.0 } else { 104.0f32 }.min(104.0);
+        let gap = 10.0;
+        let total = n as f32 * size + (n.saturating_sub(1)) as f32 * gap;
+        let x0 = w * 0.5 - total * 0.5;
+        let y = h * 0.45 - size * 0.5;
+        for (i, u) in ch.picks.iter().enumerate() {
+            let x = x0 + i as f32 * (size + gap);
+            let stop = 0.6 + crate::chest::REEL_T * (i + 1) as f32;
+            let done = ch.t >= stop;
+            round_rect(c, x, y, size, size, 14.0);
+            c.set_fill_style_str(if done { "#2a1f10" } else { "#14161e" });
+            c.fill();
+            c.set_stroke_style_str(if done { u.def().color } else { "#5a4a2a" });
+            c.set_line_width(if done { 3.0 } else { 2.0 });
+            c.stroke();
+            c.save();
+            round_rect(c, x, y, size, size, 14.0);
+            c.clip();
+            c.set_font(&format!("{}px {}", (size * 0.5).round(), emoji));
+            c.set_fill_style_str("#ffffff");
+            if done {
+                let pop = 1.0 + 0.25 * (1.0 - ((ch.t - stop) / 0.2).min(1.0));
+                c.set_font(&format!("{}px {}", (size * 0.5 * pop).round(), emoji));
+                text(c, u.def().icon, x + size * 0.5, y + size * 0.5);
+            } else {
+                // spinning strip of icons
+                let spin = ch.t * 14.0 + i as f32 * 1.7;
+                for j in 0..3 {
+                    let f = spin.fract();
+                    let idx = (spin.floor() as usize + j) % ALL.len();
+                    let yy = y + size * (0.5 + (j as f32 - 1.0 - f + 1.0) * 0.8) - size * 0.3;
+                    text(c, ALL[idx].def().icon, x + size * 0.5, yy);
+                }
+            }
+            c.restore();
+            if done {
+                c.set_font(&format!("800 {}px {}", if small { 10 } else { 12 }, font));
+                c.set_fill_style_str("#ffffff");
+                let lines = wrap(c, u.def().name, size + 6.0);
+                for (li, l) in lines.iter().take(2).enumerate() {
+                    text(c, l, x + size * 0.5, y + size + 14.0 + li as f32 * 14.0);
+                }
+            }
+        }
+        if ch.revealed() {
+            c.set_font(&format!("800 {}px {}", if small { 15 } else { 18 }, font));
+            c.set_fill_style_str("#ffd36a");
+            outlined(c, &format!("+{} coins", ch.coins), w * 0.5, y + size + 56.0, 4.0);
+            c.set_font(&format!("600 14px {}", font));
+            c.set_fill_style_str("#c8d2e8");
+            let hint = if self.input.is_touch { "Tap to continue" } else { "Click or press Enter to continue" };
+            c.set_global_alpha(d(0.6 + 0.4 * (t * 4.0).sin().abs()));
+            outlined(c, hint, w * 0.5, y + size + 84.0, 3.0);
+        }
+        c.set_global_alpha(1.0);
     }
 
     fn draw_levelup(&self, c: &Ctx, w: f32, h: f32, t: f32) {

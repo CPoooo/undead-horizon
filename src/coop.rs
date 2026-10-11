@@ -845,6 +845,7 @@ impl Game {
                 kind: match k {
                     1 => PickKind::Vacuum,
                     2 => PickKind::Frenzy,
+                    3 => PickKind::Chest,
                     _ => PickKind::Heart,
                 },
                 t,
@@ -981,6 +982,12 @@ impl Game {
                     if slot == me {
                         self.player.frenzy = 8.0;
                         self.toast = Some(("FRENZY! Double fire rate".into(), 1.6));
+                    }
+                }
+                E_CHEST => {
+                    let Some(slot) = r.u8() else { return };
+                    if slot == me {
+                        self.pending_chests += 1;
                     }
                 }
                 E_GAMEOVER => self.enter_dying(),

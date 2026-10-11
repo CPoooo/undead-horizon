@@ -1,5 +1,6 @@
 mod audio;
 mod callouts;
+mod chest;
 mod content;
 mod coop;
 mod game;
@@ -459,6 +460,12 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
             }
             let spec = g.bindings.to_spec();
             g.ui_out.push(("bindings", spec));
+        }
+        // test hooks for e2e screenshots
+        "dev" => {
+            if a == "chest" && g.phase == Phase::Playing {
+                g.open_chest();
+            }
         }
         // a one-shot action from a gamepad or an on-screen button
         "act" => {

@@ -35,6 +35,7 @@ pub const E_FRENZY: u8 = 7;
 pub const E_GAMEOVER: u8 = 8;
 pub const E_BLAST: u8 = 9;
 pub const E_BOSS: u8 = 10;
+pub const E_CHEST: u8 = 11; // slot: that player opens a chest
 
 // player flags
 pub const PF_DOWNED: u8 = 1;

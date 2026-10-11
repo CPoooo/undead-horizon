@@ -164,6 +164,7 @@ pub enum PickKind {
     Heart,
     Vacuum,
     Frenzy,
+    Chest,
 }
 
 pub struct Pickup {
@@ -379,6 +380,11 @@ pub struct Game {
     pub banished: Vec<Up>,
     /// the next card picked is banished instead of taken
     pub banish_mode: bool,
+    /// an open treasure chest (drawn over the level-up phase)
+    pub chest: Option<crate::chest::Chest>,
+    pub chests_opened: u32,
+    /// chests picked up while another overlay was open
+    pub pending_chests: u32,
     pub rng: Rng,
     pub grid: Grid,
     pub audio: Audio,
@@ -509,6 +515,9 @@ impl Game {
             skips: 0,
             banished: Vec::new(),
             banish_mode: false,
+            chest: None,
+            chests_opened: 0,
+            pending_chests: 0,
             rng: Rng::new(seed),
             grid: Grid::new(),
             audio: Audio::new(),
@@ -713,6 +722,9 @@ impl Game {
         self.skips = 3;
         self.banished.clear();
         self.banish_mode = false;
+        self.chest = None;
+        self.chests_opened = 0;
+        self.pending_chests = 0;
         self.kills = 0;
         self.score = 0;
         self.feed.clear();
@@ -975,11 +987,13 @@ impl Game {
             Phase::LevelUp | Phase::Paused if self.net.is_some() => {
                 if self.phase == Phase::LevelUp {
                     self.levelup_t += real_dt;
+                    self.tick_chest(real_dt);
                 }
                 self.simulate(real_dt);
             }
             Phase::LevelUp => {
                 self.levelup_t += real_dt;
+                self.tick_chest(real_dt);
             }
             Phase::Paused | Phase::GameOver => {}
         }
@@ -1114,7 +1128,11 @@ impl Game {
                 self.try_ult();
             }
         }
-        if self.phase == Phase::LevelUp {
+        if self.phase == Phase::LevelUp && self.chest.is_some() {
+            if !clicks.is_empty() {
+                self.close_chest();
+            }
+        } else if self.phase == Phase::LevelUp {
             // hover selects, click picks
             let rects = self.card_rects();
             let m = self.input.mouse;
@@ -1196,6 +1214,13 @@ impl Game {
                 _ => return false,
             },
             Phase::LevelUp => {
+                if self.chest.is_some() {
+                    return match a {
+                        Action::Confirm | Action::Pick1 | Action::Pick2 | Action::Pick3
+                        | Action::Dash | Action::Interact | Action::Pause => self.close_chest(),
+                        _ => false,
+                    };
+                }
                 if self.levelup_t < 0.35 {
                     return true;
                 }
@@ -1396,6 +1421,13 @@ impl Game {
             }
             return;
         }
+        self.apply_upgrade(u);
+        self.audio.play(Sfx::UiSelect);
+        self.finish_pick();
+    }
+
+    /// Gain one level of an upgrade, with its immediate side effects.
+    pub fn apply_upgrade(&mut self, u: Up) {
         self.ups.inc(u);
         match u {
             Up::Vitality => {
@@ -1407,8 +1439,6 @@ impl Game {
             Up::Lightning => self.player.bolt_t = 0.3,
             _ => {}
         }
-        self.audio.play(Sfx::UiSelect);
-        self.finish_pick();
     }
 
     /// Close this level-up (or open the next queued one).
@@ -1730,7 +1760,15 @@ impl Game {
                 self.player.xp_next = xp_for(self.player.level);
                 self.pending_levels += 1;
             }
-            if self.pending_levels > 0 && self.phase == Phase::Playing && self.player_alive() {
+            if self.pending_chests > 0 && self.phase == Phase::Playing && self.player_alive() {
+                self.pending_chests -= 1;
+                self.open_chest();
+            }
+            if self.pending_levels > 0
+                && self.phase == Phase::Playing
+                && self.chest.is_none()
+                && self.player_alive()
+            {
                 self.open_levelup();
             }
         }
@@ -2306,6 +2344,15 @@ impl Game {
             self.pickups.push(Pickup {
                 pos: pos + v2(30.0, 0.0),
                 kind: PickKind::Vacuum,
+                t: 0.0,
+                dead: false,
+            });
+        }
+        let chest = kind == ZKind::Boss || (kind == ZKind::Brute && self.rng.chance(0.08));
+        if chest {
+            self.pickups.push(Pickup {
+                pos: pos + v2(-30.0, 10.0),
+                kind: PickKind::Chest,
                 t: 0.0,
                 dead: false,
             });
@@ -2948,7 +2995,7 @@ impl Game {
                 pk.dead = true;
                 collected.push((i, tslot));
             }
-            if pk.t > 30.0 {
+            if pk.t > 30.0 && pk.kind != PickKind::Chest {
                 pk.dead = true;
             }
         }
@@ -2966,6 +3013,10 @@ impl Game {
                         }),
                         PickKind::Frenzy => net.event(|w| {
                             w.u8(net::E_FRENZY);
+                            w.u8(slot);
+                        }),
+                        PickKind::Chest => net.event(|w| {
+                            w.u8(net::E_CHEST);
                             w.u8(slot);
                         }),
                         PickKind::Vacuum => {}
@@ -2993,6 +3044,10 @@ impl Game {
                     self.ring(ppos, 600.0, 0.6, "#b48cff", 6.0);
                     self.toast = Some(("Soul Vacuum!".into(), 1.2));
                     self.sfx(Sfx::Nova, ppos);
+                }
+                PickKind::Chest => {
+                    self.burst(ppos, 30, 320.0, "#ffd36a", 3.5, 0.7, false, true);
+                    self.pending_chests += 1;
                 }
                 PickKind::Frenzy => {
                     self.player.frenzy = 8.0;
@@ -3341,5 +3396,34 @@ mod tests {
         h.load_save(&s);
         assert_eq!((h.rerolls, h.banishes, h.skips), (1, 1, 1));
         assert_eq!(h.banished, vec![victim]);
+    }
+
+    #[test]
+    fn chests_reveal_upgrades_and_queue_behind_overlays() {
+        let mut g = Game::new(15);
+        g.start("diff=rookie");
+        g.open_chest();
+        let c = g.chest.as_ref().unwrap();
+        assert_eq!(c.picks.len(), 3, "first chest is generous");
+        let total: u32 = crate::upgrades::ALL.iter().map(|u| g.ups.get(*u) as u32).sum();
+        assert_eq!(total, 3, "picks are applied on open");
+        assert_eq!(g.phase, Phase::LevelUp);
+        // first press skips the spin, second closes
+        assert!(g.close_chest());
+        assert!(g.chest.is_some());
+        assert!(g.close_chest());
+        assert!(g.chest.is_none());
+        assert_eq!(g.phase, Phase::Playing);
+        // a chest picked up during a level-up waits its turn
+        g.pending_levels = 1;
+        g.open_levelup();
+        g.pending_chests = 1;
+        g.choose(0);
+        let mut t = 0.0;
+        for _ in 0..4 {
+            t += 16.7;
+            g.frame(t);
+        }
+        assert!(g.chest.is_some(), "queued chest opens after the level-up");
     }
 }
