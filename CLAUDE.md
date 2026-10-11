@@ -140,7 +140,7 @@ Not scheduled yet; design notes for when we pick it up.
   - Squash and stretch on hit, plus directional knockback tilt.
   - Death variety: gib limbs or dissolve on elemental kills.
   - Corpses fade instead of popping.
-- [ ] J3 (M) **Dynamic light.** A light-mask pass after the world draw: player flashlight cone that follows aim, plus muzzle, explosion, nova and lightning lights punching holes in the night overlay (`draw_lighting`).
+- [x] J3 (M) **Dynamic light.** A light-mask pass after the world draw: player flashlight cone that follows aim, plus muzzle, explosion, nova and lightning lights punching holes in the night overlay (`draw_lighting`).
 - [ ] J4 (M) **Audio 2.0.**
   - Layered gun sounds (transient, body, tail).
   - Low-HP heartbeat and muffle filter.

@@ -1904,14 +1904,16 @@ impl Game {
         } else {
             (0.42 + self.wave.n as f32 * 0.012).min(0.72)
         };
-        if let Ok(g) =
-            c.create_radial_gradient(d(sp.x), d(sp.y), d(inner), d(sp.x), d(sp.y), d(outer))
-        {
-            let _ = g.add_color_stop(0.0, "rgba(4,6,18,0)");
-            let _ = g.add_color_stop(0.55, &format!("rgba(4,6,18,{:.3})", dark * 0.6));
-            let _ = g.add_color_stop(1.0, &format!("rgba(2,3,10,{:.3})", dark + 0.15));
-            c.set_fill_style_canvas_gradient(&g);
-            c.fill_rect(0.0, 0.0, d(w), d(h));
+        if !self.draw_light_mask(c, w, h, ppos, dark, cy) {
+            if let Ok(g) =
+                c.create_radial_gradient(d(sp.x), d(sp.y), d(inner), d(sp.x), d(sp.y), d(outer))
+            {
+                let _ = g.add_color_stop(0.0, "rgba(4,6,18,0)");
+                let _ = g.add_color_stop(0.55, &format!("rgba(4,6,18,{:.3})", dark * 0.6));
+                let _ = g.add_color_stop(1.0, &format!("rgba(2,3,10,{:.3})", dark + 0.15));
+                c.set_fill_style_canvas_gradient(&g);
+                c.fill_rect(0.0, 0.0, d(w), d(h));
+            }
         }
         // cool moonlight tint
         c.set_global_alpha(0.07);

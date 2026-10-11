@@ -13,6 +13,7 @@ mod math;
 mod modes;
 mod net;
 mod render;
+mod render_light;
 mod render_map;
 mod status;
 mod upgrades;
