@@ -60,6 +60,8 @@ fn run() -> Result<(), JsValue> {
     // Log Rust panics as readable console errors (release builds abort on panic).
     std::panic::set_hook(Box::new(|info| {
         web_sys::console::error_1(&format!("Undead Horizon crashed: {info}").into());
+        // the frame loop is dead after a panic: tell the UI so it can offer a reload
+        ui_event("crash", &info.to_string());
     }));
     let win = window();
     let doc = win.document().expect("no document");

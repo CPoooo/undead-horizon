@@ -572,6 +572,15 @@
         show('pause');
         break;
       case 'resume': state = 'playing'; show(null); break;
+      case 'crash': {
+        state = 'crash';
+        show('auth');
+        $('auth-title').textContent = 'Something went wrong';
+        $('auth-body').innerHTML = `<p class="sub">The game hit an error and stopped. Your account progress is safe. Reload to keep playing.</p>
+          <button class="btn" onclick="location.reload()">↻ Reload</button>
+          <details style="margin-top:12px;color:var(--muted);font-size:12px"><summary>Details</summary><pre style="white-space:pre-wrap">${esc(data)}</pre></details>`;
+        break;
+      }
       case 'autoaim': settings.autoaim = data === '1'; applySettings(); break;
       case 'saved': {
         const r = lastPause ? lastPause.run : {};
