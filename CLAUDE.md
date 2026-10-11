@@ -269,7 +269,8 @@ Original design notes:
   - Ping wheel: "Here", "Enemy", "Need revive", "Box here".
   - World markers and minimap pings, plus quick-chat emotes.
 - [x] M6 (S) **End-of-match scoreboard.** Kills, downs, revives, points, damage, MVP; per-player stats via events.
-- [ ] M7 (M) **Public parties and Quick Play.** Opt-in public parties listed via the social server; auto-fill to 3–4.
+- [x] M7 (M) **Public parties and Quick Play.** Opt-in public parties listed via the social server; auto-fill to 3–4.
+  - `parties.public`; `party.public {on}` (host), `party.list` → `{t:'parties'}` (public, room left, host online, no blocks either way, fullest first), `quickplay` joins the fullest squad or hosts a public one. Public parties can be joined without an invite; joining one mid-match auto-sends the M2 `joinreq`. Needs `npm run db:schema && npm run deploy:api`.
 - [x] M8 (S) **Lobby text chat.** Rate limit, length cap, a basic profanity filter, and block/report (server table).
 - [x] M9 (S) **Co-op modes.** Campaign co-op: the host's chapter, with progress credited to all who have it unlocked.
   - Party mode `campaign` + `parties.chapter` (clamped server-side to the host's unlocked chapter). The host broadcasts `E_VICTORY` (protocol 13) so clients replay the chapter win (and the Siege win, which clients used to miss). `/runs` only credits a chapter win when `chapter <= campaign.unlocked`.

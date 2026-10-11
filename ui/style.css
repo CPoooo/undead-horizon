@@ -468,3 +468,11 @@ body.reduce-motion *, body.reduce-motion *::before { transition: none !important
 .seg.party-mode { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
 .party-ch select { width: 100%; padding: 8px; border-radius: 8px; background: rgba(0,0,0,.35); color: var(--text); border: 1px solid var(--line); font-weight: 700; }
 .party-ch .hint { margin-top: 4px; }
+
+/* public squads (Quick Play / browser) */
+.empty-party .row { display: flex; gap: 6px; flex-wrap: wrap; }
+.pub-list { display: grid; gap: 6px; margin-top: 8px; max-height: 220px; overflow: auto; }
+.pub { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: rgba(0,0,0,.28); border: 1px solid var(--line); font-size: 12px; }
+.pub span:first-child { flex: 1; min-width: 0; }
+.pub .n { color: var(--muted); font-weight: 800; }
+.pub-toggle { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }

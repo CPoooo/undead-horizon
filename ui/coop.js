@@ -133,7 +133,12 @@
           const l = look();
           if (mine && (mine.look?.skin !== l.skin || mine.look?.hat !== l.hat || mine.look?.gun !== l.gun)) wsSend({ t: 'party.look', look: l });
         }
-        if (!was && S.party) { UI().toast('You\'re in a party. Invite friends or share the link!'); iceServers(); }
+        if (!was && S.party) { if (!S.qpJoin) UI().toast('You\'re in a party. Invite friends or share the link!'); iceServers(); S.publicList = null; }
+        // joined a public squad mid-match (Quick Play / browser): ask to drop in
+        if (S.qpJoin && p && p.hostId !== S.me?.id && p.members.length > 1) {
+          S.qpJoin = false;
+          if (p.status === 'in_game' && !S.inGame && !S.loading) wsSend({ t: 'signal', to: p.hostId, data: { kind: 'joinreq', sid: String(p.seed || p.id) } });
+        } else if (S.qpJoin && p && p.hostId === S.me?.id) S.qpJoin = false;
         if (S.party && S.party.diff) UI().setDiff?.(S.party.diff, S.party.hostId !== S.me?.id);
         if (!S.party) UI().setDiff?.(null, false);
         break;
@@ -145,6 +150,9 @@
         break;
       case 'invite':
         showInvite(m.partyId, m.fromName);
+        break;
+      case 'parties':
+        S.publicList = Array.isArray(m.list) ? m.list : [];
         break;
       case 'signal':
         if (typeof m.data?.kind === 'string' && m.data.kind.startsWith('v-')) emit('voice-signal', m);
@@ -164,7 +172,7 @@
         UI().toast(m.msg);
         break;
     }
-    if (m.t === 'party' || m.t === 'party.start' || m.t === 'social' || m.t === 'hello') emit(m.t, m);
+    if (m.t === 'party' || m.t === 'party.start' || m.t === 'social' || m.t === 'hello' || m.t === 'parties') emit(m.t, m);
     render();
   }
 
@@ -238,9 +246,17 @@
       return;
     }
     if (!S.party) {
-      box.innerHTML = `<div class="party empty-party"><b>👥 Co-op</b><span>Play with up to 3 friends.</span>
-        <button class="btn small blue" id="party-create">Create party</button></div>`;
+      const list = S.publicList;
+      box.innerHTML = `<div class="party empty-party"><b>👥 Co-op</b><span>Play with up to 3 friends, or squad up with anyone.</span>
+        <div class="row"><button class="btn small blue" id="party-create">Create party</button>
+        <button class="btn small gold" id="quickplay" title="Join the fullest public squad with room, or host one">⚡ Quick Play</button></div>
+        <button class="btn small secondary" id="party-browse">🌐 Browse public squads</button>
+        ${list ? `<div class="pub-list">${list.length ? list.map((x) => `<div class="pub"><span><b>${esc(x.host)}</b> · ${MODE_LABEL[x.mode] || esc(x.mode)}${x.mode === 'campaign' ? ` ch.${x.chapter + 1}` : ''} · ${esc(window.UHDiffName?.(x.diff) || x.diff)}${x.status === 'in_game' ? ' · ⚔ in match' : ''}</span><span class="n">${x.n}/4</span><button class="btn small" data-pjoin="${esc(x.id)}">Join</button></div>`).join('') : '<div class="hint">No public squads right now. Quick Play hosts one for you.</div>'}</div>` : ''}
+      </div>`;
       $('party-create').onclick = () => wsSend({ t: 'party.create', look: look() });
+      $('quickplay').onclick = () => { send('sfx|click'); S.qpJoin = true; wsSend({ t: 'quickplay', look: look() }); UI().toast('Finding a squad…'); };
+      $('party-browse').onclick = () => { send('sfx|click'); wsSend({ t: 'party.list' }); };
+      box.querySelectorAll('[data-pjoin]').forEach((b) => (b.onclick = () => { S.qpJoin = true; wsSend({ t: 'party.join', partyId: b.dataset.pjoin, look: look() }); }));
       return;
     }
     const p = S.party;
@@ -263,6 +279,7 @@
       <div class="seg party-mode" style="margin-top:8px">${['infinite', 'campaign', 'outbreak', 'siege'].map((m) =>
         `<button data-pmode="${m}" class="${(p.mode || 'infinite') === m ? 'on' : ''}" ${amHost ? '' : 'disabled'}>${MODE_LABEL[m]}</button>`).join('')}</div>
       ${p.mode === 'campaign' ? chapterRow(p, amHost) : ''}
+      ${amHost ? `<label class="pub-toggle"><input type="checkbox" id="party-public" ${p.public ? 'checked' : ''}> 🌐 Public: anyone can join (Quick Play fills empty slots)</label>` : p.public ? '<div class="hint">🌐 Public squad</div>' : ''}
       <div id="voice-ctl"></div>
       <div class="row" style="margin-top:8px">
         <button class="btn small secondary" id="party-link" title="Anyone signed in with this link joins your party and becomes your friend">${canShare() ? '📤 Share invite link' : '🔗 Copy invite link'}</button>
@@ -277,6 +294,7 @@
     $('party-link').onclick = () => shareInvite();
     $('party-leave').onclick = () => wsSend({ t: 'party.leave' });
     box.querySelectorAll('[data-pmode]').forEach((b) => (b.onclick = () => { if (amHost) wsSend({ t: 'party.mode', mode: b.dataset.pmode, chapter: p.chapter || 0 }); }));
+    if ($('party-public')) $('party-public').onchange = (e) => wsSend({ t: 'party.public', on: e.target.checked });
     if ($('party-ch')) $('party-ch').onchange = (e) => { if (amHost) wsSend({ t: 'party.mode', mode: 'campaign', chapter: Number(e.target.value) }); };
     if ($('party-ready')) $('party-ready').onclick = () => { send('sfx|click'); wsSend({ t: 'party.ready', ready: !me?.ready }); };
     if ($('party-start')) $('party-start').onclick = () => wsSend({ t: 'party.start' });

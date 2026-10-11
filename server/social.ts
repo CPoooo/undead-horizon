@@ -10,9 +10,10 @@
 //   | { t: "party.create"|"party.leave"|"party.start"|"party.end" }
 //   | { t: "party.invite"|"party.kick", id } | { t: "party.join"|"party.decline", partyId }
 //   | { t: "party.ready", ready } | { t: "party.diff", diff } | { t: "party.mode", mode, chapter? } | { t: "party.look", look }
+//   | { t: "party.public", on } | { t: "party.list", mode? } | { t: "quickplay", mode?, look? }
 //   | { t: "signal", to, data } | { t: "ping" }
 //   | { t: "chat", text } | { t: "party.voice", on } | { t: "block"|"unblock", id } | { t: "report", id, reason, message }
-// Server -> client: hello, social, party, party.start, invite, signal, chat, toast, error, ping
+// Server -> client: hello, social, party, party.start, invite, signal, chat, toast, error, ping, parties
 import { Hono } from "hono";
 import { upgradeWebSocket } from "@neon/functions/hono";
 import { pool, verifyToken, ensureProfile } from "./shared";
@@ -188,6 +189,7 @@ async function partyState(uid: string) {
     diff: pa.diff,
     mode: pa.mode ?? "infinite",
     chapter: pa.chapter ?? 0,
+    public: !!pa.public,
     status: pa.status,
     seed: pa.seed ? String(pa.seed) : null,
     members: m.rows,
@@ -224,6 +226,57 @@ async function leaveParty(uid: string) {
   }
   await notify(rest.rows.map((r) => r.user_id), { k: "party" });
   await notify([uid], { k: "party" });
+}
+
+async function joinParty(uid: string, partyId: string, look: unknown) {
+  const cur = await partyOf(uid);
+  if (cur && String(cur.id) !== partyId) await leaveParty(uid);
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const pa = await client.query("select * from parties where id = $1 for update", [partyId]);
+    // joining mid-match is fine: the newcomer asks the host to drop them in (M2)
+    if (!pa.rows[0] || !["open", "in_game"].includes(pa.rows[0].status)) throw new Error("That party is no longer open.");
+    const n = await client.query("select count(*)::int as n from party_members where party_id = $1", [partyId]);
+    if (n.rows[0].n >= MAX_PARTY) throw new Error("Party is full (max 4).");
+    await client.query(
+      "insert into party_members (party_id, user_id, look) values ($1, $2, $3) on conflict do nothing",
+      [partyId, uid, look ?? {}],
+    );
+    await client.query("delete from party_invites where party_id = $1 and to_id = $2", [partyId, uid]);
+    await client.query("commit");
+  } catch (e) {
+    await client.query("rollback");
+    throw e;
+  } finally {
+    client.release();
+  }
+  await notify(await memberIds(partyId), { k: "party" });
+  await notify([uid], { k: "social" });
+}
+
+const MODES = ["infinite", "campaign", "outbreak", "siege"];
+
+// Public parties with room whose host is online, skipping anyone the caller
+// blocked (or who blocked them). Fullest first, so Quick Play fills squads.
+async function publicParties(uid: string, mode?: string) {
+  const r = await pool.query(
+    `select pa.id::text as id, pa.mode, pa.diff, pa.chapter, pa.status, hp.display_name as host,
+            (select count(*)::int from party_members m where m.party_id = pa.id) as n
+     from parties pa
+     join profiles hp on hp.user_id = pa.host_id
+     join presence pr on pr.user_id = pa.host_id and pr.last_seen > now() - interval '${ONLINE_WINDOW}'
+     where pa.public and pa.status in ('open', 'in_game')
+       and ($2::text is null or pa.mode = $2)
+       and not exists (select 1 from party_members m where m.party_id = pa.id and m.user_id = $1)
+       and not exists (select 1 from party_members m join blocks b
+                       on (b.user_id = $1 and b.blocked_id = m.user_id) or (b.user_id = m.user_id and b.blocked_id = $1)
+                       where m.party_id = pa.id)
+     order by n desc, pa.created_at
+     limit 20`,
+    [uid, mode && MODES.includes(mode) ? mode : null],
+  );
+  return r.rows.filter((x) => x.n < MAX_PARTY);
 }
 
 // ---------------------------------------------------------------- commands
@@ -329,33 +382,13 @@ async function handle(uid: string, msg: any): Promise<void> {
           await notify([uid, host], { k: "social" });
         }
       } else {
-        const inv = await pool.query("select 1 from party_invites where party_id = $1 and to_id = $2", [partyId, uid]);
+        const inv = await pool.query(
+          "select 1 from party_invites where party_id = $1 and to_id = $2 union all select 1 from parties where id = $1 and public",
+          [partyId, uid],
+        );
         if (!inv.rowCount) throw new Error("That invite has expired.");
       }
-      const cur = await partyOf(uid);
-      if (cur && String(cur.id) !== partyId) await leaveParty(uid);
-      const client = await pool.connect();
-      try {
-        await client.query("begin");
-        const pa = await client.query("select * from parties where id = $1 for update", [partyId]);
-        // joining mid-match is fine: the newcomer asks the host to drop them in (M2)
-        if (!pa.rows[0] || !["open", "in_game"].includes(pa.rows[0].status)) throw new Error("That party is no longer open.");
-        const n = await client.query("select count(*)::int as n from party_members where party_id = $1", [partyId]);
-        if (n.rows[0].n >= MAX_PARTY) throw new Error("Party is full (max 4).");
-        await client.query(
-          "insert into party_members (party_id, user_id, look) values ($1, $2, $3) on conflict do nothing",
-          [partyId, uid, msg.look ?? {}],
-        );
-        await client.query("delete from party_invites where party_id = $1 and to_id = $2", [partyId, uid]);
-        await client.query("commit");
-      } catch (e) {
-        await client.query("rollback");
-        throw e;
-      } finally {
-        client.release();
-      }
-      await notify(await memberIds(partyId), { k: "party" });
-      await notify([uid], { k: "social" });
+      await joinParty(uid, partyId, msg.look);
       if (viaLink) {
         const me = await ensureProfile(uid);
         await notify((await memberIds(partyId)).filter((x) => x !== uid), { k: "toast", msg: `${me.display_name} joined the party` });
@@ -423,6 +456,40 @@ async function handle(uid: string, msg: any): Promise<void> {
       await pool.query("update parties set mode = $2, chapter = $3 where id = $1", [pa.id, msg.mode, chapter]);
       await notify(await memberIds(pa.id), { k: "party" });
       return;
+    }
+    case "party.public": {
+      const pa = await partyOf(uid);
+      if (!pa || pa.host_id !== uid) throw new Error("Only the host can make the party public.");
+      await pool.query("update parties set public = $2 where id = $1", [pa.id, !!msg.on]);
+      await notify(await memberIds(pa.id), { k: "party" });
+      return;
+    }
+    case "party.list":
+      return sendUser(uid, { t: "parties", list: await publicParties(uid, msg.mode ? String(msg.mode) : undefined) });
+    case "quickplay": {
+      // join the fullest public squad with room (any mode if none given), or host a new public one
+      const mode = MODES.includes(msg.mode) ? String(msg.mode) : undefined;
+      const cur = await partyOf(uid);
+      if (cur && (await memberIds(cur.id)).length > 1) throw new Error("Leave your party first to use Quick Play.");
+      for (const cand of await publicParties(uid, mode)) {
+        try {
+          await joinParty(uid, cand.id, msg.look);
+          const me = await ensureProfile(uid);
+          await notify((await memberIds(cand.id)).filter((x) => x !== uid), { k: "toast", msg: `${me.display_name} joined via Quick Play` });
+          return sendUser(uid, { t: "toast", msg: `Joined ${cand.host}'s squad` });
+        } catch {
+          // filled up or closed in the meantime: try the next one
+        }
+      }
+      if (cur) {
+        await pool.query("update parties set public = true, mode = coalesce($2, mode) where id = $1", [cur.id, mode ?? null]);
+      } else {
+        const pa = await pool.query("insert into parties (host_id, public, mode) values ($1, true, $2) returning id", [uid, mode ?? "infinite"]);
+        await pool.query("insert into party_members (party_id, user_id, ready, look) values ($1, $2, true, $3)", [pa.rows[0].id, uid, msg.look ?? {}]);
+        await notify(await friendIds(uid), { k: "social" });
+      }
+      await notify([uid], { k: "party" });
+      return sendUser(uid, { t: "toast", msg: "No open squads right now: you're hosting a public party. Players will fill in." });
     }
     case "party.kick": {
       const pa = await partyOf(uid);

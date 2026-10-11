@@ -192,3 +192,7 @@ create or replace view balance_upgrades as
 alter table parties add column if not exists chapter int not null default 0;
 alter table parties drop constraint if exists parties_mode_check;
 alter table parties add constraint parties_mode_check check (mode in ('infinite','campaign','outbreak','siege'));
+
+-- Public parties and Quick Play: anyone can join a public party with room.
+alter table parties add column if not exists public boolean not null default false;
+create index if not exists parties_public_idx on parties (created_at) where public;
