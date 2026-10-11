@@ -51,7 +51,7 @@ cargo build --target wasm32-unknown-unknown        # fast type-check
   - **Lobby:** party members stand next to you in the lobby showcase.
 
 - [x] 11. **Separate save slots**: one Infinite save and one Campaign save, which can coexist. Starting a new run of a mode overwrites that mode's save. Tooltips on Play and Save warn before that happens.
-- [ ] 12. **Lobby music picker** *(→ Roadmap v2 · V5)*: let players choose the lobby song on the home screen (cycle through pre-made procedural tunes). The first lobby tune ("Graveyard Shuffle") is in `src/audio.rs`; tunes should be data-driven so new ones are easy to add.
+- [x] 12. **Lobby music picker** *(→ Roadmap v2 · V5)*: let players choose the lobby song on the home screen (cycle through pre-made procedural tunes). The first lobby tune ("Graveyard Shuffle") is in `src/audio.rs`; tunes should be data-driven so new ones are easy to add.
 - [ ] 13. **Make it playable in Safari and on mobile** *(→ Roadmap v2 · A3)* *(mobile layout done; Safari and iOS real-device testing still open)*. Done so far:
   - **Lobby:** the phone lobby uses a bottom nav with one panel at a time, a lifted character showcase, and large touch targets.
   - **Level-up:** cards stack vertically on narrow screens.
@@ -274,7 +274,7 @@ Original design notes:
 - [ ] V2 (M) **Biomes.** Biome regions in the procedural world (graveyard, pine forest, town ruins, snowfield) with biome props and native zombie variants (via F1).
 - [ ] V3 (S) **Destructibles.** Explosive barrels, breakable crates (drops), and environmental kills.
 - [ ] V4 (M) **Character polish.** Better animation (procedural walk bob, reload, hurt flinch) and new cosmetic slots: backpack, kill effect, death effect, emote.
-- [ ] V5 (S) **Music picker.** Implements item 12: a data-driven tune list in `audio.rs` and a selector in Settings.
+- [x] V5 (S) **Music picker.** Implements item 12: a data-driven tune list in `audio.rs` and a selector in Settings.
 - [ ] V6 (S) **Story presentation.** Campaign dialogue portraits and panel cutscenes in the story overlay.
 
 ### M9 · Platform, UX & accessibility

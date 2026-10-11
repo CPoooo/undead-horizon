@@ -465,6 +465,10 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
         "menu" => g.to_menu(),
         "vol" => g.audio.set_volume(a.parse().unwrap_or(0.7)),
         "music" => g.audio.set_music_volume(a.parse().unwrap_or(0.5)),
+        "tune" => {
+            g.audio.lobby_tune = a.parse::<usize>().unwrap_or(0) % audio::LOBBY_TUNES.len();
+            g.ui_out.push(("tune", audio::LOBBY_TUNES[g.audio.lobby_tune].name.to_string()));
+        }
         "autoaim" => g.auto_aim = a == "1",
         "lookahead" => g.lookahead = a.parse::<f32>().unwrap_or(1.0).clamp(0.0, 2.0),
         "dash" => g.input.dash_req = true,

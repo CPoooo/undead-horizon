@@ -338,6 +338,7 @@
   function applySettings() {
     renderXSettings();
     for (const x of XSETTINGS) if (x.cmd) send(x.cmd(settings[x.key]));
+    send('tune|' + (settings.tune || 0));
     for (const id of ['vol', 'vol2']) $(id).value = settings.vol;
     for (const id of ['music', 'music2']) $(id).value = settings.music;
     for (const id of ['autoaim', 'autoaim2']) $(id).checked = settings.autoaim;
@@ -811,6 +812,8 @@
     send(`start|mode=hub;name=${playerName()};diff=${settings.diff};${equipString()}`);
   }
   on('hub-btn', 'click', enterHub);
+  // lobby music picker (tunes live in src/audio.rs LOBBY_TUNES)
+  on('tune-btn', 'click', () => { settings.tune = ((settings.tune || 0) + 1) % 4; saveSettings(); send('tune|' + settings.tune); });
   // party members walking around the hub, and their chat as speech bubbles
   setInterval(() => {
     if (state !== 'hub') return;
@@ -951,6 +954,7 @@
         if (stall) { closeStall(); break; }
         if (confirm('Leave the Home Base and return to the lobby?')) { toMenu(); }
         break;
+      case 'tune': $('tune-btn').textContent = `🎵 ${data} ▸`; break;
       case 'usebtn': $('t-use').classList.toggle('on', data === '1'); break;
       case 'readybtn': $('t-ready').classList.toggle('on', data === '1'); break;
       case 'haptic': {

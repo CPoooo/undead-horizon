@@ -92,7 +92,117 @@ pub struct Audio {
     pub music_on: bool,
     /// which tune plays: gameplay score or the lobby theme
     track: Track,
+    /// index into LOBBY_TUNES
+    pub lobby_tune: usize,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Drums {
+    Shuffle,
+    Disco,
+    Halftime,
+    None,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Lead {
+    Theremin,
+    Bell,
+    Square,
+}
+
+/// A lobby tune: tempo, feel, 4 chords (bass notes) and an 8-bar melody.
+pub struct LobbyTune {
+    pub name: &'static str,
+    pub bpm: f64,
+    /// 0 = straight 16ths, 0.24 = heavy swing
+    pub swing: f64,
+    pub chords: [[i32; 4]; 4],
+    pub melody: &'static [(u32, u32, i32, u32)],
+    pub lead: Lead,
+    pub drums: Drums,
+    pub bass: OscillatorType,
+    pub stabs: bool,
+    pub moan: bool,
+}
+
+pub const LOBBY_TUNES: [LobbyTune; 4] = [
+    LobbyTune {
+        name: "Graveyard Shuffle",
+        bpm: 116.0,
+        swing: 0.24,
+        chords: [[38, 41, 45, 41], [34, 38, 41, 38], [31, 34, 38, 34], [33, 37, 40, 37]],
+        melody: &[
+            (0, 0, 74, 3), (0, 4, 77, 2), (0, 6, 76, 2), (0, 8, 74, 4), (0, 14, 69, 2),
+            (1, 0, 70, 6), (1, 8, 74, 2), (1, 10, 73, 2), (1, 12, 70, 4),
+            (2, 0, 67, 3), (2, 4, 70, 2), (2, 6, 74, 2), (2, 8, 79, 6),
+            (3, 0, 76, 3), (3, 4, 73, 3), (3, 8, 69, 8),
+            (6, 0, 81, 4), (6, 6, 79, 2), (6, 8, 77, 4), (7, 0, 76, 4), (7, 4, 73, 4), (7, 8, 74, 8),
+        ],
+        lead: Lead::Theremin,
+        drums: Drums::Shuffle,
+        bass: OscillatorType::Sawtooth,
+        stabs: true,
+        moan: true,
+    },
+    LobbyTune {
+        name: "Midnight Bloom",
+        bpm: 84.0,
+        swing: 0.0,
+        chords: [[33, 36, 40, 36], [29, 33, 36, 33], [36, 40, 43, 40], [31, 35, 38, 35]],
+        melody: &[
+            (0, 0, 76, 4), (0, 4, 74, 2), (0, 6, 72, 2), (0, 8, 69, 8),
+            (1, 0, 72, 4), (1, 4, 74, 4), (1, 8, 76, 8),
+            (2, 0, 79, 6), (2, 8, 77, 4), (2, 12, 76, 4),
+            (3, 0, 74, 12),
+            (4, 0, 81, 4), (4, 4, 79, 4), (4, 8, 76, 8),
+            (5, 0, 77, 4), (5, 4, 76, 4), (5, 8, 72, 8),
+            (6, 0, 74, 4), (6, 4, 72, 4), (6, 8, 71, 8), (7, 0, 69, 16),
+        ],
+        lead: Lead::Bell,
+        drums: Drums::Halftime,
+        bass: OscillatorType::Sine,
+        stabs: false,
+        moan: true,
+    },
+    LobbyTune {
+        name: "Dead Man's Disco",
+        bpm: 124.0,
+        swing: 0.0,
+        chords: [[40, 43, 47, 43], [36, 40, 43, 40], [43, 47, 50, 47], [38, 42, 45, 42]],
+        melody: &[
+            (0, 0, 76, 2), (0, 2, 76, 2), (0, 6, 79, 2), (0, 8, 76, 2), (0, 12, 74, 4),
+            (1, 0, 72, 2), (1, 2, 72, 2), (1, 6, 76, 2), (1, 8, 72, 2), (1, 12, 71, 4),
+            (2, 0, 79, 2), (2, 2, 79, 2), (2, 6, 83, 2), (2, 8, 79, 2), (2, 12, 78, 4),
+            (3, 0, 74, 4), (3, 4, 76, 4), (3, 8, 78, 8),
+            (6, 0, 88, 2), (6, 4, 86, 2), (6, 8, 83, 4), (7, 0, 79, 4), (7, 8, 76, 8),
+        ],
+        lead: Lead::Square,
+        drums: Drums::Disco,
+        bass: OscillatorType::Square,
+        stabs: true,
+        moan: false,
+    },
+    LobbyTune {
+        name: "Lighthouse Lullaby",
+        bpm: 72.0,
+        swing: 0.08,
+        chords: [[36, 40, 43, 40], [33, 36, 40, 36], [29, 33, 36, 33], [31, 35, 38, 35]],
+        melody: &[
+            (0, 0, 72, 6), (0, 8, 76, 4), (0, 12, 79, 4),
+            (1, 0, 81, 8), (1, 8, 79, 8),
+            (2, 0, 77, 6), (2, 8, 76, 4), (2, 12, 74, 4),
+            (3, 0, 74, 16),
+            (4, 0, 72, 6), (4, 8, 76, 4), (4, 12, 79, 4),
+            (5, 0, 84, 8), (5, 8, 83, 8), (6, 0, 81, 6), (6, 8, 77, 8), (7, 0, 72, 16),
+        ],
+        lead: Lead::Bell,
+        drums: Drums::None,
+        bass: OscillatorType::Triangle,
+        stabs: false,
+        moan: false,
+    },
+];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Track {
@@ -124,6 +234,7 @@ impl Audio {
             intensity: 0.0,
             music_on: true, // lobby theme starts as soon as audio is unlocked
             track: Track::Lobby,
+            lobby_tune: 0,
         }
     }
 
@@ -617,114 +728,82 @@ impl Audio {
     fn lobby_step(&mut self, bus: &AudioNode, t: f64, sixteenth: f64) -> Option<()> {
         use BiquadFilterType as F;
         use OscillatorType as O;
+        let tune = &LOBBY_TUNES[self.lobby_tune % LOBBY_TUNES.len()];
         let mtof = |m: i32| 440.0 * 2f32.powf((m - 69) as f32 / 12.0);
         let b = self.beat;
         let st = b % 16;
         let bar = (b / 16) % 8;
-        // chord per bar: Dm, Bb, Gm, A  (x2)
-        let chords: [[i32; 4]; 4] = [
-            [38, 41, 45, 41],
-            [34, 38, 41, 38],
-            [31, 34, 38, 34],
-            [33, 37, 40, 37],
-        ];
-        let ch = chords[(bar % 4) as usize];
-        // walking bass on each beat (steps 0, 4, 8, 12)
+        let ch = tune.chords[(bar % 4) as usize];
+        // bass on each beat (walking through the chord)
         if st % 4 == 0 {
             let n = ch[(st / 4) as usize];
             let f = mtof(n);
             self.tone(bus, O::Triangle, t, f, f, sixteenth * 3.2, 0.32, 0.005)?;
-            self.tone(
-                bus,
-                O::Sawtooth,
-                t,
-                f,
-                f * 0.995,
-                sixteenth * 1.6,
-                0.05,
-                0.005,
-            )?;
+            self.tone(bus, tune.bass, t, f, f * 0.995, sixteenth * 1.6, 0.05, 0.005)?;
         }
-        // organ stabs on the offbeats ("and" of each beat)
-        if st % 4 == 2 {
+        // chord stabs on the offbeats
+        if tune.stabs && st % 4 == 2 {
             for (k, n) in [ch[0] + 24, ch[1] + 24, ch[2] + 24].iter().enumerate() {
                 let f = mtof(*n);
                 let det = 1.0 + (k as f32 - 1.0) * 0.004;
-                self.tone(
-                    bus,
-                    O::Square,
-                    t,
-                    f * det,
-                    f * det,
-                    sixteenth * 1.4,
-                    0.022,
-                    0.004,
-                )?;
+                self.tone(bus, O::Square, t, f * det, f * det, sixteenth * 1.4, 0.022, 0.004)?;
             }
         }
-        // drums: kick 1 & 3, clap 2 & 4, swung hats
-        if st == 0 || st == 8 || (bar % 2 == 1 && st == 14) {
-            self.tone(bus, O::Sine, t, 140.0, 42.0, 0.16, 0.5, 0.003)?;
+        // drums
+        match tune.drums {
+            Drums::Shuffle | Drums::Disco => {
+                let four = tune.drums == Drums::Disco;
+                if (four && st % 4 == 0) || (!four && (st == 0 || st == 8 || (bar % 2 == 1 && st == 14))) {
+                    self.tone(bus, O::Sine, t, 140.0, 42.0, 0.16, 0.5, 0.003)?;
+                }
+                if st == 4 || st == 12 {
+                    self.noise(bus, t, F::Bandpass, 1600.0, 1200.0, 1.2, 0.12, 0.2)?;
+                    self.noise(bus, t + 0.012, F::Bandpass, 2100.0, 1500.0, 1.5, 0.08, 0.12)?;
+                }
+                if st % 2 == 0 || (four && st % 2 == 1) {
+                    let open = if four { st % 4 == 2 } else { st % 8 == 6 };
+                    self.noise(bus, t, F::Highpass, 8000.0, 8000.0, 0.7, if open { 0.12 } else { 0.035 }, 0.05)?;
+                }
+            }
+            Drums::Halftime => {
+                if st == 0 {
+                    self.tone(bus, O::Sine, t, 120.0, 40.0, 0.25, 0.45, 0.003)?;
+                }
+                if st == 8 {
+                    self.noise(bus, t, F::Bandpass, 1400.0, 900.0, 1.0, 0.25, 0.16)?;
+                }
+                if st % 4 == 2 {
+                    self.noise(bus, t, F::Highpass, 9000.0, 9000.0, 0.7, 0.03, 0.03)?;
+                }
+            }
+            Drums::None => {}
         }
-        if st == 4 || st == 12 {
-            self.noise(bus, t, F::Bandpass, 1600.0, 1200.0, 1.2, 0.12, 0.2)?;
-            self.noise(bus, t + 0.012, F::Bandpass, 2100.0, 1500.0, 1.5, 0.08, 0.12)?;
-        }
-        if st % 2 == 0 {
-            let open = st % 8 == 6;
-            self.noise(
-                bus,
-                t,
-                F::Highpass,
-                8000.0,
-                8000.0,
-                0.7,
-                if open { 0.12 } else { 0.035 },
-                0.05,
-            )?;
-        }
-        // theremin melody: (bar, step, midi note, length in 16ths)
-        const MELODY: [(u32, u32, i32, u32); 22] = [
-            (0, 0, 74, 3),
-            (0, 4, 77, 2),
-            (0, 6, 76, 2),
-            (0, 8, 74, 4),
-            (0, 14, 69, 2),
-            (1, 0, 70, 6),
-            (1, 8, 74, 2),
-            (1, 10, 73, 2),
-            (1, 12, 70, 4),
-            (2, 0, 67, 3),
-            (2, 4, 70, 2),
-            (2, 6, 74, 2),
-            (2, 8, 79, 6),
-            (3, 0, 76, 3),
-            (3, 4, 73, 3),
-            (3, 8, 69, 8),
-            (6, 0, 81, 4),
-            (6, 6, 79, 2),
-            (6, 8, 77, 4),
-            (7, 0, 76, 4),
-            (7, 4, 73, 4),
-            (7, 8, 74, 8),
-        ];
-        for (mb, ms, note, len) in MELODY.iter() {
+        // melody: (bar, step, midi note, length in 16ths)
+        for (mb, ms, note, len) in tune.melody.iter() {
             if *mb == bar && *ms == st {
-                self.theremin(bus, t, mtof(*note), sixteenth * *len as f64 * 1.05, 0.075)?;
+                let dur = sixteenth * *len as f64 * 1.05;
+                match tune.lead {
+                    Lead::Theremin => self.theremin(bus, t, mtof(*note), dur, 0.075)?,
+                    Lead::Bell => {
+                        let f = mtof(*note);
+                        self.tone(bus, O::Sine, t, f, f, dur * 1.6, 0.07, 0.003)?;
+                        self.tone(bus, O::Sine, t, f * 2.76, f * 2.76, dur * 0.6, 0.02, 0.002)?;
+                    }
+                    Lead::Square => {
+                        let f = mtof(*note);
+                        self.tone(bus, O::Square, t, f, f, dur, 0.035, 0.004)?;
+                    }
+                }
             }
         }
-        // bars 4-5: call-and-response "boo-wah" low organ instead of melody
-        if (bar == 4 || bar == 5) && (st == 0 || st == 6) {
-            let f = mtof(ch[0] + 12);
-            self.tone(bus, O::Square, t, f * 1.06, f, sixteenth * 4.0, 0.035, 0.03)?;
-        }
-        // zombie moan pickup at the end of the loop
-        if bar == 7 && st == 12 {
+        if tune.moan && bar == 7 && st == 12 {
+            // zombie moan pickup at the end of the loop
             self.tone(bus, O::Sawtooth, t, 110.0, 70.0, 0.8, 0.06, 0.15)?;
             self.noise(bus, t, F::Bandpass, 520.0, 300.0, 9.0, 0.8, 0.07)?;
         }
         Some(())
     }
+
 
     pub fn update_music(&mut self) -> Option<()> {
         if !self.music_on {
@@ -740,12 +819,14 @@ impl Audio {
             self.next_beat = now + 0.05;
         }
         if self.track == Track::Lobby {
-            let sixteenth = 60.0 / 116.0 / 4.0;
+            let tune = &LOBBY_TUNES[self.lobby_tune % LOBBY_TUNES.len()];
+            let sixteenth = 60.0 / tune.bpm / 4.0;
+            let swing_amt = tune.swing;
             while self.next_beat < now + 0.2 {
                 let t = self.next_beat;
                 self.lobby_step(&bus, t, sixteenth)?;
                 // swing: long-short pairs of 16ths
-                let swing = if self.beat % 2 == 0 { 1.24 } else { 0.76 };
+                let swing = if self.beat % 2 == 0 { 1.0 + swing_amt } else { 1.0 - swing_amt };
                 self.next_beat += sixteenth * swing;
                 self.beat = self.beat.wrapping_add(1);
             }
