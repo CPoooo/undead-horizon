@@ -548,6 +548,8 @@ pub struct Game {
     pub daily: String,
     /// what landed the killing blow (balance telemetry)
     pub death_cause: String,
+    /// death recap: (time, source, damage) over the last few seconds
+    pub dmg_log: Vec<(f32, String, f32)>,
     pub want_tutorial: bool,
     pub relics: content::RelicBonus,
     pub camo: usize,
@@ -725,6 +727,7 @@ impl Game {
             mutators: content::Mutators::default(),
             daily: String::new(),
             death_cause: String::new(),
+            dmg_log: Vec::new(),
             want_tutorial: false,
             relics: content::RelicBonus::default(),
             camo: 0,
@@ -945,6 +948,7 @@ impl Game {
         self.pending_chests = 0;
         self.kills = 0;
         self.death_cause.clear();
+        self.dmg_log.clear();
         self.kind_kills = [0; 15];
         self.bosses_killed = 0;
         self.score = 0;
@@ -1935,11 +1939,35 @@ impl Game {
         self.audio.play(Sfx::Ultimate);
     }
 
+    /// Damage taken in the last 8s, grouped by source, most damaging first:
+    /// `{"src":"Runner","hits":3,"dmg":64}` items for the death screen.
+    fn recap_json(&self) -> String {
+        let mut by: Vec<(String, u32, f32)> = Vec::new();
+        for (t, src, d) in self.dmg_log.iter() {
+            if self.time - t > 8.0 {
+                continue;
+            }
+            match by.iter_mut().find(|e| &e.0 == src) {
+                Some(e) => {
+                    e.1 += 1;
+                    e.2 += d;
+                }
+                None => by.push((src.clone(), 1, *d)),
+            }
+        }
+        by.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        by.iter()
+            .take(4)
+            .map(|(s, n, d)| format!("{{\"src\":\"{}\",\"hits\":{},\"dmg\":{:.0}}}", s.replace('"', ""), n, d))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
     pub fn stats_json(&self) -> String {
         let name = self.player_name.replace(['\\', '"'], "");
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"candy\":{},\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{},\"mutated\":{},\"daily\":\"{}\",\"cause\":\"{}\",\"build\":\"{}\",\"squad\":[{}]}}",
+            "{{\"candy\":{},\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{},\"mutated\":{},\"daily\":\"{}\",\"cause\":\"{}\",\"recap\":[{}],\"build\":\"{}\",\"squad\":[{}]}}",
             self.candy,
             self.net.as_ref().map(|n| n.players()).unwrap_or(1),
             name,
@@ -1966,6 +1994,7 @@ impl Game {
             self.mutators.any(),
             self.daily,
             self.death_cause.replace('"', ""),
+            self.recap_json(),
             self.ups.0.iter().enumerate().filter(|(_, l)| **l > 0).map(|(i, l)| format!("{}:{}", i, l)).collect::<Vec<_>>().join(","),
             self.squad_json()
         )
@@ -3022,6 +3051,19 @@ impl Game {
             return;
         }
         let dmg = self.shield_block(dmg, from);
+        // death recap: who's been hurting us
+        let src = self
+            .zombies
+            .iter()
+            .filter(|z| !z.dead && z.pos.dist(from) < z.r + 40.0)
+            .min_by(|a, b| a.pos.dist2(from).partial_cmp(&b.pos.dist2(from)).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|z| if z.kind == ZKind::Boss { z.boss_var.name().to_string() } else { z.kind.def().name.to_string() })
+            .unwrap_or_else(|| "Projectile".into());
+        let now = self.time;
+        self.dmg_log.retain(|e| now - e.0 < 8.0);
+        if self.dmg_log.len() < 200 {
+            self.dmg_log.push((now, src, dmg.min(self.player.hp.max(0.0))));
+        }
         let p = &mut self.player;
         p.hp -= if self.mutators.onehit { p.hp + 1.0 } else { dmg };
         p.iframes = 0.65;

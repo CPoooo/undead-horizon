@@ -496,3 +496,9 @@ body.photo-mode #touch, body.photo-mode .touch-ui, body.photo-mode #chat-feed { 
 /* limited-time event card (Career tab) */
 .event-card { margin: 4px 0 16px; padding: 12px; border-radius: 12px; border: 1px solid #ff9a3c; background: linear-gradient(135deg, rgba(232,118,28,.22), rgba(60,20,70,.3)); display: grid; gap: 6px; }
 .event-card b { color: #ffb36a; }
+
+/* death recap */
+.recap { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; margin: 8px 0 4px; font-size: 13px; }
+.recap > b { color: #ff7a8a; width: 100%; text-align: center; }
+.recap .hint { width: 100%; text-align: center; margin-top: -4px; }
+.recap .rc { padding: 4px 10px; border-radius: 999px; background: rgba(255,80,100,.12); border: 1px solid rgba(255,80,100,.35); }

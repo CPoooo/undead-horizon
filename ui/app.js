@@ -1471,6 +1471,12 @@
             if (a) setTimeout(() => { toast(`🏅 Achievement: ${a.icon} ${a.name}`); send('sfx|ready'); }, 900 + i * 1600);
           });
         }
+        // death recap: what hurt us in the last seconds
+        const recap = !win && Array.isArray(s.recap) ? s.recap : [];
+        $('go-recap').innerHTML = recap.length
+          ? `<div class="recap"><b>☠ Killed by ${esc(s.cause || recap[0].src)}</b><span class="hint">Last 8 seconds</span>${recap.map((r) =>
+            `<span class="rc"><b>${esc(r.src)}</b> ×${r.hits} · ${r.dmg} dmg</span>`).join('')}</div>`
+          : '';
         $('s-wave').textContent = s.wave;
         $('s-level').textContent = s.level;
         $('s-kills').textContent = s.kills;

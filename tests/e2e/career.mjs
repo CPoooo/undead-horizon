@@ -11,6 +11,7 @@ try {
   await p.waitForSelector('#gameover.show', { timeout: 60000 });
   await p.waitForFunction(() => /XP/.test(document.getElementById('earned').textContent), null, { timeout: 10000 });
   check(true, `game over shows career gains: "${await p.textContent('#earned')}"`);
+  check(/Killed by/.test(await p.textContent('#go-recap')), `death recap: "${(await p.textContent('#go-recap')).replace(/\s+/g, ' ').trim()}"`);
   await p.screenshot({ path: `${OUT}/career-gameover.png` });
   await p.click('#tomenu');
   await p.click('#tabs button[data-tab="career"]');
