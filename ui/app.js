@@ -172,7 +172,9 @@
 
   const cmpScore = (a, b) => b.wave - a.wave || b.level - a.level || b.kills - a.kills || a.time - b.time;
   const localProfile = () => normalizeProfile(store.get(PROFILE_KEY, null));
+  const OB_KEY = 'undeadHorizon.outbreakBoard.v1';
   const localBoard = (filter) => {
+    if (filter && filter.startsWith('ob:')) return store.get(OB_KEY, []).filter((e) => e.map === filter.slice(3)).slice(0, 10);
     let lb = store.get(LB_KEY, []);
     if (filter && filter !== 'all') lb = lb.filter((e) => (e.diff || 'survivor') === filter);
     return lb.slice(0, 10);
@@ -244,6 +246,13 @@
       p.stats.runs += 1;
       p.stats.kills += s.kills;
       let rank = null, id = null;
+      if (s.mode === 'outbreak' && !abandoned) {
+        const entry = { name: s.name, wave: s.wave, level: s.level, kills: s.kills, time: s.time, diff: s.diff, score: s.score || 0, map: s.map, id: String(Date.now() + Math.random()) };
+        const ob = store.get(OB_KEY, []);
+        ob.push(entry);
+        ob.sort((a, b) => b.wave - a.wave || b.score - a.score);
+        store.set(OB_KEY, ob.slice(0, 100));
+      }
       if (s.mode === 'infinite') {
         p.stats.bestWave = Math.max(p.stats.bestWave || 0, s.wave);
         if (!abandoned) {
@@ -382,8 +391,10 @@
     $('diff-hint').textContent = DIFF[settings.diff].hint;
     const camp = settings.mode === 'campaign';
     $('chapter-box').style.display = camp ? '' : 'none';
+    $('map-box').style.display = settings.mode === 'outbreak' ? '' : 'none';
+    for (const b of $('map-seg').children) b.classList.toggle('on', b.dataset.map === (settings.map || 'asylum'));
     $('mode-hint').textContent = camp ? 'Story chapters with unique boss fights.'
-      : settings.mode === 'outbreak' ? 'Hollowbrook Asylum: rounds, boarded windows, points, doors, wall guns, a mystery box, perks and an upgrade machine.'
+      : settings.mode === 'outbreak' ? 'Rounds, boarded windows, points, doors, wall guns, a mystery box, perks, traps and an upgrade machine.'
       : 'Endless waves. Bosses every 5 waves. Ranked on the leaderboard.';
     if (camp) {
       const c = Data.profile.campaign;
@@ -412,6 +423,7 @@
     saveSettings();
   }
   on('mode-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.mode = b.dataset.mode; renderMode(); send('equip|'); } });
+  on('map-seg', 'click', (e) => { const b = e.target.closest('button'); if (b) { settings.map = b.dataset.map; renderMode(); } });
   on('diff-seg', 'click', (e) => {
     const b = e.target.closest('button');
     if (!b || b.disabled) return;
@@ -529,8 +541,9 @@
     $('lb-live').style.display = Data.globalBoard ? '' : 'none';
     const note = Data.globalBoard && !Data.cloud ? '<div class="hint" style="margin-top:10px">🌍 Global board. <a href="#" data-signin style="color:var(--accent)">Sign in</a> to get your runs on it.</div>' : '';
     if (!lb.length) { el.innerHTML = '<div class="empty">No runs yet. Be the first legend.</div>' + note; return; }
-    el.innerHTML = '<table class="lb"><thead><tr><th>#</th><th>Name</th><th>Wave</th><th>Lv</th><th>Kills</th><th>Diff</th></tr></thead><tbody>' +
-      lb.map((e, i) => `<tr class="${e.id === highlightId ? 'me' : ''}"><td class="rank">${i + 1}</td><td class="name">${esc(e.name)}</td><td class="wave">${e.wave}</td><td>${e.level}</td><td>${e.kills}</td><td><span class="dtag ${esc(e.diff || 'survivor')}">${esc(DIFF[e.diff || 'survivor']?.name || '')}</span></td></tr>`).join('') +
+    const ob = filter.startsWith('ob:');
+    el.innerHTML = `<table class="lb"><thead><tr><th>#</th><th>Name</th><th>${ob ? 'Round' : 'Wave'}</th><th>${ob ? 'Score' : 'Lv'}</th><th>Kills</th><th>Diff</th></tr></thead><tbody>` +
+      lb.map((e, i) => `<tr class="${e.id === highlightId ? 'me' : ''}"><td class="rank">${i + 1}</td><td class="name">${esc(e.name)}</td><td class="wave">${e.wave}</td><td>${ob ? (e.score || 0).toLocaleString() : e.level}</td><td>${e.kills}</td><td><span class="dtag ${esc(e.diff || 'survivor')}">${esc(DIFF[e.diff || 'survivor']?.name || '')}</span></td></tr>`).join('') +
       '</tbody></table>' + note;
   }
   document.addEventListener('click', (e) => { if (e.target.closest('[data-signin]')) { e.preventDefault(); openAccount(); } });
@@ -593,7 +606,8 @@
     show(null);
     applySettings();
     pushEquip();
-    send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}`);
+    const map = settings.mode === 'outbreak' ? `;map=${settings.map || 'asylum'}` : '';
+    send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}${map}`);
   }
   async function continueRun(slot) {
     const sv = Data.profile.saves[slot];

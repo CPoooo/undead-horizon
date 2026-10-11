@@ -1695,7 +1695,7 @@ impl Game {
         let name = self.player_name.replace(['\\', '"'], "");
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{}}}",
+            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\"}}",
             self.net.as_ref().map(|n| n.players()).unwrap_or(1),
             name,
             self.wave.n.max(1),
@@ -1709,7 +1709,8 @@ impl Game {
             diff,
             GUNS[self.gun].id,
             self.victory_t >= 0.0,
-            self.score
+            self.score,
+            self.map_id
         )
     }
 

@@ -651,6 +651,7 @@ pub fn builtin_map(id: &str) -> Option<&'static str> {
     match id {
         "testbox" => Some(include_str!("../assets/maps/testbox.json")),
         "asylum" => Some(include_str!("../assets/maps/asylum.json")),
+        "refinery" => Some(include_str!("../assets/maps/refinery.json")),
         _ => None,
     }
 }
@@ -700,8 +701,9 @@ mod tests {
     }
 
     #[test]
-    fn asylum_parses_and_every_zone_is_reachable_with_doors_open() {
-        let m = load_builtin("asylum").expect("asylum parses");
+    fn outbreak_maps_parse_and_every_zone_is_reachable_with_doors_open() {
+      for id in ["asylum", "refinery"] {
+        let m = load_builtin(id).expect("map parses");
         assert_eq!(m.zones.len(), 7);
         assert!(m.windows.len() >= 12);
         for i in 0..m.doors.len() {
@@ -716,7 +718,8 @@ mod tests {
         }
         for w in &m.windows {
             let p = v2(w.pos[0], w.pos[1]) + v2(w.dir[0], w.dir[1]) * 40.0;
-            assert!(f.reachable(p), "window at {:?} leads in", w.pos);
+            assert!(f.reachable(p), "{id}: window at {:?} leads in", w.pos);
         }
+      }
     }
 }

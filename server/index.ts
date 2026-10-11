@@ -72,6 +72,20 @@ app.post("/errors", async (c) => {
 });
 
 app.get("/leaderboard", async (c) => {
+  if (c.req.query("mode") === "outbreak") {
+    // best round per player on one Outbreak map
+    const map = String(c.req.query("map") || "asylum").slice(0, 20);
+    const { rows } = await pool.query(
+      `select * from (
+         select distinct on (user_id) id, user_id, name, wave, level, kills, time, diff, gun, players, score, created_at
+         from runs where mode = 'outbreak' and map = $1 and not abandoned
+         order by user_id, wave desc, score desc
+       ) best order by wave desc, score desc limit 25`,
+      [map],
+    );
+    c.header("Cache-Control", "no-store");
+    return c.json(rows.map((r) => ({ id: String(r.id), name: r.name, wave: r.wave, level: r.level, kills: r.kills, time: r.time, diff: r.diff, gun: r.gun, players: r.players, score: Number(r.score), date: r.created_at })));
+  }
   const diff = c.req.query("diff");
   const filter = diff && DIFFS.includes(diff) ? diff : null;
   // Best infinite run per player, then ranked.
@@ -322,10 +336,11 @@ app.post("/runs", async (c) => {
   try {
     await client.query("begin");
     const score = int(r.score, 0, 2_000_000_000);
+    const map = String(r.map || "").replace(/[^a-z0-9_]/g, "").slice(0, 20);
     const ins = await client.query(
-      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id`,
-      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score],
+      `insert into runs (user_id, name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning id`,
+      [uid, p.display_name, mode, chapter, diff, gun, wave, level, kills, time, coins, victory, abandoned, players, score, map],
     );
     const campaign = p.campaign as { unlocked: number; cleared: number[] };
     if (victory) {

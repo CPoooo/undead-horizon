@@ -697,7 +697,7 @@ impl Game {
             sub: if hounds {
                 "Something is hunting you. Watch for the lightning.".into()
             } else if n == 1 {
-                "Hold the courtyard. Buy doors, guns and perks with points.".into()
+                "Hold your ground. Buy doors, guns and perks with points.".into()
             } else {
                 format!("{} undead", self.wave.total)
             },

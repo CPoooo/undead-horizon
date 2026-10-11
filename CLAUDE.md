@@ -197,7 +197,7 @@ Not scheduled yet; design notes for when we pick it up.
 - [x] O10 (M) **Secrets.** Buildables (collect 3 parts to build a shield or trap) and a multi-step easter-egg quest with a reward; secrets are server-tracked achievements.
 - [x] O11 (S) **Traps.** Buyable electric and fire traps (shared code with Siege S4).
 - [x] O12 (M) **Co-op replication.** Host-authoritative door, box, power and perk-machine state through snapshot fields and events. Per-player points via events. Revive costs nothing; Second Wind changes the revive time.
-- [ ] O13 (M) **Second map.** "Ashfall Refinery", plus an Outbreak leaderboard (round reached, per map, by player count).
+- [x] O13 (M) **Second map.** "Ashfall Refinery", plus an Outbreak leaderboard (round reached, per map, by player count).
 
 ### M4 · Siege mode (Dungeon Defenders homage)
 - [ ] S1 (M) **Crystal.** Crystal entity with HP and a lose condition. Authored map with lanes and spawn portals. New `src/modes/siege.rs`. Depends on F2 and F3.
