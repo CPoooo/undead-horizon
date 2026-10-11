@@ -119,6 +119,9 @@ pub struct Zombie {
     pub shield: f32,
     /// screamer enrage: faster while > 0
     pub rage_t: f32,
+    /// boss phase (1..3) and lifetime, for phases and the enrage timer
+    pub phase: u8,
+    pub age: f32,
     /// underground (burrowers): not in the spatial grid, so nothing can hit it
     pub hidden: bool,
     pub timer: f32,
@@ -164,6 +167,8 @@ pub struct EShot {
     pub life: f32,
     pub dmg: f32,
     pub dead: bool,
+    /// homing turn rate (0 = flies straight)
+    pub turn: f32,
 }
 
 pub struct Gem {
@@ -403,6 +408,8 @@ pub struct Game {
     pub evolved: Vec<Evo>,
     /// volatile elite blasts waiting to go off: (pos, fuse, damage)
     pub volatile: Vec<(V2, f32, f32)>,
+    pub slams: Vec<crate::boss::Slam>,
+    pub boss_intro: Option<crate::boss::BossIntro>,
     /// chests picked up while another overlay was open
     pub pending_chests: u32,
     pub rng: Rng,
@@ -539,6 +546,8 @@ impl Game {
             chests_opened: 0,
             evolved: Vec::new(),
             volatile: Vec::new(),
+            slams: Vec::new(),
+            boss_intro: None,
             pending_chests: 0,
             rng: Rng::new(seed),
             grid: Grid::new(),
@@ -748,6 +757,8 @@ impl Game {
         self.chests_opened = 0;
         self.evolved.clear();
         self.volatile.clear();
+        self.slams.clear();
+        self.boss_intro = None;
         self.pending_chests = 0;
         self.kills = 0;
         self.score = 0;
@@ -1116,6 +1127,7 @@ impl Game {
         self.cam_kick = self.cam_kick * (1.0 - damp(16.0, real_dt));
         self.zoom_punch = (self.zoom_punch - real_dt * 0.6).max(0.0);
         self.tick_callouts(real_dt);
+        self.tick_boss_intro(real_dt);
         let look = if matches!(self.phase, Phase::Playing) && !self.player.downed {
             V2::from_angle(self.player.aim) * (55.0 * self.lookahead)
         } else {
@@ -1800,6 +1812,7 @@ impl Game {
             self.update_status();
             self.update_elites();
             self.update_volatile();
+            self.update_bosses();
         }
         self.grid.build(self.player.pos, &self.zombies);
         if !client {
@@ -2280,6 +2293,8 @@ impl Game {
         let dmg = dmg * self.status_damage_mult(j);
         let dmg = self.shield_absorb(j, dmg);
         let dmg = self.armor_mult(j, dir, crit) * dmg;
+        let weak = !crit && self.weak_point(j, dir);
+        let (dmg, crit) = if weak { (dmg * 2.0, true) } else { (dmg, crit) };
         let z = &mut self.zombies[j];
         if z.dead {
             return false;
@@ -2637,6 +2652,7 @@ impl Game {
                             life: 2.2,
                             dmg: z.dmg,
                             dead: false,
+                            turn: 0.0,
                         });
                         self.pending_sfx.push((Sfx::Spit, z.pos));
                     }
@@ -2725,11 +2741,14 @@ impl Game {
                                         life: 2.6,
                                         dmg: shot_dmg,
                                         dead: false,
+                                        turn: 0.0,
                                     });
                                 }
                             };
                         match var {
                             BossVar::Abomination => z.special_t = 99.0,
+                            // signature moves live in boss.rs
+                            BossVar::Butcher | BossVar::HiveQueen => {}
                             BossVar::Gravedigger => {
                                 z.special_t = if enraged { 3.5 } else { 5.0 };
                                 boss_summons.push((
@@ -2768,7 +2787,7 @@ impl Game {
                             }
                         }
                     }
-                    if var == BossVar::Matriarch {
+                    if matches!(var, BossVar::Matriarch | BossVar::HiveQueen) {
                         // keeps her distance and strafes
                         if dist < 300.0 {
                             want = -dir;
@@ -2778,7 +2797,7 @@ impl Game {
                         }
                     }
                     let charges = match var {
-                        BossVar::Matriarch => false,
+                        BossVar::Matriarch | BossVar::HiveQueen => false,
                         BossVar::BloomHeart => enraged,
                         _ => true,
                     };
@@ -2805,6 +2824,7 @@ impl Game {
                                 self.pending_sfx.push((Sfx::BossRoar, z.pos));
                             }
                         }
+                        3 => spd = 0.0,
                         _ => {
                             want = z.charge_dir;
                             spd = charge_speed;
@@ -3120,6 +3140,12 @@ impl Game {
         let targets = self.targets();
         let mut hits = Vec::new();
         for (i, s) in self.eshots.iter_mut().enumerate() {
+            if s.turn > 0.0 {
+                let (_, tp, _) = Game::nearest_target(&targets, s.pos);
+                let sp = s.vel.len();
+                let want = (tp - s.pos).norm() * sp;
+                s.vel = s.vel.lerp(want, damp(s.turn, DT)).norm() * sp;
+            }
             s.prev = s.pos;
             s.pos += s.vel * DT;
             s.life -= DT;
@@ -3374,6 +3400,8 @@ impl Game {
             affix: crate::elites::Affix::None,
             shield: 0.0,
             rage_t: 0.0,
+            phase: 0,
+            age: 0.0,
             hidden: kind == ZKind::Burrower,
             timer: if kind == ZKind::Boss {
                 3.0
@@ -3772,5 +3800,48 @@ mod tests {
         g.grid.build(g.player.pos, &g.zombies);
         g.update_zombies();
         assert!(g.zombies[1].rage_t > 0.0);
+    }
+
+    #[test]
+    fn boss_phases_weak_point_enrage_and_hook() {
+        let mut g = Game::new(21);
+        g.start("diff=rookie");
+        g.spawn_boss(BossVar::Butcher, v2(300.0, 0.0));
+        g.zombies[0].face = PI; // facing the player
+        g.grid.build(g.player.pos, &g.zombies);
+        // weak point: a hit travelling with its facing (from behind) doubles
+        let hp = g.zombies[0].hp;
+        g.damage_zombie(0, 10.0, v2(1.0, 0.0), 0.0, false); // front
+        let front = hp - g.zombies[0].hp;
+        let hp = g.zombies[0].hp;
+        g.damage_zombie(0, 10.0, v2(-1.0, 0.0), 0.0, false); // back
+        let back = hp - g.zombies[0].hp;
+        assert!(back > front * 1.9, "front {front} back {back}");
+        // dropping below 66% starts phase 2 with adds and a shield
+        let max = g.zombies[0].max_hp;
+        g.zombies[0].hp = max * 0.6;
+        let before = g.zombies.len();
+        g.update_bosses();
+        assert_eq!(g.zombies[0].phase, 2);
+        assert!(g.zombies.len() > before && g.zombies[0].shield > 0.0);
+        // enrage after the timer
+        g.zombies[0].age = crate::boss::ENRAGE_T + 1.0;
+        g.update_bosses();
+        assert!(g.zombies[0].rage_t > 1000.0);
+        // slams land after their telegraph
+        g.zombies.clear();
+        g.slams.clear();
+        g.player.iframes = 0.0;
+        let php = g.player.hp;
+        g.slams.push(crate::boss::Slam { pos: g.player.pos, r: 100.0, t: 0.0, dur: 0.2, dmg: 10.0, fire: false });
+        for _ in 0..40 {
+            g.update_bosses();
+        }
+        assert!(g.slams.is_empty() && g.player.hp < php);
+        // the hook drags you in
+        g.player.iframes = 0.0;
+        g.player.vel = V2::ZERO;
+        g.butcher_hook(v2(300.0, 0.0), v2(-1.0, 0.0), 5.0);
+        assert!(g.player.vel.x > 500.0, "pulled toward the butcher");
     }
 }

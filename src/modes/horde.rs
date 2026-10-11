@@ -193,7 +193,7 @@ impl Game {
                     let p2 = center + V2::from_angle(a + PI) * (self.spawn_r - 40.0);
                     self.spawn_boss(var, p2);
                 }
-                self.toast = Some((var.name().to_string(), 2.5));
+                self.boss_intro(var);
                 self.zoom_punch = 0.08;
                 self.sfx(Sfx::BossRoar, self.player.pos);
                 self.add_shake(0.5);

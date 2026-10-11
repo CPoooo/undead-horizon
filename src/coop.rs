@@ -851,6 +851,7 @@ impl Game {
                 life: 1.0,
                 dmg: 0.0,
                 dead: false,
+                turn: 0.0,
             })
             .collect();
         self.pickups = pks
@@ -1015,9 +1016,15 @@ impl Game {
                     let d = self.player.pos.dist(p);
                     self.add_shake(if d < 400.0 { 0.3 } else { 0.08 });
                 }
+                E_PULL => {
+                    let (Some(slot), Some(v)) = (r.u8(), r.v2()) else { return };
+                    if slot == me && self.player.dash_t <= 0.0 {
+                        self.player.vel = v.clamp_len(1500.0);
+                    }
+                }
                 E_BOSS => {
                     let Some(v) = r.u8() else { return };
-                    self.toast = Some((boss_from(v).name().to_string(), 2.5));
+                    self.boss_intro(boss_from(v));
                     self.audio.play(Sfx::BossRoar);
                     self.add_shake(0.5);
                 }
@@ -1032,14 +1039,7 @@ fn zkind_from(k: u8) -> ZKind {
 }
 
 fn boss_from(v: u8) -> BossVar {
-    match v {
-        1 => BossVar::Gravedigger,
-        2 => BossVar::Matriarch,
-        3 => BossVar::CinderKing,
-        4 => BossVar::Wraith,
-        5 => BossVar::BloomHeart,
-        _ => BossVar::Abomination,
-    }
+    BossVar::from_u8(v)
 }
 
 /// A client-side zombie built from a snapshot entry.
@@ -1069,6 +1069,8 @@ fn replica(uid: u32, kind: ZKind, var: BossVar, pos: V2) -> Zombie {
         affix: crate::elites::Affix::None,
         shield: 0.0,
         rage_t: 0.0,
+        phase: 0,
+        age: 0.0,
         hidden: false,
         timer: 1.0,
         state: 0,

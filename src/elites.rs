@@ -122,6 +122,7 @@ impl Game {
             life: 1.6,
             dmg: z.dmg * 0.5,
             dead: false,
+            turn: 0.0,
         });
     }
 

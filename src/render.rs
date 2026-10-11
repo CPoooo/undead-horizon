@@ -362,6 +362,9 @@ impl Game {
         if self.coop() && !matches!(self.phase, Phase::Menu) {
             self.draw_coop_hud(c, w, h, t);
         }
+        if let Some(bi) = &self.boss_intro {
+            self.draw_boss_intro(c, w, h, bi.var, bi.t);
+        }
         if self.phase == Phase::LevelUp {
             if self.chest.is_some() {
                 self.draw_chest(c, w, h, t);
@@ -627,8 +630,39 @@ impl Game {
     }
 
     fn draw_telegraphs(&self, c: &Ctx, a: f32, t: f32) {
+        for sl in self.slams.iter() {
+            let k = (sl.t / sl.dur).clamp(0.0, 1.0);
+            let col = if sl.fire { "#ff7a1f" } else { "#ff2040" };
+            c.set_global_alpha(d(0.12 + 0.2 * k));
+            c.set_fill_style_str(col);
+            circle(c, sl.pos.x, sl.pos.y, sl.r);
+            c.set_global_alpha(0.55);
+            circle(c, sl.pos.x, sl.pos.y, sl.r * k);
+            c.set_global_alpha(d(0.6 + 0.4 * (t * 25.0).sin().abs()));
+            c.set_stroke_style_str(col);
+            c.set_line_width(3.0);
+            c.begin_path();
+            let _ = c.arc(d(sl.pos.x), d(sl.pos.y), d(sl.r), 0.0, TAU64);
+            c.stroke();
+            c.set_global_alpha(1.0);
+        }
         for z in self.zombies.iter() {
             let p = z.prev.lerp(z.pos, self.za(a));
+            if z.kind == ZKind::Boss && z.state == 3 && z.boss_var == crate::content::BossVar::Butcher {
+                // hook line: a dashed chain that fills in before the throw
+                let k = 1.0 - (z.timer / 0.8).clamp(0.0, 1.0);
+                let end = p + z.charge_dir * 460.0;
+                c.set_stroke_style_str("#ff4060");
+                c.set_global_alpha(d(0.35 + 0.5 * k));
+                c.set_line_width(d(6.0 + 6.0 * k));
+                let _ = c.set_line_dash(&js_sys::Array::of2(&12.0.into(), &10.0.into()));
+                c.begin_path();
+                c.move_to(d(p.x), d(p.y));
+                c.line_to(d(end.x), d(end.y));
+                c.stroke();
+                let _ = c.set_line_dash(&js_sys::Array::new());
+                c.set_global_alpha(1.0);
+            }
             if z.kind == ZKind::Boss && z.state == 1 {
                 let k = 1.0 - (z.timer / 0.75).clamp(0.0, 1.0);
                 c.save();
@@ -1120,6 +1154,46 @@ impl Game {
                 }
             }
             ZKind::Boss => {
+                // glowing weak point on the back
+                let wp = body - fwd * (r * 0.75);
+                let pulse = 0.6 + 0.4 * (t * 6.0).sin();
+                let _ = c.set_global_composite_operation("lighter");
+                c.set_global_alpha(d(0.5 * pulse));
+                c.set_fill_style_str("#ffe14a");
+                circle(c, wp.x, wp.y, r * 0.42);
+                c.set_global_alpha(1.0);
+                c.set_fill_style_str("#fff6c0");
+                circle(c, wp.x, wp.y, r * 0.18);
+                let _ = c.set_global_composite_operation("source-over");
+                match z.boss_var {
+                    crate::content::BossVar::Butcher => {
+                        // a cleaver in the right hand
+                        let hand = body + side * (r * 0.95) + fwd * (r * 0.6);
+                        c.set_fill_style_str("#c8ccd4");
+                        c.save();
+                        let _ = c.translate(d(hand.x), d(hand.y));
+                        let _ = c.rotate(d(face + 0.4 * (z.anim * 2.0).sin()));
+                        c.fill_rect(0.0, d(-r * 0.25), d(r * 0.9), d(r * 0.5));
+                        c.set_fill_style_str("#4a3020");
+                        c.fill_rect(d(-r * 0.4), d(-r * 0.08), d(r * 0.4), d(r * 0.16));
+                        c.restore();
+                    }
+                    crate::content::BossVar::HiveQueen => {
+                        let flap = (z.anim * 3.0).sin();
+                        c.set_global_alpha(0.75);
+                        c.set_fill_style_str("#b08ad0");
+                        for s2 in [-1.0f32, 1.0] {
+                            c.begin_path();
+                            c.move_to(d(body.x), d(body.y));
+                            c.line_to(d(body.x + s2 * r * 2.2), d(body.y - r * (1.2 + flap * 0.6)));
+                            c.line_to(d(body.x + s2 * r * 1.6), d(body.y + r * 0.4));
+                            c.close_path();
+                            c.fill();
+                        }
+                        c.set_global_alpha(1.0);
+                    }
+                    _ => {}
+                }
                 // bony spikes along the back
                 c.set_fill_style_str("#d8cce0");
                 for k in 0..5 {
@@ -1988,9 +2062,29 @@ impl Game {
             let k = (b.hp / b.max_hp).clamp(0.0, 1.0);
             if k > 0.0 {
                 round_rect(c, bx + 2.0, by + 2.0, (bw2 - 4.0) * k, 8.0, 3.0);
-                c.set_fill_style_str("#d03aff");
+                c.set_fill_style_str(if b.rage_t > 1000.0 { "#ff3a3a" } else { "#d03aff" });
                 c.fill();
             }
+            // phase thresholds
+            c.set_fill_style_str("rgba(255,255,255,0.7)");
+            for f in [0.33f32, 0.66] {
+                c.fill_rect(d(bx + bw2 * f), d(by + 1.0), 2.0, 10.0);
+            }
+            if b.shield > 0.0 {
+                c.set_stroke_style_str("#9fdcff");
+                c.set_line_width(2.0);
+                round_rect(c, bx - 2.0, by - 2.0, bw2 + 4.0, 16.0, 5.0);
+                c.stroke();
+            }
+            c.set_font(&format!("700 11px {}", font));
+            c.set_fill_style_str(if b.rage_t > 1000.0 { "#ff6a6a" } else { "#e0c0ff" });
+            let phase_txt = if b.rage_t > 1000.0 {
+                format!("PHASE {} · ENRAGED", b.phase.max(1))
+            } else {
+                let left = (crate::boss::ENRAGE_T - b.age).max(0.0);
+                format!("PHASE {} · enrage in {}s · hit its back for crits", b.phase.max(1), left as i32)
+            };
+            outlined(c, &phase_txt, w * 0.5, by + 26.0, 3.0);
         }
 
         // abilities (bottom centre)
@@ -2573,6 +2667,37 @@ impl Game {
                 5.0,
             );
         }
+    }
+
+    /// Cinematic boss card: letterbox bars, the name slams in, then the taunt types out.
+    fn draw_boss_intro(&self, c: &Ctx, w: f32, h: f32, var: crate::content::BossVar, it: f32) {
+        let font = "'Inter','Segoe UI',system-ui,sans-serif";
+        let total = crate::boss::INTRO_T;
+        let inn = ease_out((it / 0.35).min(1.0));
+        let out = ease_out(((total - it) / 0.4).clamp(0.0, 1.0));
+        let k = inn.min(out);
+        let bar = (h * 0.11).min(80.0) * k;
+        c.set_fill_style_str("#000000");
+        c.fill_rect(0.0, 0.0, d(w), d(bar));
+        c.fill_rect(0.0, d(h - bar), d(w), d(bar));
+        let small = w < 640.0;
+        let y = h * 0.34;
+        c.set_global_alpha(d(k));
+        c.set_text_align("center");
+        c.set_text_baseline("middle");
+        c.set_stroke_style_str("rgba(0,0,0,0.9)");
+        c.set_line_join("round");
+        let slam = 1.0 + 0.6 * (1.0 - ((it - 0.15) / 0.2).clamp(0.0, 1.0));
+        c.set_font(&format!("900 {}px {}", ((if small { 30.0 } else { 54.0 }) * slam).round(), font));
+        c.set_fill_style_str("#ff9cff");
+        outlined(c, var.name(), w * 0.5, y, 8.0);
+        let taunt = var.taunt();
+        let shown = ((it - 0.5).max(0.0) * 40.0) as usize;
+        let line: String = taunt.chars().take(shown).collect();
+        c.set_font(&format!("italic 600 {}px {}", if small { 14 } else { 19 }, font));
+        c.set_fill_style_str("#f0e0ff");
+        outlined(c, &format!("\u{201c}{}\u{201d}", line), w * 0.5, y + if small { 34.0 } else { 50.0 }, 4.0);
+        c.set_global_alpha(1.0);
     }
 
     /// Slot-machine chest reveal: one reel per pick, stopping left to right.

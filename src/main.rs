@@ -1,4 +1,5 @@
 mod audio;
+mod boss;
 mod callouts;
 mod chest;
 mod elites;
@@ -474,6 +475,12 @@ fn handle_cmd(g: &mut Game, cmd: &str) {
                 for (k, kind) in [Crawler, Screamer, Armored, Bat, Burrower].iter().enumerate() {
                     g.spawn_zombie(*kind, p + math::V2::from_angle(k as f32 * 1.25 + 0.3) * 230.0);
                 }
+            }
+            if let Some(v) = a.strip_prefix("boss=") {
+                let p = g.player.pos + math::v2(260.0, -60.0);
+                let var = content::BossVar::from_u8(v.parse().unwrap_or(0));
+                g.spawn_boss(var, p);
+                g.boss_intro(var);
             }
             if a == "elites" && g.phase == Phase::Playing {
                 let p = g.player.pos;

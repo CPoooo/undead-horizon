@@ -579,6 +579,8 @@ pub enum BossVar {
     CinderKing,
     Wraith,
     BloomHeart,
+    Butcher,
+    HiveQueen,
 }
 
 impl BossVar {
@@ -590,7 +592,37 @@ impl BossVar {
             BossVar::CinderKing => "THE CINDER KING",
             BossVar::Wraith => "HOLLOW WRAITH",
             BossVar::BloomHeart => "THE BLOOM HEART",
+            BossVar::Butcher => "THE BUTCHER",
+            BossVar::HiveQueen => "THE HIVE QUEEN",
         }
+    }
+    /// Line shown on the boss intro card.
+    pub fn taunt(self) -> &'static str {
+        match self {
+            BossVar::Abomination => "It hungers. It grows. It has seen you.",
+            BossVar::Gravedigger => "Every grave I dig has your name on it.",
+            BossVar::Matriarch => "My children are hungry. Feed them.",
+            BossVar::CinderKing => "Kneel and burn warm. Run and burn anyway.",
+            BossVar::Wraith => "You cannot shoot what is already gone.",
+            BossVar::BloomHeart => "I am the root of every corpse on this horizon.",
+            BossVar::Butcher => "Fresh meat! Come closer... closer...",
+            BossVar::HiveQueen => "The swarm is my voice. Listen.",
+        }
+    }
+    pub fn from_u8(v: u8) -> BossVar {
+        [
+            BossVar::Abomination,
+            BossVar::Gravedigger,
+            BossVar::Matriarch,
+            BossVar::CinderKing,
+            BossVar::Wraith,
+            BossVar::BloomHeart,
+            BossVar::Butcher,
+            BossVar::HiveQueen,
+        ]
+        .get(v as usize)
+        .copied()
+        .unwrap_or(BossVar::Abomination)
     }
     /// (hp mult, radius, speed mult)
     pub fn stats(self) -> (f32, f32, f32) {
@@ -601,6 +633,8 @@ impl BossVar {
             BossVar::CinderKing => (1.15, 46.0, 1.0),
             BossVar::Wraith => (0.6, 36.0, 1.35),
             BossVar::BloomHeart => (2.6, 64.0, 0.7),
+            BossVar::Butcher => (1.3, 48.0, 0.95),
+            BossVar::HiveQueen => (1.0, 42.0, 0.9),
         }
     }
     /// (body/cloth, skin, dark)
@@ -612,16 +646,20 @@ impl BossVar {
             BossVar::CinderKing => ("#5a1a0a", "#e0702a", "#200804"),
             BossVar::Wraith => ("#1a2a40", "#9ab8e0", "#0a1020"),
             BossVar::BloomHeart => ("#5a0a3a", "#ff4aa8", "#20041a"),
+            BossVar::Butcher => ("#6a5a50", "#c09080", "#2a1a14"),
+            BossVar::HiveQueen => ("#3a2a4a", "#b08ad0", "#140a1e"),
         }
     }
 }
 
 /// Infinite mode cycles bosses every 5 waves.
-pub const INFINITE_BOSSES: [BossVar; 5] = [
+pub const INFINITE_BOSSES: [BossVar; 7] = [
     BossVar::Abomination,
     BossVar::Gravedigger,
+    BossVar::Butcher,
     BossVar::Matriarch,
     BossVar::CinderKing,
+    BossVar::HiveQueen,
     BossVar::BloomHeart,
 ];
 
