@@ -688,8 +688,8 @@ pub fn skin_index(id: &str) -> usize {
     SKINS.iter().position(|s| s.id == id).unwrap_or(0)
 }
 
-pub const HATS: [&str; 8] = [
-    "none", "cap", "headband", "cowboy", "tophat", "horns", "crown", "halo",
+pub const HATS: [&str; 9] = [
+    "none", "cap", "headband", "cowboy", "tophat", "horns", "crown", "halo", "pumpkin",
 ];
 
 pub fn hat_index(id: &str) -> usize {

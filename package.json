@@ -20,6 +20,6 @@
     "build:cloud": "esbuild ui/cloud-src.js --bundle --format=iife --minify --target=es2020 --outfile=ui/cloud.js",
     "db:schema": "neon psql production -- -v ON_ERROR_STOP=1 -f server/schema.sql",
     "deploy:api": "neon deploy --env .env.local",
-    "e2e": "node tests/e2e/turn.mjs && node tests/e2e/coop.mjs && node tests/e2e/chat-voice.mjs && node tests/e2e/outbreak.mjs && node tests/e2e/hub.mjs && node tests/e2e/career.mjs && node tests/e2e/photo.mjs && node tests/e2e/nemesis.mjs"
+    "e2e": "node tests/e2e/turn.mjs && node tests/e2e/coop.mjs && node tests/e2e/chat-voice.mjs && node tests/e2e/outbreak.mjs && node tests/e2e/hub.mjs && node tests/e2e/career.mjs && node tests/e2e/photo.mjs && node tests/e2e/nemesis.mjs && node tests/e2e/event.mjs"
   }
 }

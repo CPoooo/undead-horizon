@@ -567,6 +567,9 @@ pub struct Game {
     pub victory_t: f32,
     /// co-op: joined mid-match, spectating until the wave is cleared
     pub late_join: bool,
+    /// Hollow Night event: pumpkin heads and candy drops
+    pub event_hollow: bool,
+    pub candy: u32,
     /// the Nemesis that hunts this player (solo horde runs)
     pub nemesis: Option<crate::nemesis::Nemesis>,
     /// photo mode (free camera while paused)
@@ -739,6 +742,8 @@ impl Game {
             director: Default::default(),
             photo: None,
             nemesis: None,
+            event_hollow: false,
+            candy: 0,
             ult_queued: false,
             net: None,
             net_in: Vec::new(),
@@ -801,6 +806,7 @@ impl Game {
                 }
                 "best" => self.best_wave = v.parse().unwrap_or(0),
                 "nemesis" => self.set_nemesis_opt(v),
+                "event" => self.event_hollow = v == "hollow",
                 "mode" => {
                     self.mode = match v {
                         "campaign" => Mode::Campaign(self.chapter()),
@@ -886,6 +892,8 @@ impl Game {
         self.mode = Mode::Infinite;
         self.pending_chapter = 0;
         self.nemesis = None;
+        self.event_hollow = false;
+        self.candy = 0;
         self.apply_opts(opts);
         self.player = Game::fresh_player();
         let map = world::load_builtin(&self.map_id);
@@ -1931,7 +1939,8 @@ impl Game {
         let name = self.player_name.replace(['\\', '"'], "");
         let diff = ["rookie", "survivor", "veteran", "nightmare"][self.diff];
         format!(
-            "{{\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{},\"mutated\":{},\"daily\":\"{}\",\"cause\":\"{}\",\"build\":\"{}\",\"squad\":[{}]}}",
+            "{{\"candy\":{},\"players\":{},\"name\":\"{}\",\"wave\":{},\"level\":{},\"kills\":{},\"time\":{:.1},\"combo\":{},\"coins\":{},\"mode\":\"{}\",\"chapter\":{},\"diff\":\"{}\",\"gun\":\"{}\",\"victory\":{},\"score\":{},\"map\":\"{}\",\"kk\":[{}],\"bosses\":{},\"char\":\"{}\",\"evos\":{},\"chests\":{},\"pure\":{},\"stars\":{},\"mutated\":{},\"daily\":\"{}\",\"cause\":\"{}\",\"build\":\"{}\",\"squad\":[{}]}}",
+            self.candy,
             self.net.as_ref().map(|n| n.players()).unwrap_or(1),
             name,
             self.wave.n.max(1),
@@ -4846,5 +4855,24 @@ mod tests {
         }
         assert!(g.kills >= kills + 4, "the blast takes the horde with it");
         assert!(world::obstacle_at((b.pos.x / world::OBST_CELL).floor() as i32, (b.pos.y / world::OBST_CELL).floor() as i32).is_none(), "and it's gone");
+    }
+
+    #[test]
+    fn hollow_night_candy_drops_from_kills_and_reaches_the_run_summary() {
+        let mut g = Game::new(21);
+        g.start("mode=infinite;event=hollow");
+        assert!(g.event_hollow);
+        for _ in 0..400 {
+            g.credit_kill();
+        }
+        assert!(g.candy > 5 && g.candy < 60, "about 1 in 20 kills: {}", g.candy);
+        assert!(g.stats_json().contains(&format!("\"candy\":{}", g.candy)));
+        assert_eq!(crate::content::hat_index("pumpkin"), 8);
+        let mut plain = Game::new(21);
+        plain.start("mode=infinite");
+        for _ in 0..400 {
+            plain.credit_kill();
+        }
+        assert_eq!(plain.candy, 0, "no candy outside the event");
     }
 }

@@ -502,6 +502,11 @@ impl Game {
     /// Credit a kill to the local player (combo, ultimate charge, vampirism).
     pub fn credit_kill(&mut self) {
         self.kills += 1;
+        if self.event_hollow && self.hub.is_none() && self.rng.chance(0.05) {
+            self.candy += 1;
+            let p = self.player.pos + v2(0.0, -30.0);
+            self.push_text(p, "+1 🍬".into(), "#ff9a3c", 18.0);
+        }
         self.combo += 1;
         self.combo_t = 2.5;
         self.best_combo = self.best_combo.max(self.combo);

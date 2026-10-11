@@ -422,6 +422,7 @@ app.post("/runs", async (c) => {
       mode, diff, wave, level, kills, time, victory, players, gun, score, kk, bosses,
       combo: int(r.combo, 0, 100000), evos: int(r.evos, 0, 8), chests: int(r.chests, 0, 200),
       stars: int(r.stars, 0, 3), pure: !!r.pure, chapter, daily: r.daily === new Date().toISOString().slice(0, 10) ? r.daily : "",
+      candy: int(r.candy, 0, 500),
     });
     const owned = new Set(p.owned as string[]);
     for (const it of career.items) owned.add(it);

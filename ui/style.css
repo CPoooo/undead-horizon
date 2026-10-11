@@ -492,3 +492,7 @@ body.reduce-motion *, body.reduce-motion *::before { transition: none !important
 body.photo-mode #touch, body.photo-mode .touch-ui, body.photo-mode #chat-feed { display: none !important; }
 .ph-flash { position: fixed; inset: 0; background: #fff; z-index: 80; pointer-events: none; animation: phflash .45s ease-out forwards; }
 @keyframes phflash { from { opacity: .85; } to { opacity: 0; } }
+
+/* limited-time event card (Career tab) */
+.event-card { margin: 4px 0 16px; padding: 12px; border-radius: 12px; border: 1px solid #ff9a3c; background: linear-gradient(135deg, rgba(232,118,28,.22), rgba(60,20,70,.3)); display: grid; gap: 6px; }
+.event-card b { color: #ffb36a; }

@@ -54,6 +54,8 @@
       { id: 'horns', name: 'Viking Helm', icon: '🪖', price: 500 },
       { id: 'crown', name: 'Crown', icon: '👑', price: 1200, rarity: 'epic' },
       { id: 'halo', name: 'Halo', icon: '😇', price: 2000, rarity: 'epic' },
+      // limited-time event reward (UHProg.EVENT): not for sale, earned with candy
+      { id: 'pumpkin', name: 'Jack-o\'-Lantern', icon: '🎃', price: 0, rarity: 'epic', event: true },
     ],
     tracer: [
       { id: 'default', name: 'Brass', color: '#ffbe5a', price: 0 },
@@ -683,6 +685,13 @@
         <div class="acct-bar"><div style="width:${Math.round((lv.into / lv.need) * 100)}%"></div></div>
         <span class="hint">${lv.into.toLocaleString()} / ${lv.need.toLocaleString()} XP · next reward: 🪙 ${P.levelReward(lv.level + 1).coins}${P.levelReward(lv.level + 1).item ? ' + ' + esc(P.levelReward(lv.level + 1).item.split(':')[1]) : ''}</span></div></div>
       <div class="hint" style="margin:6px 0 14px">${pr.runs} runs · ${pr.kills.toLocaleString()} kills · ${pr.bosses} bosses · ${got.size}/${P.ACHIEVEMENTS.length} achievements</div>
+      ${P.eventActive() ? (() => {
+        const ev = P.EVENT;
+        const have = pr.event?.id === ev.id ? pr.event.candy : 0;
+        return `<div class="event-card"><b>${ev.icon} ${esc(ev.name)}</b> <span class="hint">limited-time event · until ${new Date(Date.parse(ev.to) - 86400000).toISOString().slice(5, 10).replace('-', '/')}</span>
+          <div>Zombies wear pumpkins and drop 🍬 candy. Collect ${ev.goal} for the free <b>Jack-o'-Lantern</b> hat.</div>
+          <div class="acct-bar"><div style="width:${Math.round(Math.min(1, have / ev.goal) * 100)}%"></div></div><span class="hint">${Math.min(have, ev.goal)} / ${ev.goal} candy${have >= ev.goal ? ' · ✓ Unlocked' : ''}</span></div>`;
+      })() : ''}
       <h3>🎯 Challenges</h3><div class="chals">${P.currentChallenges().map((c, i) => {
         const st = pr.challenges?.[c.id] || { v: 0, done: false };
         const k = Math.min(1, st.v / c.goal);
@@ -973,6 +982,8 @@
     return `☠ The ${ZNAMES[kind] || 'zombie'} that killed you rose as your Nemesis: ${settings.nemesis.name}`;
   }
   let nemesisLine = '';
+  // limited-time event (Hollow Night): pumpkin heads and candy in every mode
+  const eventOpt = () => (window.UHProg.eventActive() ? ';event=hollow' : '');
 
   let dailyOverride = '';
   async function start() {
@@ -995,7 +1006,7 @@
       : settings.mode === 'siege' ? `;map=${settings.siegeMap || 'keep'}${settings.glass ? ';variant=glass' : ''}` : '');
     const tut = !settings.tutorialDone && settings.mode === 'infinite' && !extra ? ';tutorial=1' : '';
     nemesisLine = '';
-    send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}${map}${tut}${tut ? '' : nemesisOpt()}`);
+    send(`start|name=${name};best=${best};mode=${settings.mode};chapter=${settings.chapter};diff=${settings.diff};${equipString()}${map}${tut}${tut ? '' : nemesisOpt()}${eventOpt()}`);
   }
   async function continueRun(slot) {
     const sv = Data.profile.saves[slot];
@@ -1104,7 +1115,7 @@
       $('v-body').innerHTML = `<div class="mission">${ms.map(([m, map, t, d]) =>
         `<button class="btn secondary" data-mission="${m}" data-map="${map || ''}"><b>${t}</b><br><span class="hint">${d} · ${DIFF[settings.diff].name}</span></button>`).join('')}</div>`;
     } else {
-      $('v-body').innerHTML = v.cats.map((cat) => `<h3>${CAT_LABEL[cat] || cat}</h3><div class="items">${CATALOG[cat].map((it) => {
+      $('v-body').innerHTML = v.cats.map((cat) => `<h3>${CAT_LABEL[cat] || cat}</h3><div class="items">${CATALOG[cat].filter((it) => !it.event || p.owned.includes(`${cat}:${it.id}`)).map((it) => {
         const owned = p.owned.includes(`${cat}:${it.id}`);
         const eq = p.equipped[cat] === it.id;
         return `<div class="item ${eq ? 'equipped' : ''}" data-look="${cat}:${it.id}">${rarityTag(it)}${visual(cat, it)}<div class="nm">${esc(it.name)}</div>
@@ -1191,7 +1202,7 @@
     show(null);
     applySettings();
     pushEquip();
-    send(`start|mode=hub;name=${playerName()};diff=${settings.diff};${equipString()}`);
+    send(`start|mode=hub;name=${playerName()};diff=${settings.diff};${equipString()}${eventOpt()}`);
   }
   on('hub-btn', 'click', enterHub);
   // ------------------------------------------------------------------ PWA: offline play + install
@@ -1450,6 +1461,9 @@
           if (cr.relics?.length) bits.push(`🏺 ${cr.relics.length} relic${cr.relics.length > 1 ? 's' : ''} found`);
           if (cr.live?.challenges?.length) bits.push(`🎯 ${cr.live.challenges.length} challenge${cr.live.challenges.length > 1 ? 's' : ''} done`);
           if (cr.live?.tiers?.length) bits.push(`🌸 Season tier ${cr.live.tiers[cr.live.tiers.length - 1]}`);
+          const EV = window.UHProg.EVENT;
+          if (s.candy > 0 && window.UHProg.eventActive()) bits.push(`${EV.icon} +${s.candy} candy (${Math.min(EV.goal, Data.profile.progress?.event?.candy || 0)}/${EV.goal})`);
+          if ((cr.items || []).includes(EV.item)) setTimeout(() => { toast(`${EV.icon} ${EV.name} reward unlocked: Jack-o'-Lantern hat! Equip it in the Locker.`); send('sfx|ready'); }, 600);
           $('earned').textContent += ($('earned').textContent ? ' · ' : '') + bits.join(' · ');
           const P = window.UHProg;
           (cr.achievements || []).forEach((id, i) => {
@@ -1626,6 +1640,7 @@
   window.UHUI = {
     send,
     equipString,
+    eventOpt: () => eventOpt(),
     // campaign co-op: chapter titles and how far this player has unlocked
     chapters: () => ({ titles: STORY.map((c) => c.title), unlocked: Data.profile.campaign?.unlocked || 0 }),
     startCoop(o) {

@@ -204,6 +204,14 @@
 
   // free season pass: 30 tiers of season XP
   const SEASON = { id: 's1', name: 'Season 1: The Bloom', tiers: 30, perTier: 1000 };
+
+  // Limited-time event (free; the reward rotates back into the shop later).
+  // Candy drops from your kills while it runs; the goal unlocks the item.
+  const EVENT = { id: 'hollow-2026', name: 'Hollow Night', icon: '🎃', from: '2026-10-01', to: '2026-11-03', goal: 100, item: 'hat:pumpkin' };
+  const eventActive = (now = new Date()) => {
+    const d = now.toISOString().slice(0, 10);
+    return d >= EVENT.from && d < EVENT.to;
+  };
   const SEASON_REWARDS = (tier) => {
     const items = { 5: 'hat:cowboy', 10: 'skin:shadow', 15: 'tracer:fire', 20: 'skin:royal', 25: 'tracer:plasma', 30: 'skin:gold' };
     return { coins: tier % 5 === 0 ? 0 : 40 + tier * 5, item: items[tier] || null };
@@ -247,6 +255,14 @@
       }
       p.challenges[c.id] = st;
     }
+    // limited-time event candy (capped by kills: ~1 in 20 drops, plus slack)
+    let eventItem = null;
+    if (eventActive(now) && run.candy > 0) {
+      p.event = p.event && p.event.id === EVENT.id ? p.event : { id: EVENT.id, candy: 0 };
+      const was = p.event.candy;
+      p.event.candy = Math.min(EVENT.goal, was + Math.min(run.candy | 0, Math.floor((run.kills || 0) / 10) + 3));
+      if (was < EVENT.goal && p.event.candy >= EVENT.goal) eventItem = EVENT.item;
+    }
     p.season = p.season || { id: SEASON.id, sxp: 0 };
     if (p.season.id !== SEASON.id) p.season = { id: SEASON.id, sxp: 0 };
     const before = seasonTier(p.season.sxp);
@@ -264,6 +280,7 @@
       p.dailyBest = p.dailyBest || {};
       if (!p.dailyBest[run.daily]) p.dailyBest = { [run.daily]: run.wave };
     }
+    if (eventItem) items.push(eventItem);
     return { challenges: done, coins, sxp, tiers, items };
   }
 
@@ -337,5 +354,6 @@
     xpToNext, levelFromXp, xpForRun, levelReward, charUnlocked, camoTier, metaCost, metaSpec,
     rollRelic, relicSpec, relicLabel, fresh, normalize, applyRun,
     dayKey, weekKey, currentChallenges, SEASON, SEASON_REWARDS, seasonTier, MUTATORS, daily, weeklyMutator,
+    EVENT, eventActive,
   };
 });

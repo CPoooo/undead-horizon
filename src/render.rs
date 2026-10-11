@@ -1254,6 +1254,31 @@ impl Game {
                 c.set_fill_style_str("#e0203a");
                 circle(c, head.x, head.y - 2.0, 2.5);
             }
+            "pumpkin" => {
+                // a carved jack-o'-lantern helmet (Hollow Night event reward)
+                c.set_fill_style_str("#e8761c");
+                circle(c, head.x, head.y - 2.0, 9.5);
+                c.set_stroke_style_str("#a8480c");
+                c.set_line_width(1.0);
+                for s in [-4.0f32, 0.0, 4.0] {
+                    c.begin_path();
+                    let _ = c.ellipse(d(head.x + s), d(head.y - 2.0), 3.2, 9.0, 0.0, 0.0, TAU64);
+                    c.stroke();
+                }
+                c.set_fill_style_str("#3f7a2a");
+                c.fill_rect(d(head.x - 1.5), d(head.y - 14.0), 3.0, 4.0);
+                let _ = c.set_global_composite_operation("lighter");
+                c.set_fill_style_str("#ffd040");
+                for s in [-1.0f32, 1.0] {
+                    c.begin_path();
+                    c.move_to(d(head.x + s * 3.5 - 2.0), d(head.y - 1.0));
+                    c.line_to(d(head.x + s * 3.5 + 2.0), d(head.y - 1.0));
+                    c.line_to(d(head.x + s * 3.5), d(head.y - 4.5));
+                    c.close_path();
+                    c.fill();
+                }
+                let _ = c.set_global_composite_operation("source-over");
+            }
             "halo" => {
                 let _ = c.set_global_composite_operation("lighter");
                 c.set_stroke_style_str("#ffe68a");
@@ -1642,11 +1667,30 @@ impl Game {
         // head
         let head = body + fwd * (r * 0.32) + v2(0.0, -r * 0.3);
         let hr = r * if z.kind == ZKind::Boss { 0.5 } else { 0.6 } * if self.mutators.bighead { 1.8 } else { 1.0 };
-        c.set_fill_style_str(skin);
-        circle(c, head.x, head.y, hr);
+        // Hollow Night: a quarter of the horde wears jack-o'-lanterns
+        let pumpkin = self.event_hollow && z.kind != ZKind::Boss && z.uid % 4 == 0;
+        if pumpkin {
+            let hr = hr * 1.15;
+            c.set_fill_style_str("#e8761c");
+            circle(c, head.x, head.y, hr);
+            c.set_stroke_style_str("#a8480c");
+            c.set_line_width(1.2);
+            for s in [-0.45f32, 0.0, 0.45] {
+                c.begin_path();
+                let _ = c.ellipse(d(head.x + s * hr), d(head.y), d(hr * 0.35), d(hr * 0.95), 0.0, 0.0, TAU64);
+                c.stroke();
+            }
+            c.set_fill_style_str("#3f7a2a");
+            c.fill_rect(d(head.x - 1.5), d(head.y - hr - 3.0), 3.0, 4.0);
+        } else {
+            c.set_fill_style_str(skin);
+            circle(c, head.x, head.y, hr);
+        }
         // glowing eyes
         let _ = c.set_global_composite_operation("lighter");
-        let eye_col = if z.kind == ZKind::Boss {
+        let eye_col = if pumpkin {
+            "#ffd040"
+        } else if z.kind == ZKind::Boss {
             "#ff40ff"
         } else if z.st.chill > 0.05 || z.st.frozen() {
             "#80e0ff"

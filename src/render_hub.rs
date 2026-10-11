@@ -219,6 +219,38 @@ impl Game {
             c.set_stroke_style_str("rgba(0,0,0,0.85)");
             outlined(c, &format!("SUPPLY DROP · {:.0}s", (DROP_HOLD - dr.held).max(0.0)), dr.pos.x, dr.pos.y - 240.0, 3.0);
         }
+        // Hollow Night: jack-o'-lanterns around the plaza
+        if self.event_hollow {
+            for (i, at) in [v2(-120.0, 200.0), v2(120.0, 200.0), v2(-200.0, -40.0), v2(200.0, -40.0), v2(-560.0, -260.0), v2(560.0, -260.0), v2(940.0, 120.0), v2(940.0, -120.0)].iter().enumerate() {
+                let flick = 0.75 + 0.25 * (t * 7.0 + i as f32 * 1.7).sin();
+                let _ = c.set_global_composite_operation("lighter");
+                c.set_global_alpha(d(0.18 * flick));
+                c.set_fill_style_str("#ff9a3c");
+                c.begin_path();
+                let _ = c.arc(d(at.x), d(at.y), 46.0, 0.0, TAU64);
+                c.fill();
+                let _ = c.set_global_composite_operation("source-over");
+                c.set_global_alpha(1.0);
+                c.set_fill_style_str("#e8761c");
+                c.begin_path();
+                let _ = c.ellipse(d(at.x), d(at.y), 15.0, 12.0, 0.0, 0.0, TAU64);
+                c.fill();
+                c.set_fill_style_str("#3f7a2a");
+                c.fill_rect(d(at.x - 2.0), d(at.y - 15.0), 4.0, 5.0);
+                c.set_global_alpha(d(flick));
+                c.set_fill_style_str("#ffd040");
+                for s in [-1.0f32, 1.0] {
+                    c.begin_path();
+                    c.move_to(d(at.x + s * 5.0 - 3.0), d(at.y - 1.0));
+                    c.line_to(d(at.x + s * 5.0 + 3.0), d(at.y - 1.0));
+                    c.line_to(d(at.x + s * 5.0), d(at.y - 6.0));
+                    c.close_path();
+                    c.fill();
+                }
+                c.fill_rect(d(at.x - 6.0), d(at.y + 3.0), 12.0, 3.0);
+                c.set_global_alpha(1.0);
+            }
+        }
         // the memorial: names of the best runs live in the UI panel
         c.set_font(&format!("900 13px {}", FONT));
         c.set_fill_style_str("#e8f0ff");

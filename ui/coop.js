@@ -731,7 +731,7 @@
 
   function opts(role, present) {
     const names = [0, 1, 2, 3].map((i) => (S.roster.find((m) => m.slot === i)?.name || '').replace(/[;,=|]/g, ''));
-    return `role=${role};me=${S.mySlot};names=${names.join(',')};present=${present.join(',')};mode=${['campaign', 'outbreak', 'siege'].includes(S.party.mode) ? S.party.mode : 'infinite'};chapter=${S.party.chapter || 0};diff=${S.party.diff};name=${names[S.mySlot]};${UI().equipString()}`;
+    return `role=${role};me=${S.mySlot};names=${names.join(',')};present=${present.join(',')};mode=${['campaign', 'outbreak', 'siege'].includes(S.party.mode) ? S.party.mode : 'infinite'};chapter=${S.party.chapter || 0};diff=${S.party.diff};name=${names[S.mySlot]};${UI().equipString()}${UI().eventOpt?.() || ''}`;
   }
 
   function hostTimedOut() {
